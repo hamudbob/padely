@@ -346,6 +346,12 @@ export async function generateNextRound(sessionId: string): Promise<GenerateNext
   // Promise.all tuple, not one result TS can narrow together. This check is
   // the real narrowing point for every `newRoundRow.id` use below.
   if (!newRoundRow) throw new Error("Failed to create the new round — no row was returned.");
+  // Pulled out as a plain string, not left as `newRoundRow.id` — TypeScript's
+  // null-narrowing above doesn't reach inside `insertRests`, a nested
+  // function defined further down that closes over `newRoundRow`. A plain
+  // `string` local has no null to narrow, so it's safe to use anywhere below,
+  // closures included.
+  const newRoundId = newRoundRow.id;
 
   // Fixed Partner only — pairId here is already the real pairs.id (see the
   // reconstruction above), so no tempId remapping is needed like
@@ -363,7 +369,7 @@ export async function generateNextRound(sessionId: string): Promise<GenerateNext
     const pairAId = pairByPlayerId.get(match.teamA[0]);
     const pairBId = pairByPlayerId.get(match.teamB[0]);
     return {
-      round_id: newRoundRow.id,
+      round_id: newRoundId,
       court_id: courtId,
       status: "not_started" as const,
       ...(pairAId && pairBId ? { pair_a_id: pairAId, pair_b_id: pairBId } : {}),
@@ -374,7 +380,7 @@ export async function generateNextRound(sessionId: string): Promise<GenerateNext
     if (result.restingIds.length === 0) return { error: null };
     const { error } = await supabase.from("round_rests").insert(
       result.restingIds.map((playerId) => ({
-        round_id: newRoundRow.id,
+        round_id: newRoundId,
         player_id: playerId,
         consecutive_rest_count: 0,
       })),
@@ -401,5 +407,5 @@ export async function generateNextRound(sessionId: string): Promise<GenerateNext
   const { error: participantsInsertError } = await supabase.from("match_participants").insert(allParticipantsInsert);
   if (participantsInsertError) throw participantsInsertError;
 
-  return { roundId: newRoundRow.id, sequence: newSequence };
+  return { roundId: newRoundId, sequence: newSequence };
 }
