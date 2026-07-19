@@ -16,6 +16,13 @@
     "noUnusedParameters": false,
     "noFallthroughCasesInSwitch": true
   },
-  "include": ["src", "scripts"],
+  "include": ["src"],
+  // "scripts" (verify.ts / verify_scoring.ts) is intentionally NOT included
+  // here. Those files use Node globals (process.exit) and are run directly
+  // via `tsx` (see package.json's "verify" script), which transpiles them
+  // without needing them to satisfy this project's browser-focused tsconfig.
+  // Including them here made `tsc -b` (part of `npm run build`) fail on
+  // Netlify with "Cannot find name 'process'" — tsx never hit that because
+  // it doesn't type-check against this file.
   "references": [{ "path": "./tsconfig.node.json" }]
 }

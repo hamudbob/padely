@@ -3,6 +3,17 @@
 //   npx supabase gen types typescript --linked > src/lib/supabase/database.types.ts
 // and this file becomes redundant — keeping it for now so the app typechecks
 // before that project exists.
+//
+// IMPORTANT: every table/view below carries a `Relationships: []` field.
+// @supabase/supabase-js's real types require each table to satisfy
+// `GenericTable` (Row/Insert/Update/Relationships) — without Relationships,
+// TypeScript can't confirm this Database type matches what createClient<Database>
+// expects, and silently resolves every `.from(...)` call to `never`. That
+// shows up as a wall of "Property 'x' does not exist on type 'never'" errors
+// across every file that queries Supabase — which is exactly what a real
+// `tsc` build (e.g. on Netlify) surfaces, but a loose/local editor check can
+// miss. We don't use embedded foreign-table selects anywhere in this app, so
+// an empty array is accurate, not a placeholder.
 
 export interface Database {
   public: {
@@ -11,6 +22,7 @@ export interface Database {
         Row: { id: string; owner_id: string; name: string; settings: Record<string, unknown>; created_at: string };
         Insert: { id?: string; owner_id: string; name: string; settings?: Record<string, unknown> };
         Update: Partial<Database["public"]["Tables"]["teams"]["Insert"]>;
+        Relationships: [];
       };
       sessions: {
         Row: {
@@ -55,11 +67,13 @@ export interface Database {
         // fields (started_at, ended_at, updated_at) that endSession() and
         // future lifecycle actions need to set on update.
         Update: Partial<Database["public"]["Tables"]["sessions"]["Row"]>;
+        Relationships: [];
       };
       courts: {
         Row: { id: string; session_id: string; ordinal: number; display_name: string; available: boolean };
         Insert: { id?: string; session_id: string; ordinal: number; display_name: string; available?: boolean };
         Update: Partial<Database["public"]["Tables"]["courts"]["Insert"]>;
+        Relationships: [];
       };
       players: {
         Row: {
@@ -90,6 +104,7 @@ export interface Database {
         // fields (left_at, joined_at) that the Manage menu's "mark as left"
         // action needs to set on update, same reasoning as sessions.Update.
         Update: Partial<Database["public"]["Tables"]["players"]["Row"]>;
+        Relationships: [];
       };
       pairs: {
         Row: {
@@ -112,6 +127,7 @@ export interface Database {
           player_b_id: string;
         };
         Update: Partial<Database["public"]["Tables"]["pairs"]["Insert"]>;
+        Relationships: [];
       };
       rounds: {
         Row: {
@@ -132,6 +148,7 @@ export interface Database {
           seed_used: number;
         };
         Update: Partial<Database["public"]["Tables"]["rounds"]["Insert"]>;
+        Relationships: [];
       };
       matches: {
         Row: {
@@ -156,11 +173,13 @@ export interface Database {
           status?: Database["public"]["Tables"]["matches"]["Row"]["status"];
         };
         Update: Partial<Database["public"]["Tables"]["matches"]["Row"]>;
+        Relationships: [];
       };
       match_participants: {
         Row: { match_id: string; player_id: string; side: "A" | "B" };
         Insert: { match_id: string; player_id: string; side: "A" | "B" };
         Update: Partial<Database["public"]["Tables"]["match_participants"]["Insert"]>;
+        Relationships: [];
       };
       adjustments: {
         Row: {
@@ -186,12 +205,14 @@ export interface Database {
           applied_by: string;
         };
         Update: Partial<Database["public"]["Tables"]["adjustments"]["Insert"]>;
+        Relationships: [];
       };
       round_rests: {
         // composite primary key (round_id, player_id) — no separate id column.
         Row: { round_id: string; player_id: string; consecutive_rest_count: number };
         Insert: { round_id: string; player_id: string; consecutive_rest_count?: number };
         Update: Partial<Database["public"]["Tables"]["round_rests"]["Insert"]>;
+        Relationships: [];
       };
       score_edits: {
         Row: {
@@ -216,6 +237,7 @@ export interface Database {
           reason?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["score_edits"]["Insert"]>;
+        Relationships: [];
       };
     };
     Views: {
@@ -229,6 +251,7 @@ export interface Database {
           losses: number;
           adjustment_total: number;
         };
+        Relationships: [];
       };
       standings_live_pairs: {
         Row: {
@@ -240,6 +263,7 @@ export interface Database {
           losses: number;
           adjustment_total: number;
         };
+        Relationships: [];
       };
     };
     Functions: {
