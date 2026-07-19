@@ -1,0 +1,12 @@
+[build]
+  command = "npm run build"
+  publish = "dist"
+
+# The app uses BrowserRouter (real URL paths like /session/:id/host), so
+# Netlify needs to serve index.html for every path and let react-router
+# handle routing client-side — otherwise refreshing on any route but "/"
+# 404s.
+[[redirects]]
+  from = "/*"
+  to = "/index.html"
+  status = 200
