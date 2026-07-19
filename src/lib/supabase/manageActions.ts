@@ -53,6 +53,7 @@ export async function addLatePlayer(input: AddLatePlayerInput): Promise<{ id: st
     .select("id")
     .single();
   if (error) throw error;
+  if (!data) throw new Error("Failed to add the player — no row was returned.");
   return { id: data.id };
 }
 

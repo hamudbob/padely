@@ -86,6 +86,7 @@ export async function getHostLiveSnapshot(sessionId: string): Promise<HostLiveSn
   if (courtsError) throw courtsError;
   if (playersError) throw playersError;
   if (roundsError) throw roundsError;
+  if (!session) throw new Error("Session not found.");
 
   const courtNameById = new Map((courts ?? []).map((c) => [c.id, c.display_name]));
   const playerNameById = new Map((players ?? []).map((p) => [p.id, p.display_name]));

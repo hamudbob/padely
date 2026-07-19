@@ -49,6 +49,7 @@ export async function generateNextRound(sessionId: string): Promise<GenerateNext
     .eq("id", sessionId)
     .single();
   if (sessionError) throw sessionError;
+  if (!session) throw new Error("Session not found.");
 
   // "fixed_partner" is kept here only for backward compatibility with any
   // session created before the rework (it used to be its own format value);
@@ -340,6 +341,11 @@ export async function generateNextRound(sessionId: string): Promise<GenerateNext
   ]);
   if (markScoredError) throw markScoredError;
   if (newRoundError) throw newRoundError;
+  // TS can't infer from newRoundError being null that newRoundRow is
+  // non-null — they're two separately-typed values pulled out of the same
+  // Promise.all tuple, not one result TS can narrow together. This check is
+  // the real narrowing point for every `newRoundRow.id` use below.
+  if (!newRoundRow) throw new Error("Failed to create the new round — no row was returned.");
 
   // Fixed Partner only — pairId here is already the real pairs.id (see the
   // reconstruction above), so no tempId remapping is needed like

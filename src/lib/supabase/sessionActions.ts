@@ -89,6 +89,7 @@ export async function createAndStartSession(
     .limit(1)
     .single();
   if (teamError) throw new Error("Could not find your team — try logging out and back in.");
+  if (!teamRow) throw new Error("Could not find your team — try logging out and back in.");
 
   // join_code has a unique constraint; retry a few times on collision.
   let sessionId: string | null = null;
@@ -122,6 +123,7 @@ export async function createAndStartSession(
       if (sessionError.code === "23505") continue; // unique violation on join_code -> retry
       throw sessionError;
     }
+    if (!sessionRow) throw new Error("Could not create session (no row returned). Try again.");
     sessionId = sessionRow.id;
   }
   if (!sessionId) throw lastError instanceof Error ? lastError : new Error("Could not create session (join code collision). Try again.");

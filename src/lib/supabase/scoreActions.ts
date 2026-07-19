@@ -31,6 +31,7 @@ export async function submitMatchScore(input: SubmitScoreInput): Promise<void> {
     .eq("id", input.matchId)
     .single();
   if (fetchError) throw fetchError;
+  if (!existing) throw new Error("Match not found.");
 
   const wasFinal = existing.status === "final";
 

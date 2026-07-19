@@ -45,6 +45,7 @@ export async function getSessionStandings(sessionId: string): Promise<SessionSta
   if (playersError) throw playersError;
   if (roundsError) throw roundsError;
   if (adjustmentsError) throw adjustmentsError;
+  if (!session) throw new Error("Session not found.");
 
   // Fixed Partner: partners are locked for the whole session, so standings
   // should show one row per PAIR (e.g. "Hamud & Said"), not one row per
