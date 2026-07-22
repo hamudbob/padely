@@ -20,6 +20,7 @@ import {
 import { generateInitialRounds } from "../../lib/scheduling/initialSchedule";
 import { createLobby, finalizeAndStart, DraftCourt, DraftPlayer } from "../../lib/supabase/sessionActions";
 import { listJoinRequests, acknowledgeJoinRequest, rejectJoinRequest, JoinRequest } from "../../lib/supabase/joinRequestQueries";
+import { useHostSession } from "../../lib/supabase/useHostSession";
 
 type SessionFormat = Database["public"]["Tables"]["sessions"]["Row"]["format"];
 type ScoringFormat = Database["public"]["Tables"]["sessions"]["Row"]["scoring_format"];
@@ -123,6 +124,7 @@ function recommendedFixedPartnerRounds(pairCount: number, courts: number): numbe
 
 export default function CreateSessionPage() {
   const navigate = useNavigate();
+  const { user } = useHostSession();
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
   const [format, setFormat] = useState<SessionFormat>("americano");
@@ -377,6 +379,13 @@ export default function CreateSessionPage() {
     } catch {
       /* clipboard unavailable — the code is shown as a fallback */
     }
+  }
+
+  const hostName = ((user?.user_metadata?.name as string | undefined)?.trim() || (user?.email ?? "").split("@")[0] || "Me").trim();
+  const hostAlreadyIn = players.some((p) => p.name.trim().toLowerCase() === hostName.toLowerCase());
+  function addMe() {
+    if (hostAlreadyIn) return;
+    setPlayers((prev) => [...prev, { tempId: nextTempId("p"), name: hostName, gender: "M", teamSide: nextAutoTeamSide(prev) }]);
   }
 
   // Auto-balances new players onto whichever team currently has fewer —
@@ -669,6 +678,16 @@ export default function CreateSessionPage() {
                 </div>
               ))}
             </div>
+          )}
+
+          {!hostAlreadyIn && (
+            <button
+              type="button"
+              onClick={addMe}
+              className="w-full flex items-center justify-center gap-1.5 rounded-2xl border-[1.5px] border-graphite text-graphite bg-surface px-4 py-2.5 text-[13px] font-semibold active:scale-[0.99] transition-transform"
+            >
+              <span className="text-[16px] leading-none">+</span> I'm playing too
+            </button>
           )}
 
           <PlayersStep

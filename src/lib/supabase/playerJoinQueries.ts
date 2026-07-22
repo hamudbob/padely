@@ -13,7 +13,7 @@ import { supabase } from "./client";
  * small typed cast — the same pattern the public-session + old join stubs use.
  */
 type RpcFn = (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }>;
-const rpc = supabase.rpc as unknown as RpcFn;
+const rpc = supabase.rpc.bind(supabase) as unknown as RpcFn;
 
 export interface JoinSessionInfo {
   id: string;
