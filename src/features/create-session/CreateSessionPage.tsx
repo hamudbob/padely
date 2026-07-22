@@ -578,7 +578,7 @@ export default function CreateSessionPage() {
   return (
     <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
       <button
-        onClick={() => navigate(-1)}
+        onClick={() => (step > 0 ? setStep((s) => s - 1) : navigate(-1))}
         aria-label="Back"
         className="w-9 h-9 -ml-0.5 mb-3 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform"
       >
@@ -855,18 +855,11 @@ export default function CreateSessionPage() {
       )}
 
       {step < 5 && (
-        <div className="flex gap-2 mt-6">
-          <button
-            onClick={() => setStep((s) => Math.max(0, s - 1))}
-            disabled={step === 0}
-            className="flex-1 flex items-center justify-center rounded-full px-4 py-3 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform disabled:opacity-40"
-          >
-            Back
-          </button>
+        <div className="mt-6">
           <button
             onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}
             disabled={!canProceed}
-            className="flex-1 flex items-center justify-center rounded-full px-4 py-3 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-40"
+            className="w-full flex items-center justify-center rounded-full px-4 py-3 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-40"
           >
             Next
           </button>

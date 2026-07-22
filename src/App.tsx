@@ -4,6 +4,7 @@ import LoginPage from "./features/auth/LoginPage";
 import ProfilePage from "./features/profile/ProfilePage";
 import RequireHost from "./features/auth/RequireHost";
 import JoinPage from "./features/join/JoinPage";
+import WatchPage from "./features/watch/WatchPage";
 import CreateSessionPage from "./features/create-session/CreateSessionPage";
 import HostLivePage from "./features/host-live/HostLivePage";
 import LobbyPage from "./features/lobby/LobbyPage";
@@ -24,6 +25,7 @@ export default function App() {
         }
       />
       <Route path="/join" element={<JoinPage />} />
+      <Route path="/watch" element={<WatchPage />} />
       <Route
         path="/create"
         element={

@@ -13,6 +13,8 @@ import { supabase } from "./client";
  * small typed cast — the same pattern the public-session + old join stubs use.
  */
 type RpcFn = (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }>;
+// Bind to the client — calling a detached `supabase.rpc` loses its `this` and
+// throws before it ever hits the network.
 const rpc = supabase.rpc.bind(supabase) as unknown as RpcFn;
 
 export interface JoinSessionInfo {
@@ -20,15 +22,17 @@ export interface JoinSessionInfo {
   name: string;
   format: string;
   status: "draft" | "live";
+  /** For spectating — resolve a code straight to the read-only /live view. */
+  publicToken: string;
 }
 
-/** Validate a join code; returns the session to join, or null if no open session matches. */
+/** Validate a join code; returns the session (incl. its public token), or null if no open session matches. */
 export async function getJoinSession(code: string): Promise<JoinSessionInfo | null> {
   const { data, error } = await rpc("get_join_session", { p_code: code });
   if (error) throw new Error(error.message);
   if (!data) return null;
-  const d = data as { id: string; name: string; format: string; status: "draft" | "live" };
-  return { id: d.id, name: d.name, format: d.format, status: d.status };
+  const d = data as { id: string; name: string; format: string; status: "draft" | "live"; public_token?: string };
+  return { id: d.id, name: d.name, format: d.format, status: d.status, publicToken: d.public_token ?? "" };
 }
 
 export interface GuestPrefill {
@@ -46,6 +50,37 @@ export async function lookupGuest(email: string): Promise<GuestPrefill | null> {
   if (!data) return null;
   const d = data as { name: string; gender: "M" | "F"; preferredSide: "L" | "R" | null };
   return { name: d.name, gender: d.gender, preferredSide: d.preferredSide ?? null };
+}
+
+export interface PlayerSession {
+  id: string;
+  name: string;
+  format: string;
+  status: "draft" | "live" | "ended";
+  createdAt: string;
+  publicToken: string;
+}
+
+/** Sessions the signed-in user has joined (confirmed), for the dashboard Player tab. */
+export async function getMyPlayerSessions(): Promise<PlayerSession[]> {
+  const { data, error } = await rpc("get_player_sessions", {});
+  if (error) throw new Error(error.message);
+  const rows = (data ?? []) as {
+    id: string;
+    name: string;
+    format: string;
+    status: "draft" | "live" | "ended";
+    created_at: string;
+    public_token: string;
+  }[];
+  return rows.map((r) => ({
+    id: r.id,
+    name: r.name,
+    format: r.format,
+    status: r.status,
+    createdAt: r.created_at,
+    publicToken: r.public_token,
+  }));
 }
 
 export interface RequestJoinInput {

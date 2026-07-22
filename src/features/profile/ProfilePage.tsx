@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { signOutHost, updateHostName, updateHostPrefs } from "../../lib/supabase/auth";
 import { listHostSessions, HostSessionSummary } from "../../lib/supabase/hostSessionsQueries";
+import { getMyPlayerSessions, PlayerSession } from "../../lib/supabase/playerJoinQueries";
 
 const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
@@ -21,7 +22,7 @@ function formatSessionDate(iso: string): string {
   return date.toLocaleDateString([], { month: "short", day: "numeric" });
 }
 
-type RoleTab = "host" | "player" | "spectator";
+type RoleTab = "host" | "player";
 
 /**
  * Padelier dashboard — the personal hub reached from the home avatar. A single
@@ -39,6 +40,7 @@ export default function ProfilePage() {
 
   const [sessions, setSessions] = useState<HostSessionSummary[] | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [playerSessions, setPlayerSessions] = useState<PlayerSession[] | null>(null);
   const [tab, setTab] = useState<RoleTab>("host");
 
   const [displayName, setDisplayName] = useState("");
@@ -100,13 +102,15 @@ export default function ProfilePage() {
       .then(setSessions)
       .catch(() => setSessions([]))
       .finally(() => setSessionsLoading(false));
+    getMyPlayerSessions()
+      .then(setPlayerSessions)
+      .catch(() => setPlayerSessions([]));
   }, [user]);
 
   const hostedSessions = sessions ?? [];
   const liveCount = hostedSessions.filter((s) => s.status === "live").length;
   const hostedCount = hostedSessions.length;
-  const playedCount = 0; // Phase 3 — player join
-  const watchedCount = 0; // Phase 3 — spectator join
+  const playedCount = playerSessions?.length ?? 0;
 
   async function handleSaveName() {
     const trimmed = nameDraft.trim();
@@ -142,13 +146,11 @@ export default function ProfilePage() {
   const roleChips: { key: RoleTab; label: string; on: boolean }[] = [
     { key: "host", label: "Host", on: hostedCount > 0 },
     { key: "player", label: "Player", on: playedCount > 0 },
-    { key: "spectator", label: "Spectator", on: watchedCount > 0 },
   ];
 
   const tiles = [
     { label: "Hosted", value: hostedCount },
     { label: "Played", value: playedCount },
-    { label: "Watched", value: watchedCount },
   ];
 
   return (
@@ -235,7 +237,7 @@ export default function ProfilePage() {
       </div>
 
       {/* Big-picture stat tiles */}
-      <div className="grid grid-cols-3 gap-2 mb-5">
+      <div className="grid grid-cols-2 gap-2 mb-5">
         {tiles.map((t) => (
           <div key={t.label} className="rounded-2xl border border-line bg-surface py-3 px-2 text-center shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
             <b className="block font-mono tnum text-[24px] font-semibold text-graphite leading-none">{t.value}</b>
@@ -268,7 +270,7 @@ export default function ProfilePage() {
           <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
         </Link>
 
-        <Link to="/join" className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+        <Link to="/watch" className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
           <span className="w-[34px] h-[34px] rounded-[11px] bg-surface-2 border border-line text-ink-2 flex items-center justify-center shrink-0">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="2.6" /></svg>
           </span>
@@ -318,7 +320,7 @@ export default function ProfilePage() {
 
       {/* Role tabs + session list */}
       <div className="flex gap-1 mb-3 rounded-2xl border border-line bg-surface p-1">
-        {(["host", "player", "spectator"] as const).map((t) => (
+        {(["host", "player"] as const).map((t) => (
           <button
             key={t}
             onClick={() => setTab(t)}
@@ -388,26 +390,44 @@ export default function ProfilePage() {
         </>
       )}
 
-      {tab === "player" && (
-        <div className="rounded-2xl border border-dashed border-line bg-surface px-4 py-8 text-center">
-          <p className="text-[13px] font-semibold text-ink-2">No games yet</p>
-          <p className="text-[12px] text-warm-gray mt-1.5 leading-relaxed">
-            Join a session as a player with a code and your matches, scores and standings will show up here.
-          </p>
-          <Link to="/join" className="inline-flex mt-4 items-center justify-center rounded-full px-4 py-2.5 font-semibold text-[13px] border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform">
-            Join by code
-          </Link>
-        </div>
-      )}
-
-      {tab === "spectator" && (
-        <div className="rounded-2xl border border-dashed border-line bg-surface px-4 py-8 text-center">
-          <p className="text-[13px] font-semibold text-ink-2">Not watching anything</p>
-          <p className="text-[12px] text-warm-gray mt-1.5 leading-relaxed">
-            Follow a live session as a spectator and it'll appear here so you can jump back to the action.
-          </p>
-        </div>
-      )}
+      {tab === "player" &&
+        (playerSessions && playerSessions.length > 0 ? (
+          <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+            {playerSessions.map((s) => (
+              <Link
+                key={s.id}
+                to={`/live/${s.publicToken}`}
+                className="flex items-center gap-3 px-4 py-3.5 border-t border-line first:border-t-0 active:bg-surface-2 transition-colors"
+              >
+                <span
+                  className={`w-2 h-2 rounded-full shrink-0 ${
+                    s.status === "live" ? "bg-court-lime shadow-[0_0_0_3px_rgba(196,226,75,0.28)]" : "bg-stone"
+                  }`}
+                  aria-hidden
+                />
+                <div className="flex-1 min-w-0">
+                  <b className="block text-[15px] font-semibold text-graphite truncate">{s.name}</b>
+                  <p className="text-[11px] text-warm-gray mt-0.5 truncate">
+                    {FORMAT_LABELS[s.format] ?? s.format} · {s.status === "live" ? "live now" : "ended"} · {formatSessionDate(s.createdAt)}
+                  </p>
+                </div>
+                <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                  <path d="M9 18l6-6-6-6" />
+                </svg>
+              </Link>
+            ))}
+          </div>
+        ) : (
+          <div className="rounded-2xl border border-dashed border-line bg-surface px-4 py-8 text-center">
+            <p className="text-[13px] font-semibold text-ink-2">No games yet</p>
+            <p className="text-[12px] text-warm-gray mt-1.5 leading-relaxed">
+              Join a session as a player with a code and it'll show up here — you can tap in to follow the scores live.
+            </p>
+            <Link to="/join" className="inline-flex mt-4 items-center justify-center rounded-full px-4 py-2.5 font-semibold text-[13px] border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform">
+              Join by code
+            </Link>
+          </div>
+        ))}
 
       {/* Account */}
       <div className="flex items-center justify-between border-t border-line mt-6 pt-4">
