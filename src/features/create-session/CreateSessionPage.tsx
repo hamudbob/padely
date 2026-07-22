@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import type { Database } from "../../lib/supabase/database.types";
 import { mulberry32, PlayerFairnessState, PlayerId, RoundResult } from "../../lib/scheduling/types";
@@ -18,7 +18,7 @@ import {
   generateFixedPartnerRankedRound,
 } from "../../lib/scheduling/fixedPartner";
 import { generateInitialRounds } from "../../lib/scheduling/initialSchedule";
-import { createLobby, finalizeAndStart, DraftCourt, DraftPlayer } from "../../lib/supabase/sessionActions";
+import { createLobby, finalizeAndStart, deleteSession, DraftCourt, DraftPlayer } from "../../lib/supabase/sessionActions";
 import { listJoinRequests, acknowledgeJoinRequest, rejectJoinRequest, JoinRequest } from "../../lib/supabase/joinRequestQueries";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 
@@ -168,6 +168,20 @@ export default function CreateSessionPage() {
   const [joinCode, setJoinCode] = useState("");
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [copiedLink, setCopiedLink] = useState(false);
+
+  // Refs so the unmount cleanup sees the latest values. If the host leaves the
+  // wizard (back button, browser back, route change) without starting, the
+  // draft session that was minted for the join code is deleted — no orphan.
+  const lobbyIdRef = useRef<string | null>(null);
+  const startedRef = useRef(false);
+  useEffect(() => {
+    lobbyIdRef.current = lobbyId;
+  }, [lobbyId]);
+  useEffect(() => {
+    return () => {
+      if (lobbyIdRef.current && !startedRef.current) void deleteSession(lobbyIdRef.current);
+    };
+  }, []);
 
   const courts: DraftCourt[] = useMemo(
     () => Array.from({ length: courtCount }, (_, i) => ({ tempId: `court-${i}`, name: `Court ${i + 1}` })),
@@ -552,6 +566,7 @@ export default function CreateSessionPage() {
         previewRounds,
         schedulingSeed,
       );
+      startedRef.current = true; // it's live now — don't let the unmount cleanup delete it
       navigate(`/session/${sid}/host`);
     } catch (err) {
       setStartError(err instanceof Error ? err.message : "Could not start the session.");

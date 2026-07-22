@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
-import { signOutHost, updateHostName } from "../../lib/supabase/auth";
+import { signOutHost, updateHostName, updateHostPrefs } from "../../lib/supabase/auth";
 import { listHostSessions, HostSessionSummary } from "../../lib/supabase/hostSessionsQueries";
 
 const FORMAT_LABELS: Record<string, string> = {
@@ -49,6 +49,12 @@ export default function ProfilePage() {
 
   const [signingOut, setSigningOut] = useState(false);
 
+  // Default playing preferences, saved to the account so a signed-in join needs
+  // zero input. Seeded from metadata (default Right / Male until set).
+  const [prefSide, setPrefSide] = useState<"L" | "R">("R");
+  const [prefGender, setPrefGender] = useState<"M" | "F">("M");
+  const [savingPrefs, setSavingPrefs] = useState(false);
+
   const metadataName = (user?.user_metadata?.name as string | undefined)?.trim() || "";
   const emailPrefix = (user?.email ?? "").split("@")[0];
 
@@ -56,6 +62,36 @@ export default function ProfilePage() {
   useEffect(() => {
     if (!editingName) setDisplayName(metadataName || emailPrefix || "Player");
   }, [metadataName, emailPrefix, editingName]);
+
+  // Seed preference toggles from the account.
+  useEffect(() => {
+    const md = user?.user_metadata ?? {};
+    setPrefSide(md.preferred_side === "L" ? "L" : "R");
+    setPrefGender(md.gender === "F" ? "F" : "M");
+  }, [user]);
+
+  async function saveSide(side: "L" | "R") {
+    setPrefSide(side);
+    setSavingPrefs(true);
+    try {
+      await updateHostPrefs({ preferredSide: side });
+    } catch {
+      /* keep the optimistic value; a retry will re-save */
+    } finally {
+      setSavingPrefs(false);
+    }
+  }
+  async function saveGender(gender: "M" | "F") {
+    setPrefGender(gender);
+    setSavingPrefs(true);
+    try {
+      await updateHostPrefs({ gender });
+    } catch {
+      /* optimistic */
+    } finally {
+      setSavingPrefs(false);
+    }
+  }
 
   useEffect(() => {
     if (!user) return;
@@ -242,6 +278,42 @@ export default function ProfilePage() {
           </span>
           <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
         </Link>
+      </div>
+
+      {/* Playing preferences — used to auto-fill a signed-in join */}
+      <div className="flex items-center justify-between mb-2">
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray">Playing preferences</p>
+        {savingPrefs && <span className="text-[10px] text-warm-gray">saving…</span>}
+      </div>
+      <div className="flex gap-2 mb-6">
+        <div className="flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-warm-gray mb-1.5">Side</p>
+          <div className="flex gap-1 rounded-2xl border border-line bg-surface p-1">
+            {(["L", "R"] as const).map((s) => (
+              <button
+                key={s}
+                onClick={() => saveSide(s)}
+                className={`flex-1 rounded-xl px-2 py-2 text-[13px] font-semibold transition-colors ${prefSide === s ? "bg-graphite text-ivory" : "text-ink-2 active:bg-surface-2"}`}
+              >
+                {s === "L" ? "Left" : "Right"}
+              </button>
+            ))}
+          </div>
+        </div>
+        <div className="flex-1">
+          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-warm-gray mb-1.5">Gender</p>
+          <div className="flex gap-1 rounded-2xl border border-line bg-surface p-1">
+            {(["M", "F"] as const).map((g) => (
+              <button
+                key={g}
+                onClick={() => saveGender(g)}
+                className={`flex-1 rounded-xl px-2 py-2 text-[13px] font-semibold transition-colors ${prefGender === g ? "bg-graphite text-ivory" : "text-ink-2 active:bg-surface-2"}`}
+              >
+                {g === "M" ? "Male" : "Female"}
+              </button>
+            ))}
+          </div>
+        </div>
       </div>
 
       {/* Role tabs + session list */}

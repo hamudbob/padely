@@ -498,6 +498,17 @@ export async function endSession(sessionId: string): Promise<void> {
 }
 
 /**
+ * Hard-deletes a session (cascading to its courts/players/rounds/join_requests).
+ * Used to clean up an abandoned DRAFT — the empty shell the create wizard mints
+ * for its join code — when the host backs out without starting. Never called on
+ * a live/ended session.
+ */
+export async function deleteSession(sessionId: string): Promise<void> {
+  const { error } = await supabase.from("sessions").delete().eq("id", sessionId);
+  if (error) throw error;
+}
+
+/**
  * Creates a session in DRAFT (lobby) state — config, courts, typed players and
  * (Fixed Partner) pairs — but does NOT generate any rounds and does NOT go
  * live. The join code is active immediately, so players can join the lobby

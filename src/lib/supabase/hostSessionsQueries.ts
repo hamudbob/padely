@@ -33,6 +33,10 @@ export async function listHostSessions(): Promise<HostSessionSummary[]> {
     .from("sessions")
     .select("id, name, format, status, join_code, created_at, ended_at")
     .eq("team_id", teamRow.id)
+    // Drafts are just the transient shell the create wizard mints for its join
+    // code — never surface them here (an abandoned one is deleted on exit, but
+    // this hides any that slipped through, e.g. a closed tab).
+    .neq("status", "draft")
     .order("created_at", { ascending: false });
   if (sessionsError) throw sessionsError;
 

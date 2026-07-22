@@ -67,6 +67,21 @@ export async function updateHostName(name: string) {
   return data.user;
 }
 
+/**
+ * Saves the account's default playing preferences (padel court side + gender)
+ * onto the auth user's metadata. These feed a signed-in player's join so they
+ * never re-enter them. updateUser merges into existing metadata, so `name` is
+ * left untouched.
+ */
+export async function updateHostPrefs(prefs: { gender?: "M" | "F"; preferredSide?: "L" | "R" }) {
+  const data: Record<string, unknown> = {};
+  if (prefs.gender) data.gender = prefs.gender;
+  if (prefs.preferredSide) data.preferred_side = prefs.preferredSide;
+  const { data: res, error } = await supabase.auth.updateUser({ data });
+  if (error) throw error;
+  return res.user;
+}
+
 export async function getCurrentHost() {
   const { data, error } = await supabase.auth.getUser();
   if (error) throw error;

@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getJoinSession, requestJoin, lookupGuest, JoinSessionInfo } from "../../lib/supabase/playerJoinQueries";
+import { useHostSession } from "../../lib/supabase/useHostSession";
 
 const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
@@ -23,6 +24,7 @@ type Stage = "code" | "form" | "done";
 export default function JoinPage() {
   const navigate = useNavigate();
   const [params] = useSearchParams();
+  const { user, loading: authLoading } = useHostSession();
 
   const [stage, setStage] = useState<Stage>("code");
   const [code, setCode] = useState("");
@@ -36,30 +38,88 @@ export default function JoinPage() {
   const [email, setEmail] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [sessionName, setSessionName] = useState("");
+  const [didPrefill, setDidPrefill] = useState(false);
 
-  // Prefill + auto-advance when arriving from a QR link (?code=).
+  // A signed-in player shouldn't retype what their account knows: pull name +
+  // email straight from the account, and side/gender from their last join
+  // (looked up by that email). They can still tweak side/gender before joining.
   useEffect(() => {
+    if (stage !== "form" || !user || didPrefill) return;
+    setDidPrefill(true);
+    const accountName = (user.user_metadata?.name as string | undefined)?.trim() ?? "";
+    const accountEmail = user.email ?? "";
+    if (accountName) setName(accountName);
+    if (accountEmail) setEmail(accountEmail);
+    if (accountEmail) {
+      lookupGuest(accountEmail)
+        .then((g) => {
+          if (!g) return;
+          if (!accountName) setName(g.name);
+          setGender(g.gender);
+          if (g.preferredSide) setSide(g.preferredSide);
+        })
+        .catch(() => {});
+    }
+  }, [stage, user, didPrefill]);
+
+  // Prefill + auto-advance from a QR link (?code=). Wait for auth to resolve
+  // first so a signed-in scanner takes the zero-input path, not the form.
+  const [qrHandled, setQrHandled] = useState(false);
+  useEffect(() => {
+    if (authLoading || qrHandled) return;
+    setQrHandled(true);
     const fromQr = (params.get("code") ?? "").replace(/\D/g, "").slice(0, 6);
     if (fromQr.length === 6) {
       setCode(fromQr);
       void validateCode(fromQr);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
+  }, [authLoading, qrHandled]);
 
   async function validateCode(value: string) {
     setChecking(true);
     setError(null);
+    let found: JoinSessionInfo | null = null;
     try {
-      const found = await getJoinSession(value);
-      if (!found) {
-        setError("No open session matches that code. Double-check with your host.");
-        return;
-      }
-      setSession(found);
-      setStage("form");
+      found = await getJoinSession(value);
     } catch {
       setError("Couldn't check that code just now — please try again.");
+      setChecking(false);
+      return;
+    }
+    if (!found) {
+      setError("No open session matches that code. Double-check with your host.");
+      setChecking(false);
+      return;
+    }
+    setSession(found);
+
+    // Not signed in → collect details on the form.
+    if (!user) {
+      setStage("form");
+      setChecking(false);
+      return;
+    }
+
+    // Signed in → the account already has everything, so join with no form.
+    try {
+      const md = user.user_metadata ?? {};
+      const nm = (md.name as string | undefined)?.trim() || (user.email ?? "").split("@")[0] || "Player";
+      let g: "M" | "F" = md.gender === "F" ? "F" : "M";
+      let s: "L" | "R" = md.preferred_side === "L" ? "L" : "R";
+      // Fall back to their last join if the account has no prefs saved yet.
+      if (!md.gender || !md.preferred_side) {
+        const guest = await lookupGuest(user.email ?? "").catch(() => null);
+        if (guest) {
+          if (!md.gender) g = guest.gender;
+          if (!md.preferred_side && guest.preferredSide) s = guest.preferredSide;
+        }
+      }
+      const result = await requestJoin({ code: value, name: nm, gender: g, preferredSide: s, email: user.email ?? null });
+      setSessionName(result.sessionName);
+      setStage("done");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't join just now — please try again.");
     } finally {
       setChecking(false);
     }
@@ -208,20 +268,26 @@ export default function JoinPage() {
               </div>
             </div>
 
-            <div>
-              <label className="block text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1.5">
-                Email <span className="text-warm-gray font-medium normal-case tracking-normal">· optional</span>
-              </label>
-              <input
-                type="email"
-                value={email}
-                onChange={(e) => setEmail(e.target.value)}
-                onBlur={handleEmailBlur}
-                placeholder="you@email.com"
-                className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
-              />
-              <p className="text-[11px] text-warm-gray mt-1.5">We'll remember your details next time — and your history is saved if you ever make an account.</p>
-            </div>
+            {user ? (
+              <p className="text-[12px] text-warm-gray">
+                Joining with your account · <span className="font-semibold text-ink-2">{user.email}</span>
+              </p>
+            ) : (
+              <div>
+                <label className="block text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1.5">
+                  Email <span className="text-warm-gray font-medium normal-case tracking-normal">· optional</span>
+                </label>
+                <input
+                  type="email"
+                  value={email}
+                  onChange={(e) => setEmail(e.target.value)}
+                  onBlur={handleEmailBlur}
+                  placeholder="you@email.com"
+                  className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+                />
+                <p className="text-[11px] text-warm-gray mt-1.5">We'll remember your details next time — and your history is saved if you ever make an account.</p>
+              </div>
+            )}
 
             {error && <p className="text-[13px] text-loss">{error}</p>}
             <button
