@@ -17,7 +17,9 @@ import {
   generateFixedPartnerSchedule,
   generateFixedPartnerRankedRound,
 } from "../../lib/scheduling/fixedPartner";
-import { createAndStartSession, DraftCourt, DraftPlayer } from "../../lib/supabase/sessionActions";
+import { generateInitialRounds } from "../../lib/scheduling/initialSchedule";
+import { createLobby, finalizeAndStart, DraftCourt, DraftPlayer } from "../../lib/supabase/sessionActions";
+import { listJoinRequests, acknowledgeJoinRequest, rejectJoinRequest, JoinRequest } from "../../lib/supabase/joinRequestQueries";
 
 type SessionFormat = Database["public"]["Tables"]["sessions"]["Row"]["format"];
 type ScoringFormat = Database["public"]["Tables"]["sessions"]["Row"]["scoring_format"];
@@ -158,6 +160,13 @@ export default function CreateSessionPage() {
   const [startError, setStartError] = useState<string | null>(null);
   const [schedulingSeed] = useState(() => Math.floor(Math.random() * 1_000_000_000));
 
+  // Lobby: the Players step mints a draft session so its join code is live and
+  // people can join while setup continues. Confirmed joins merge into `players`.
+  const [lobbyId, setLobbyId] = useState<string | null>(null);
+  const [joinCode, setJoinCode] = useState("");
+  const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
+  const [copiedLink, setCopiedLink] = useState(false);
+
   const courts: DraftCourt[] = useMemo(
     () => Array.from({ length: courtCount }, (_, i) => ({ tempId: `court-${i}`, name: `Court ${i + 1}` })),
     [courtCount],
@@ -291,6 +300,85 @@ export default function CreateSessionPage() {
     setRoundCountTouched(false); // the effect above recomputes it from recommendedRoundCount
   }
 
+  // Mint the draft session (→ live join code) the first time the host reaches
+  // the Players step. Non-fatal on failure — manual name entry still works.
+  useEffect(() => {
+    if (step !== 2 || lobbyId || name.trim().length < 2) return;
+    createLobby({
+      name: name.trim(),
+      format,
+      scoringFormat,
+      rankingBasis,
+      teamScoreMode: isTeamSparring ? teamScoreMode : undefined,
+      fixedPartnerStyle: isFixedPartner ? fixedPartnerStyle : undefined,
+    })
+      .then((r) => {
+        setLobbyId(r.sessionId);
+        setJoinCode(r.joinCode);
+      })
+      .catch(() => {
+        /* code sharing unavailable — the host can still type players in */
+      });
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [step, lobbyId, name]);
+
+  // Poll for people asking to join while the host is on the Players step.
+  useEffect(() => {
+    if (step !== 2 || !lobbyId) return;
+    let active = true;
+    const load = () => {
+      listJoinRequests(lobbyId)
+        .then((r) => active && setJoinRequests(r))
+        .catch(() => {});
+    };
+    load();
+    const t = window.setInterval(load, 4000);
+    return () => {
+      active = false;
+      window.clearInterval(t);
+    };
+  }, [step, lobbyId]);
+
+  // Accept a self-join into the SAME local roster as typed players; the request
+  // is marked handled (no DB player yet — finalizeAndStart inserts everyone).
+  async function acceptJoin(r: JoinRequest) {
+    setPlayers((prev) => [
+      ...prev,
+      {
+        tempId: nextTempId("p"),
+        name: r.displayName,
+        gender: r.gender,
+        teamSide: nextAutoTeamSide(prev),
+        preferredSide: r.preferredSide === "L" ? "left" : r.preferredSide === "R" ? "right" : undefined,
+      },
+    ]);
+    setJoinRequests((prev) => prev.filter((x) => x.id !== r.id));
+    try {
+      await acknowledgeJoinRequest(r.id);
+    } catch {
+      /* the player is already in the local roster; a stale request row is harmless */
+    }
+  }
+
+  async function declineJoin(id: string) {
+    setJoinRequests((prev) => prev.filter((x) => x.id !== id));
+    try {
+      await rejectJoinRequest(id);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  async function copyJoinLink() {
+    try {
+      await navigator.clipboard.writeText(`${window.location.origin}/join?code=${joinCode}`);
+      setCopiedLink(true);
+      window.setTimeout(() => setCopiedLink(false), 1800);
+    } catch {
+      /* clipboard unavailable — the code is shown as a fallback */
+    }
+  }
+
   // Auto-balances new players onto whichever team currently has fewer —
   // Team Sparring only, so the host doesn't have to manually place every
   // single player; the per-player chip (see PlayersStep) still lets them
@@ -394,101 +482,53 @@ export default function CreateSessionPage() {
   // depend on standings that don't exist yet, so they're generated
   // round-by-round after each is scored. ----
   const previewRounds: RoundResult[] = useMemo(() => {
-    if (players.length < 4) return [];
-    const activePlayerIds = players.map((p) => p.tempId);
-
-    // Fixed Partner toggle takes priority over the base format's own preview
-    // logic below — it composes with whichever base (Americano/Mexicano) is
-    // selected rather than being a format of its own.
-    if (isFixedPartner) {
-      if (resolvedPairs.length === 0) return [];
-      if (fixedPartnerStyle === "round_robin") {
-        return generateFixedPartnerSchedule({ pairs: resolvedPairs, courtsAvailable: courtCount, roundCount, schedulingSeed });
-      }
-      // rank_based — round-by-round like Mexicano, so only Round 1 previews
-      // here; later rounds are generated live from real standings once
-      // scores start coming in.
-      const pairStats = new Map<string, PairFairnessState>(
-        resolvedPairs.map((p) => [p.pairId, { pairId: p.pairId, matchesPlayed: 0, restedLastRound: false }]),
-      );
-      const rng = mulberry32(schedulingSeed + 1);
-      const round1 = generateFixedPartnerRankedRound({
-        pairs: resolvedPairs,
-        statsById: pairStats,
-        courtsAvailable: courtCount,
-        standings: { rankValue: () => 0 },
-        isFirstRound: true,
-        rng,
-      });
-      return round1.matches.length > 0 ? [round1] : [];
-    }
-
-    if (format === "mexicano" || format === "mix_mexicano") {
-      const stats = new Map<string, PlayerFairnessState>(
-        activePlayerIds.map((id) => [id, { playerId: id, matchesPlayed: 0, restedLastRound: false }]),
-      );
-      const rng = mulberry32(schedulingSeed + 1);
-      const standings: StandingLookup = { rankValue: () => 0 };
-      const round1 =
-        format === "mix_mexicano"
-          ? generateMixMexicanoRound({
-              activePlayerIds,
-              genderById,
-              statsById: stats,
-              courtsAvailable: courtCount,
-              standings,
-              isFirstRound: true,
-              rng,
-            })
-          : generateMexicanoRound({
-              activePlayerIds,
-              statsById: stats,
-              courtsAvailable: courtCount,
-              standings,
-              isFirstRound: true,
-              rng,
-            });
-      return round1.matches.length > 0 ? [round1] : [];
-    }
-
-    if (format === "team_sparring") {
-      const teamA = players.filter((p) => p.teamSide === "A").map((p) => p.tempId);
-      const teamB = players.filter((p) => p.teamSide === "B").map((p) => p.tempId);
-      return generateTeamSparringSchedule({
-        roster: { teamA, teamB },
-        courtsAvailable: courtCount,
-        roundCount,
-        schedulingSeed,
-      });
-    }
-
-    if (format === "mix_americano") {
-      return generateMixAmericanoSchedule({ activePlayerIds, genderById, courtsAvailable: courtCount, roundCount, schedulingSeed });
-    }
-
-    return generateAmericanoSchedule({
-      activePlayerIds,
+    // Single source of truth shared with the lobby's Start (see initialSchedule.ts).
+    return generateInitialRounds({
+      players: players.map((p) => ({ id: p.tempId, gender: p.gender, teamSide: p.teamSide ?? null })),
       courtsAvailable: courtCount,
-      roundCount,
+      format,
       schedulingSeed,
+      roundCount,
+      fixedPartnerStyle: isFixedPartner ? fixedPartnerStyle : null,
+      pairs: isFixedPartner ? resolvedPairs : undefined,
     });
-  }, [players, courtCount, format, schedulingSeed, roundCount, resolvedPairs, genderById, isFixedPartner, fixedPartnerStyle]);
+  }, [players, courtCount, format, schedulingSeed, roundCount, resolvedPairs, isFixedPartner, fixedPartnerStyle]);
 
   const nameByTempId = useMemo(() => new Map(players.map((p) => [p.tempId, p.name])), [players]);
 
   const canProceed = (() => {
     if (step === 0) return name.trim().length >= 2 && name.trim().length <= 80;
-    if (step === 2) return players.length >= 4;
+    // Players step is the lobby now — people can still be joining by code, so
+    // don't gate moving on by count. "At least 4" is enforced at Start instead.
     if (step === 3) return courtsOk;
     return true;
   })();
 
+  // Start fills the draft session (minted on the Players step) with the final
+  // roster — typed players plus everyone who joined by code — and its computed
+  // round preview, then goes live. Falls back to minting the draft here if the
+  // Players-step effect never ran (e.g. it failed earlier).
   async function handleStart() {
     if (previewRounds.length === 0) return;
     setStarting(true);
     setStartError(null);
     try {
-      const result = await createAndStartSession(
+      let sid = lobbyId;
+      if (!sid) {
+        const created = await createLobby({
+          name: name.trim(),
+          format,
+          scoringFormat,
+          rankingBasis,
+          teamScoreMode: isTeamSparring ? teamScoreMode : undefined,
+          fixedPartnerStyle: isFixedPartner ? fixedPartnerStyle : undefined,
+        });
+        sid = created.sessionId;
+        setLobbyId(sid);
+        setJoinCode(created.joinCode);
+      }
+      await finalizeAndStart(
+        sid,
         {
           name: name.trim(),
           format,
@@ -503,7 +543,7 @@ export default function CreateSessionPage() {
         previewRounds,
         schedulingSeed,
       );
-      navigate(`/session/${result.sessionId}/host`);
+      navigate(`/session/${sid}/host`);
     } catch (err) {
       setStartError(err instanceof Error ? err.message : "Could not start the session.");
     } finally {
@@ -513,6 +553,13 @@ export default function CreateSessionPage() {
 
   return (
     <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+      <button
+        onClick={() => navigate(-1)}
+        aria-label="Back"
+        className="w-9 h-9 -ml-0.5 mb-3 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform"
+      >
+        ‹
+      </button>
       <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1] mb-1">Create session</h1>
       <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-4">Step {step + 1} of {STEPS.length}: {STEPS[step]}</p>
 
@@ -576,6 +623,54 @@ export default function CreateSessionPage() {
 
       {step === 2 && (
         <div className="space-y-4">
+          {/* Lobby: share the code so players can add themselves */}
+          {lobbyId && (
+            <div className="rounded-2xl border border-line bg-surface p-3.5 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray">Join code</p>
+                  <p className="font-mono tnum text-[26px] font-semibold text-graphite leading-tight tracking-[0.12em]">{joinCode}</p>
+                </div>
+                <button
+                  type="button"
+                  onClick={copyJoinLink}
+                  className="shrink-0 rounded-full bg-graphite text-ivory text-[12px] font-semibold px-3.5 py-2 active:scale-95 transition-transform"
+                >
+                  {copiedLink ? "Copied ✓" : "Copy link"}
+                </button>
+              </div>
+              <p className="text-[11px] text-warm-gray mt-2 leading-snug">
+                Players enter this code (or open your link) to add themselves — accept them below. Not on the app? Just type their name. QR coming soon.
+              </p>
+            </div>
+          )}
+
+          {joinRequests.length > 0 && (
+            <div className="space-y-2">
+              {joinRequests.map((r) => (
+                <div key={r.id} className="rounded-2xl border border-gold/40 bg-gold-soft/50 px-3.5 py-2.5 anim-rise">
+                  <div className="flex items-center justify-between gap-2">
+                    <div className="min-w-0">
+                      <b className="block text-[14px] font-semibold text-graphite truncate">{r.displayName}</b>
+                      <p className="text-[11px] text-ink-2 mt-0.5">
+                        {r.preferredSide === "L" ? "Left" : r.preferredSide === "R" ? "Right" : "Any side"} · {r.gender === "F" ? "Female" : "Male"}
+                        {r.email ? ` · ${r.email}` : ""}
+                      </p>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                      <button type="button" onClick={() => declineJoin(r.id)} className="text-[12px] font-semibold text-ink-2 rounded-full border border-line bg-surface px-3 py-1.5">
+                        Decline
+                      </button>
+                      <button type="button" onClick={() => acceptJoin(r)} className="text-[12px] font-semibold text-ivory rounded-full bg-graphite px-3 py-1.5">
+                        Add
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              ))}
+            </div>
+          )}
+
           <PlayersStep
             players={players}
             onAddSingle={addSinglePlayer}

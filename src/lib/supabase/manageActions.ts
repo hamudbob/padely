@@ -57,6 +57,17 @@ export async function addLatePlayer(input: AddLatePlayerInput): Promise<{ id: st
   return { id: data.id };
 }
 
+/**
+ * Hard-deletes a player. Safe ONLY before a session starts (the lobby), where
+ * no round/match references them yet — used to drop someone from the roster
+ * entirely rather than the "left" tombstone a live session needs. Do not call
+ * on a live session; use markPlayerLeft there.
+ */
+export async function removePlayer(playerId: string): Promise<void> {
+  const { error } = await supabase.from("players").delete().eq("id", playerId);
+  if (error) throw error;
+}
+
 /** Excludes a player from every future round (already-played rounds/scores are untouched). */
 export async function markPlayerLeft(playerId: string): Promise<void> {
   const { error } = await supabase.from("players").update({ status: "left", left_at: new Date().toISOString() }).eq("id", playerId);

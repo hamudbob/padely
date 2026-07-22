@@ -57,6 +57,16 @@ export async function signOutHost() {
   if (error) throw error;
 }
 
+/** Updates the host's display name (stored on the auth user's metadata, the
+ * same `name` set at sign-up). Returns the refreshed user. */
+export async function updateHostName(name: string) {
+  const trimmed = name.trim();
+  if (!trimmed) throw new Error("Name can't be empty.");
+  const { data, error } = await supabase.auth.updateUser({ data: { name: trimmed } });
+  if (error) throw error;
+  return data.user;
+}
+
 export async function getCurrentHost() {
   const { data, error } = await supabase.auth.getUser();
   if (error) throw error;

@@ -1,7 +1,6 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { Link } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
-import { signOutHost } from "../../lib/supabase/auth";
 import { listHostSessions, HostSessionSummary } from "../../lib/supabase/hostSessionsQueries";
 
 const FORMAT_LABELS: Record<string, string> = {
@@ -36,11 +35,9 @@ function formatSessionDate(iso: string): string {
  */
 export default function HomePage() {
   const { user } = useHostSession();
-  const navigate = useNavigate();
   const [sessions, setSessions] = useState<HostSessionSummary[] | null>(null);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
-  const [signingOut, setSigningOut] = useState(false);
 
   useEffect(() => {
     if (!user) {
@@ -55,16 +52,6 @@ export default function HomePage() {
       .finally(() => setSessionsLoading(false));
   }, [user]);
 
-  async function handleSignOut() {
-    setSigningOut(true);
-    try {
-      await signOutHost();
-      navigate(0); // reload so every hook (useHostSession etc.) resets cleanly
-    } finally {
-      setSigningOut(false);
-    }
-  }
-
   const liveSessions = (sessions ?? []).filter((s) => s.status === "live");
   const pastSessions = (sessions ?? []).filter((s) => s.status !== "live");
   const greeting = greetingFor(new Date());
@@ -78,9 +65,13 @@ export default function HomePage() {
           <span className="ml-[3px] w-[7px] h-[7px] rounded-full bg-gold inline-block" aria-hidden />
         </div>
         {user && (
-          <div className="w-9 h-9 rounded-full bg-graphite text-ivory flex items-center justify-center text-sm font-semibold uppercase">
-            {(user.email ?? "?").charAt(0)}
-          </div>
+          <Link
+            to="/profile"
+            aria-label="Your dashboard"
+            className="w-9 h-9 rounded-full bg-graphite text-ivory flex items-center justify-center text-sm font-semibold uppercase active:scale-95 transition-transform"
+          >
+            {((user.user_metadata?.name as string | undefined)?.trim() || user.email || "?").charAt(0)}
+          </Link>
         )}
       </div>
 
@@ -95,22 +86,6 @@ export default function HomePage() {
             : "Fair rotations, live scoring, real standings."
           : "Fair rotations. Real standings. Zero napkin math."}
       </p>
-
-      {/* Signed-in chip */}
-      {user && (
-        <div className="flex items-center justify-between mb-6 rounded-2xl bg-surface border border-line px-3.5 py-2.5">
-          <p className="text-[11px] text-warm-gray truncate">
-            Signed in as <span className="font-semibold text-ink-2">{user.email}</span>
-          </p>
-          <button
-            onClick={handleSignOut}
-            disabled={signingOut}
-            className="shrink-0 text-[11px] font-semibold text-ink-2 disabled:opacity-50 ml-2"
-          >
-            {signingOut ? "…" : "Sign out"}
-          </button>
-        </div>
-      )}
 
       {/* Primary actions */}
       <div className="space-y-2.5">

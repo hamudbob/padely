@@ -85,6 +85,8 @@ export interface Database {
           team_side: "A" | "B" | null;
           /** Fixed Partner's "auto-pair by position" mode only — null for every other case. */
           preferred_side: "left" | "right" | null;
+          /** Captured at self-join so a returning guest can be matched, and later linked to an account made with the same email (0005). */
+          email: string | null;
           status: "active" | "late" | "left";
           matches_played: number;
           rests: number;
@@ -98,12 +100,42 @@ export interface Database {
           gender?: "M" | "F";
           team_side?: "A" | "B" | null;
           preferred_side?: "left" | "right" | null;
+          email?: string | null;
           status?: "active" | "late" | "left";
         };
         // Partial<Row>, not Partial<Insert> — Insert omits server/lifecycle
         // fields (left_at, joined_at) that the Manage menu's "mark as left"
         // action needs to set on update, same reasoning as sessions.Update.
         Update: Partial<Database["public"]["Tables"]["players"]["Row"]>;
+        Relationships: [];
+      };
+      join_requests: {
+        Row: {
+          id: string;
+          session_id: string;
+          display_name: string;
+          gender: "M" | "F";
+          team_side: "A" | "B" | null;
+          /** Padel left/right court preference captured at join ('L'/'R'); mapped to players.preferred_side ('left'/'right') on confirm. */
+          preferred_side: "L" | "R" | null;
+          email: string | null;
+          status: "pending" | "confirmed" | "rejected";
+          player_id: string | null;
+          created_at: string;
+          decided_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          display_name: string;
+          gender?: "M" | "F";
+          team_side?: "A" | "B" | null;
+          preferred_side?: "L" | "R" | null;
+          email?: string | null;
+          status?: "pending" | "confirmed" | "rejected";
+          player_id?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["join_requests"]["Row"]>;
         Relationships: [];
       };
       pairs: {

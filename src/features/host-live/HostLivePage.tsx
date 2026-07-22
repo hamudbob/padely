@@ -6,6 +6,7 @@ import { endSession } from "../../lib/supabase/sessionActions";
 import { getSessionStandings, SessionStandings } from "../../lib/supabase/standingsQueries";
 import { getRoundHistory, RoundHistoryEntry } from "../../lib/supabase/roundHistoryQueries";
 import { renameCourt, setCourtAvailability, addLatePlayer, markPlayerLeft, restorePlayer, setRankingBasis } from "../../lib/supabase/manageActions";
+import { listJoinRequests, confirmJoinRequest, rejectJoinRequest, JoinRequest } from "../../lib/supabase/joinRequestQueries";
 import { isAutoFillFormat, scoreRangeForFormat, validateAndDeriveScore, ScoringFormat } from "../../lib/scoring/formats";
 import {
   enqueueScore,
@@ -178,6 +179,11 @@ export default function HostLivePage() {
   const [newPlayerGender, setNewPlayerGender] = useState<"M" | "F">("M");
   const [newPlayerTeamSide, setNewPlayerTeamSide] = useState<"A" | "B">("A");
 
+  // Self-service join requests (players who scanned the QR / entered the code).
+  const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
+  const [joinBusyId, setJoinBusyId] = useState<string | null>(null);
+  const [copiedLink, setCopiedLink] = useState(false);
+
   const [standings, setStandings] = useState<SessionStandings | null>(null);
   const [standingsError, setStandingsError] = useState<string | null>(null);
   const [standingsLoading, setStandingsLoading] = useState(false);
@@ -261,6 +267,12 @@ export default function HostLivePage() {
     return subscribeSyncQueue(onSyncChange);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [sessionId]);
+
+  // Refresh the pending self-service join list whenever the Manage panel opens.
+  useEffect(() => {
+    if (showManage) loadJoinRequests();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showManage, sessionId]);
   useEffect(() => {
     // Team Sparring also needs standings loaded on the Rounds tab, not just
     // Standings — the Team A vs Team B scoreboard banner is visible there
@@ -599,6 +611,52 @@ export default function HostLivePage() {
     const currentHasScores = !!currentRound && currentRound.matches.some((m) => m.status === "final");
     if (kind === "delete" || currentHasScores) setRoundConfirm(kind);
     else runRoundAction(kind);
+  }
+
+  function loadJoinRequests() {
+    if (!sessionId) return;
+    listJoinRequests(sessionId)
+      .then(setJoinRequests)
+      .catch(() => setJoinRequests([]));
+  }
+
+  async function handleConfirmJoin(request: JoinRequest) {
+    if (!sessionId) return;
+    setJoinBusyId(request.id);
+    setManageError(null);
+    try {
+      await confirmJoinRequest(sessionId, request);
+      loadJoinRequests();
+      load(); // roster now includes the new player
+    } catch (err) {
+      setManageError(err instanceof Error ? err.message : "Could not add that player.");
+    } finally {
+      setJoinBusyId(null);
+    }
+  }
+
+  async function handleRejectJoin(requestId: string) {
+    setJoinBusyId(requestId);
+    setManageError(null);
+    try {
+      await rejectJoinRequest(requestId);
+      loadJoinRequests();
+    } catch (err) {
+      setManageError(err instanceof Error ? err.message : "Could not decline that request.");
+    } finally {
+      setJoinBusyId(null);
+    }
+  }
+
+  async function handleCopyJoinLink() {
+    const link = `${window.location.origin}/join?code=${snapshot?.session.joinCode ?? ""}`;
+    try {
+      await navigator.clipboard.writeText(link);
+      setCopiedLink(true);
+      window.setTimeout(() => setCopiedLink(false), 1800);
+    } catch {
+      /* clipboard may be unavailable — the code is shown as a fallback */
+    }
   }
 
   async function handleSetRankingBasis(basis: "points_first" | "wins_first") {
@@ -1199,6 +1257,67 @@ export default function HostLivePage() {
             </div>
 
             {manageError && <p className="text-xs text-loss mb-2">{manageError}</p>}
+
+            {/* Invite players — share the code, review who's asking to join */}
+            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1.5">Invite players</p>
+            <div className="rounded-2xl border border-line bg-surface p-3.5 mb-2">
+              <div className="flex items-center justify-between gap-3">
+                <div className="min-w-0">
+                  <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray">Join code</p>
+                  <p className="font-mono tnum text-[26px] font-semibold text-graphite leading-tight tracking-[0.12em]">
+                    {snapshot.session.joinCode}
+                  </p>
+                </div>
+                <button
+                  onClick={handleCopyJoinLink}
+                  className="shrink-0 rounded-full bg-graphite text-ivory text-[12px] font-semibold px-3.5 py-2 active:scale-95 transition-transform"
+                >
+                  {copiedLink ? "Copied ✓" : "Copy link"}
+                </button>
+              </div>
+              <p className="text-[11px] text-warm-gray mt-2 leading-snug">
+                Players enter this code (or open your link) to ask to join — you confirm them below. Scannable QR is coming next.
+              </p>
+            </div>
+
+            {joinRequests.length > 0 && (
+              <div className="space-y-2 mb-2">
+                {joinRequests.map((r) => (
+                  <div key={r.id} className="rounded-2xl border border-gold/40 bg-gold-soft/50 px-3.5 py-2.5">
+                    <div className="flex items-center justify-between gap-2">
+                      <div className="min-w-0">
+                        <b className="block text-[14px] font-semibold text-graphite truncate">{r.displayName}</b>
+                        <p className="text-[11px] text-ink-2 mt-0.5">
+                          {r.preferredSide === "L" ? "Left" : r.preferredSide === "R" ? "Right" : "Any side"} · {r.gender === "F" ? "Female" : "Male"}
+                          {r.email ? ` · ${r.email}` : ""}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-1.5 shrink-0">
+                        <button
+                          onClick={() => handleRejectJoin(r.id)}
+                          disabled={joinBusyId === r.id}
+                          className="text-[12px] font-semibold text-ink-2 rounded-full border border-line bg-surface px-3 py-1.5 disabled:opacity-50"
+                        >
+                          Decline
+                        </button>
+                        <button
+                          onClick={() => handleConfirmJoin(r)}
+                          disabled={joinBusyId === r.id}
+                          className="text-[12px] font-semibold text-ivory rounded-full bg-graphite px-3 py-1.5 disabled:opacity-50"
+                        >
+                          {joinBusyId === r.id ? "…" : "Add"}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+            <p className="text-[11px] text-warm-gray mb-4">
+              {joinRequests.length === 0
+                ? "No one's waiting to join right now."
+                : `${joinRequests.length} ${joinRequests.length === 1 ? "person is" : "people are"} waiting — added players join from the next round.`}
+            </p>
 
             <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1.5">Ranking basis</p>
             <div className="flex gap-1 mb-1.5 rounded-2xl border border-line bg-surface p-1">

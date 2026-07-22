@@ -1,10 +1,12 @@
 import { Routes, Route } from "react-router-dom";
 import HomePage from "./features/home/HomePage";
 import LoginPage from "./features/auth/LoginPage";
+import ProfilePage from "./features/profile/ProfilePage";
 import RequireHost from "./features/auth/RequireHost";
 import JoinPage from "./features/join/JoinPage";
 import CreateSessionPage from "./features/create-session/CreateSessionPage";
 import HostLivePage from "./features/host-live/HostLivePage";
+import LobbyPage from "./features/lobby/LobbyPage";
 import PublicLivePage from "./features/public-live/PublicLivePage";
 import FinalSummaryPage from "./features/final-summary/FinalSummaryPage";
 
@@ -13,12 +15,28 @@ export default function App() {
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/login" element={<LoginPage />} />
+      <Route
+        path="/profile"
+        element={
+          <RequireHost>
+            <ProfilePage />
+          </RequireHost>
+        }
+      />
       <Route path="/join" element={<JoinPage />} />
       <Route
         path="/create"
         element={
           <RequireHost>
             <CreateSessionPage />
+          </RequireHost>
+        }
+      />
+      <Route
+        path="/session/:sessionId/lobby"
+        element={
+          <RequireHost>
+            <LobbyPage />
           </RequireHost>
         }
       />
