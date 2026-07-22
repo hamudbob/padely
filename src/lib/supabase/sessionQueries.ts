@@ -44,6 +44,8 @@ export interface HostLiveSnapshot {
     teamScoreMode: string | null;
     /** Set only when partners are locked for the session — 'round_robin' | 'rank_based'. Null otherwise. */
     fixedPartnerStyle: string | null;
+    /** 'points_first' | 'wins_first' — what Mexicano/Mix-Mexicano pairing ranks on, and the Standings rank badge. Switchable mid-session from Manage. */
+    rankingBasis: string;
   };
   /** Every player in the session (regardless of round), for the Players tab. */
   roster: HostLiveRosterEntry[];
@@ -75,7 +77,7 @@ export async function getHostLiveSnapshot(sessionId: string): Promise<HostLiveSn
   ] = await Promise.all([
     supabase
       .from("sessions")
-      .select("id, name, format, scoring_format, join_code, public_token, status, team_score_mode, fixed_partner_style")
+      .select("id, name, format, scoring_format, join_code, public_token, status, team_score_mode, fixed_partner_style, ranking_basis")
       .eq("id", sessionId)
       .single(),
     supabase.from("courts").select("id, display_name, available").eq("session_id", sessionId).order("ordinal", { ascending: true }),
@@ -136,6 +138,7 @@ export async function getHostLiveSnapshot(sessionId: string): Promise<HostLiveSn
         status: session.status,
         teamScoreMode: session.team_score_mode,
         fixedPartnerStyle: session.fixed_partner_style,
+        rankingBasis: session.ranking_basis,
       },
       roster,
       courts: courtList,
@@ -196,6 +199,7 @@ export async function getHostLiveSnapshot(sessionId: string): Promise<HostLiveSn
       status: session.status,
       teamScoreMode: session.team_score_mode,
       fixedPartnerStyle: session.fixed_partner_style,
+      rankingBasis: session.ranking_basis,
     },
     roster,
     courts: courtList,

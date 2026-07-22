@@ -68,3 +68,16 @@ export async function restorePlayer(playerId: string): Promise<void> {
   const { error } = await supabase.from("players").update({ status: "active", left_at: null }).eq("id", playerId);
   if (error) throw error;
 }
+
+/**
+ * Switches what future Mexicano / Mix-Mexicano rounds rank on when they pair
+ * players, and what the Standings rank badge reflects: 'points_first' (order
+ * by total points) or 'wins_first' (order by wins). Takes effect on the NEXT
+ * generated round — rounds already drawn are untouched, exactly like every
+ * other Manage action. The Standings sort toggle is display-only and separate;
+ * this changes the session's official basis.
+ */
+export async function setRankingBasis(sessionId: string, basis: "points_first" | "wins_first"): Promise<void> {
+  const { error } = await supabase.from("sessions").update({ ranking_basis: basis }).eq("id", sessionId);
+  if (error) throw error;
+}

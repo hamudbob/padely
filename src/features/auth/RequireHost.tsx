@@ -13,23 +13,23 @@ export default function RequireHost({ children }: { children: ReactNode }) {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-white px-4 py-8">
-        <p className="text-sm text-slate-400">Checking your session…</p>
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+        <p className="text-sm text-warm-gray">Checking your session…</p>
       </div>
     );
   }
 
   if (!user) {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-white px-4 py-8">
-        <h1 className="text-lg font-extrabold mb-2">You need to log in first</h1>
-        <p className="text-sm text-slate-500 mb-4">
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+        <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1] mb-2">You need to log in first</h1>
+        <p className="text-[13.5px] text-ink-2 mb-4 leading-relaxed">
           Your session isn't active right now — this can happen if you signed up but haven't confirmed your email yet, or
           if you've been logged out.
         </p>
         <Link
           to="/login"
-          className="block text-center rounded-xl px-4 py-3 font-bold text-white bg-gradient-to-br from-accent to-accent-dark"
+          className="flex items-center justify-center gap-2 rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform"
         >
           Go to Log in
         </Link>

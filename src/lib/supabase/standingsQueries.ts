@@ -6,11 +6,22 @@ import {
   RankingBasis,
   StandingRow,
 } from "../scoring/standings";
+import { scoreRangeForFormat, ScoringFormat } from "../scoring/formats";
 
 export interface StandingsRow extends StandingRow {
   playerName: string;
   /** Team Sparring only — which fixed side this player is on; null for every other format. */
   teamSide: "A" | "B" | null;
+  /** Points total + neutral rest compensation: for every match a subject is
+   * short of the highest match count in the session, floor(gameTarget/2)
+   * points are added — so resting more (and thus playing fewer games) is not
+   * a scoreboard penalty. Equals totalPoints when everyone played the same
+   * number of games (no-op when the field is balanced). */
+  compensatedPoints: number;
+  /** Raw points ÷ matches played — the "Point avg" sort. 0 when no matches. */
+  pointAvg: number;
+  /** Wins ÷ matches played, 0..1 — the "Win %" sort. 0 when no matches. */
+  winPct: number;
 }
 
 export interface SessionStandings {
@@ -36,7 +47,7 @@ export async function getSessionStandings(sessionId: string): Promise<SessionSta
     { data: rounds, error: roundsError },
     { data: adjustmentRows, error: adjustmentsError },
   ] = await Promise.all([
-    supabase.from("sessions").select("ranking_basis, format, fixed_partner_style").eq("id", sessionId).single(),
+    supabase.from("sessions").select("ranking_basis, format, fixed_partner_style, scoring_format").eq("id", sessionId).single(),
     supabase.from("players").select("id, display_name, team_side").eq("session_id", sessionId).eq("status", "active"),
     supabase.from("rounds").select("id").eq("session_id", sessionId),
     supabase.from("adjustments").select("player_id, pair_id, amount").eq("session_id", sessionId),
@@ -150,10 +161,21 @@ export async function getSessionStandings(sessionId: string): Promise<SessionSta
 
   const subjectIds = isFixedPartner ? pairIds : activePlayerIds;
 
-  const rows: StandingsRow[] = computeStandings(subjectIds, completedMatches, adjustments, session.ranking_basis).map((r) => ({
+  // Neutral rest compensation is a fixed constant per scoring format —
+  // half the game's target, floored (21→10, 4-game→2, 5-game→2, race-4→2,
+  // race-6→3). It stands in for "an even, average game" for each match a
+  // subject didn't play, so a rester's Points total stays comparable.
+  const neutralRestPoints = Math.floor(scoreRangeForFormat(session.scoring_format as ScoringFormat).max / 2);
+  const computed = computeStandings(subjectIds, completedMatches, adjustments, session.ranking_basis);
+  const maxMatches = computed.reduce((mx, r) => Math.max(mx, r.matchesPlayed), 0);
+
+  const rows: StandingsRow[] = computed.map((r) => ({
     ...r,
     playerName: isFixedPartner ? pairLabelById.get(r.subjectId) ?? "?" : nameById.get(r.subjectId) ?? "?",
     teamSide: isFixedPartner ? null : teamSideById.get(r.subjectId) ?? null,
+    compensatedPoints: r.totalPoints + Math.max(0, maxMatches - r.matchesPlayed) * neutralRestPoints,
+    pointAvg: r.matchesPlayed > 0 ? r.totalPoints / r.matchesPlayed : 0,
+    winPct: r.matchesPlayed > 0 ? r.wins / r.matchesPlayed : 0,
   }));
 
   return { rankingBasis: session.ranking_basis, rows };

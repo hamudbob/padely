@@ -42,7 +42,7 @@ export interface GenerateNextRoundResult {
  * the server-side backstop), and refuses to persist a round with zero
  * playable courts rather than silently saving an empty one.
  */
-export async function generateNextRound(sessionId: string): Promise<GenerateNextRoundResult> {
+export async function generateNextRound(sessionId: string, seedOverride?: number): Promise<GenerateNextRoundResult> {
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
     .select("id, format, scoring_format, ranking_basis, scheduling_seed, status, fixed_partner_style")
@@ -238,7 +238,10 @@ export async function generateNextRound(sessionId: string): Promise<GenerateNext
   );
 
   const newSequence = latestRound.sequence + 1;
-  const roundSeed = session.scheduling_seed + newSequence;
+  // Normal path: a deterministic seed so a given session/round always draws
+  // the same way. seedOverride is used by "Randomize" (regenerateCurrentRound)
+  // to force a fresh, different-but-still-fair arrangement of the same round.
+  const roundSeed = seedOverride ?? session.scheduling_seed + newSequence;
   const rng = mulberry32(roundSeed);
 
   const standingsLookup = { rankValue: (id: PlayerId) => rankValueById.get(id) ?? 0 };
@@ -408,4 +411,68 @@ export async function generateNextRound(sessionId: string): Promise<GenerateNext
   if (participantsInsertError) throw participantsInsertError;
 
   return { roundId: newRoundId, sequence: newSequence };
+}
+
+/**
+ * Loads a session's rounds (oldest→newest) and returns the latest + the one
+ * before it. Used by delete/regenerate, which both only ever touch the live
+ * (latest) round and need the prior round to fall back to. Throws if there's
+ * only one round, since neither op is valid on the first draw (there'd be no
+ * prior round to regenerate from, and deleting it would leave a live session
+ * with no rounds at all).
+ */
+async function loadLatestTwoRounds(sessionId: string): Promise<{ latestId: string; latestSeq: number; prevId: string }> {
+  const { data: rounds, error } = await supabase
+    .from("rounds")
+    .select("id, sequence")
+    .eq("session_id", sessionId)
+    .order("sequence", { ascending: true });
+  if (error) throw error;
+  if (!rounds || rounds.length === 0) throw new Error("This session has no rounds yet.");
+  if (rounds.length < 2) {
+    throw new Error("This is the first round — there's nothing before it to fall back to. Add or remove players and it'll apply on the next round.");
+  }
+  const latest = rounds[rounds.length - 1];
+  const prev = rounds[rounds.length - 2];
+  return { latestId: latest.id, latestSeq: latest.sequence, prevId: prev.id };
+}
+
+/**
+ * Deletes the current (latest) round entirely — its matches, participants and
+ * rests all cascade away via FK (0001_init.sql) — and hands the "live round"
+ * role back to the previous round by flipping it from 'scored' to
+ * 'in_progress'. The host lands back on that round, able to re-score it or
+ * generate the next one again.
+ */
+export async function deleteCurrentRound(sessionId: string): Promise<void> {
+  const { latestId, prevId } = await loadLatestTwoRounds(sessionId);
+  const { error: deleteError } = await supabase.from("rounds").delete().eq("id", latestId);
+  if (deleteError) throw deleteError;
+  const { error: reopenError } = await supabase.from("rounds").update({ status: "in_progress" }).eq("id", prevId);
+  if (reopenError) throw reopenError;
+}
+
+/**
+ * Redraws the current (latest) round in place: deletes it, then regenerates a
+ * round at the same sequence from the CURRENT active roster and courts.
+ *
+ *  - "Refresh" (randomize = false): deterministic redraw. Same seed as before,
+ *    so if nothing changed the draw is identical — but a player marked as left
+ *    (or a newly added one, or a court toggled) after the round was generated
+ *    is now picked up, since generation re-reads the live roster.
+ *  - "Randomize" (randomize = true): a fresh random seed, so the same fair
+ *    engine (which already favours the least-played to play and avoids
+ *    back-to-back rests) produces a different, "colourful" arrangement.
+ *
+ * Any scores already entered in the current round are discarded with it — the
+ * caller confirms that first.
+ */
+export async function regenerateCurrentRound(sessionId: string, opts: { randomize: boolean }): Promise<GenerateNextRoundResult> {
+  const { latestId } = await loadLatestTwoRounds(sessionId);
+  const { error: deleteError } = await supabase.from("rounds").delete().eq("id", latestId);
+  if (deleteError) throw deleteError;
+  // A large, non-negative integer seed keeps mulberry32 well-distributed. Vary
+  // it only for randomize; refresh reuses generateNextRound's deterministic seed.
+  const randomSeed = opts.randomize ? Math.floor(Math.random() * 2_000_000_000) : undefined;
+  return generateNextRound(sessionId, randomSeed);
 }

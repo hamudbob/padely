@@ -512,60 +512,63 @@ export default function CreateSessionPage() {
   }
 
   return (
-    <div className="mx-auto max-w-sm min-h-screen bg-white px-4 py-8">
-      <h1 className="text-xl font-extrabold mb-1">Create Session</h1>
-      <p className="text-xs text-slate-500 mb-4">Step {step + 1} of {STEPS.length}: {STEPS[step]}</p>
+    <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+      <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1] mb-1">Create session</h1>
+      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-4">Step {step + 1} of {STEPS.length}: {STEPS[step]}</p>
 
-      <div className="flex justify-between mb-5">
+      <div className="flex gap-1.5 mb-5">
         {STEPS.map((s, i) => (
           <button
             key={s}
             onClick={() => setStep(i)}
-            className={`flex-1 text-center text-[9px] font-bold ${i === step ? "text-accent-dark" : "text-slate-400"}`}
-          >
-            <div
-              className={`w-5 h-5 mx-auto mb-1 rounded-full flex items-center justify-center text-[9px] ${
-                i === step ? "bg-accent text-white" : i < step ? "border border-accent text-accent-dark" : "border border-slate-300"
-              }`}
-            >
-              {i + 1}
-            </div>
-            {s}
-          </button>
+            aria-label={s}
+            className={`flex-1 h-1 rounded-full ${i < step ? "bg-gold" : i === step ? "bg-graphite" : "bg-stone"}`}
+          />
         ))}
       </div>
 
       {step === 0 && (
         <div className="space-y-2">
-          <label className="block text-xs font-bold uppercase text-slate-500">Session name</label>
+          <label className="block text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray">Session name</label>
           <input
-            className="w-full rounded-xl border border-slate-300 px-3 py-2"
+            className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Tuesday Night Padel"
             maxLength={80}
           />
-          <p className="text-[10px] text-slate-400">2-80 characters, required.</p>
+          <p className="text-[11px] text-warm-gray">2-80 characters, required.</p>
         </div>
       )}
 
       {step === 1 && (
-        <div className="space-y-2">
+        <div>
+          <h2 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1] mb-1">How do you want to play?</h2>
+          <p className="text-[13.5px] text-ink-2 leading-relaxed mb-5">Pick a format. We'll handle the rotations so every game stays fair.</p>
           {FORMAT_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               disabled={!opt.enabled}
               onClick={() => setFormat(opt.value)}
-              className={`w-full text-left rounded-xl border px-3 py-2 ${
+              className={`w-full text-left rounded-2xl border px-4 py-3.5 mb-2.5 flex items-center justify-between gap-3 ${
                 !opt.enabled
-                  ? "border-dashed border-slate-200 text-slate-300 cursor-not-allowed"
+                  ? "border-dashed border-line text-warm-gray/50 cursor-not-allowed"
                   : format === opt.value
-                    ? "border-accent bg-accent-soft text-accent-dark"
-                    : "border-slate-300"
+                    ? "border-graphite bg-graphite"
+                    : "border-line bg-surface"
               }`}
             >
-              <div className="font-bold text-sm">{opt.label}</div>
-              <div className="text-[10px] opacity-80">{opt.sub}</div>
+              <div>
+                <div className={`text-[15px] font-semibold ${format === opt.value ? "text-ivory" : "text-graphite"}`}>{opt.label}</div>
+                <div className={`text-[11.5px] mt-0.5 leading-snug ${format === opt.value ? "text-ivory/60" : "text-warm-gray"}`}>{opt.sub}</div>
+              </div>
+              <span
+                className={`w-[22px] h-[22px] rounded-full flex items-center justify-center shrink-0 ${
+                  format === opt.value ? "bg-gold text-graphite text-[13px] font-bold" : "border-[1.5px] border-stone"
+                }`}
+              >
+                {format === opt.value ? "✓" : ""}
+              </span>
             </button>
           ))}
         </div>
@@ -636,7 +639,7 @@ export default function CreateSessionPage() {
         <div className="space-y-3">
           {isTeamSparring && (
             <div>
-              <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Team score</label>
+              <label className="block text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1">Team score</label>
               <div className="space-y-2">
                 {TEAM_SCORE_MODE_OPTIONS.map((opt) => {
                   const disabled = opt.value === "by_round" && !canUseByRound;
@@ -645,16 +648,16 @@ export default function CreateSessionPage() {
                       key={opt.value}
                       disabled={disabled}
                       onClick={() => setTeamScoreMode(opt.value)}
-                      className={`w-full text-left rounded-xl border px-3 py-2 ${
+                      className={`w-full text-left rounded-2xl border px-4 py-3 ${
                         disabled
-                          ? "border-dashed border-slate-200 text-slate-300 cursor-not-allowed"
+                          ? "border-dashed border-line text-warm-gray/50 cursor-not-allowed"
                           : teamScoreMode === opt.value
-                            ? "border-accent bg-accent-soft text-accent-dark"
-                            : "border-slate-300"
+                            ? "border-graphite bg-graphite"
+                            : "border-line bg-surface"
                       }`}
                     >
-                      <div className="font-bold text-sm">{opt.label}</div>
-                      <div className="text-[10px] opacity-80">
+                      <div className={`font-semibold text-sm ${teamScoreMode === opt.value && !disabled ? "text-ivory" : "text-ink"}`}>{opt.label}</div>
+                      <div className={`text-[11px] ${teamScoreMode === opt.value && !disabled ? "text-ivory/60" : "text-warm-gray"}`}>
                         {disabled ? `Needs an odd court count (3, 5, 7…) — you have ${courtCount}.` : opt.description}
                       </div>
                     </button>
@@ -664,14 +667,14 @@ export default function CreateSessionPage() {
             </div>
           )}
           <div>
-            <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Scoring format</label>
+            <label className="block text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1">Scoring format</label>
             <div className="space-y-2">
               {SCORING_OPTIONS.map((opt) => (
                 <button
                   key={opt.value}
                   onClick={() => setScoringFormat(opt.value)}
-                  className={`w-full text-left rounded-xl border px-3 py-2 text-sm font-bold ${
-                    scoringFormat === opt.value ? "border-accent bg-accent-soft text-accent-dark" : "border-slate-300"
+                  className={`w-full text-left rounded-2xl border px-4 py-3 text-sm font-semibold ${
+                    scoringFormat === opt.value ? "border-graphite bg-graphite text-ivory" : "border-line bg-surface text-ink"
                   }`}
                 >
                   {opt.label}
@@ -680,20 +683,20 @@ export default function CreateSessionPage() {
             </div>
           </div>
           <div>
-            <label className="block text-xs font-bold uppercase text-slate-500 mb-1">Ranking basis</label>
-            <div className="flex bg-slate-100 rounded-xl p-1">
+            <label className="block text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1">Ranking basis</label>
+            <div className="flex rounded-full bg-surface border border-line p-1">
               {(["points_first", "wins_first"] as const).map((v) => (
                 <button
                   key={v}
                   onClick={() => setRankingBasis(v)}
-                  className={`flex-1 py-2 rounded-lg text-xs font-bold ${rankingBasis === v ? "bg-white shadow" : "text-slate-500"}`}
+                  className={`flex-1 rounded-full py-2 text-[12.5px] font-semibold ${rankingBasis === v ? "bg-graphite text-ivory" : "text-warm-gray"}`}
                 >
                   {v === "points_first" ? "Points first" : "Wins first"}
                 </button>
               ))}
             </div>
           </div>
-          <p className="text-[10px] text-slate-400">
+          <p className="text-[11px] text-warm-gray">
             Golden point at deuce (0/15/30/40, next point wins at 40-40) applies to every format.
           </p>
         </div>
@@ -727,14 +730,14 @@ export default function CreateSessionPage() {
           <button
             onClick={() => setStep((s) => Math.max(0, s - 1))}
             disabled={step === 0}
-            className="flex-1 rounded-xl border border-slate-300 py-2 font-bold text-sm disabled:opacity-40"
+            className="flex-1 flex items-center justify-center rounded-full px-4 py-3 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform disabled:opacity-40"
           >
             Back
           </button>
           <button
             onClick={() => setStep((s) => Math.min(STEPS.length - 1, s + 1))}
             disabled={!canProceed}
-            className="flex-1 rounded-xl py-2 font-bold text-sm text-white bg-gradient-to-br from-accent to-accent-dark disabled:opacity-40"
+            className="flex-1 flex items-center justify-center rounded-full px-4 py-3 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-40"
           >
             Next
           </button>
@@ -778,16 +781,16 @@ function PlayersStep({
 
   return (
     <div className="space-y-3">
-      <div className="flex bg-slate-100 rounded-xl p-1">
+      <div className="flex rounded-full bg-surface border border-line p-1">
         <button
           onClick={() => setMode("single")}
-          className={`flex-1 py-2 rounded-lg text-xs font-bold ${mode === "single" ? "bg-white shadow" : "text-slate-500"}`}
+          className={`flex-1 rounded-full py-2 text-[12.5px] font-semibold ${mode === "single" ? "bg-graphite text-ivory" : "text-warm-gray"}`}
         >
           Single Add
         </button>
         <button
           onClick={() => setMode("bulk")}
-          className={`flex-1 py-2 rounded-lg text-xs font-bold ${mode === "bulk" ? "bg-white shadow" : "text-slate-500"}`}
+          className={`flex-1 rounded-full py-2 text-[12.5px] font-semibold ${mode === "bulk" ? "bg-graphite text-ivory" : "text-warm-gray"}`}
         >
           Bulk Add
         </button>
@@ -796,7 +799,7 @@ function PlayersStep({
       {mode === "single" ? (
         <div className="flex gap-2">
           <input
-            className="flex-1 rounded-xl border border-slate-300 px-3 py-2 text-sm"
+            className="flex-1 rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-sm text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
             placeholder="Player name…"
             value={singleName}
             onChange={(e) => setSingleName(e.target.value)}
@@ -812,7 +815,7 @@ function PlayersStep({
               onAddSingle(singleName);
               setSingleName("");
             }}
-            className="px-3 rounded-xl bg-ink text-white text-sm font-bold"
+            className="px-4 rounded-full bg-graphite text-ivory text-sm font-semibold"
           >
             + Add
           </button>
@@ -820,7 +823,7 @@ function PlayersStep({
       ) : (
         <div className="space-y-2">
           <textarea
-            className="w-full rounded-xl border border-slate-300 px-3 py-2 text-sm"
+            className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-sm text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
             rows={5}
             placeholder={"One name per line\nOscar\nPriya\nQuinn"}
             value={bulkText}
@@ -831,7 +834,7 @@ function PlayersStep({
               onAddBulk(bulkText);
               setBulkText("");
             }}
-            className="w-full rounded-xl py-2 font-bold text-sm text-white bg-gradient-to-br from-accent to-accent-dark"
+            className="w-full flex items-center justify-center rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform"
           >
             Add all lines as players
           </button>
@@ -839,30 +842,30 @@ function PlayersStep({
       )}
 
       <div>
-        <p className="text-xs font-bold uppercase text-slate-500 mb-1">
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1">
           Players ({players.length}) — tap a name to toggle M/F
           {isTeamSparring ? ", tap the A/B chip to switch teams" : ""}
           {isFixedPartner ? ", tap the L/R chip for their preferred side" : ""}
         </p>
         {isTeamSparring && (
-          <p className="text-[10px] font-bold text-accent-dark mb-2">
-            Team A: {teamACount} players · Team B: {teamBCount} players — new players auto-balance onto whichever team is smaller.
+          <p className="text-[11px] font-semibold text-ink-2 mb-2">
+            Team A: <span className="font-mono tnum">{teamACount}</span> players · Team B: <span className="font-mono tnum">{teamBCount}</span> players — new players auto-balance onto whichever team is smaller.
           </p>
         )}
         {isFixedPartner && (
-          <p className="text-[10px] text-slate-400 mb-2">
+          <p className="text-[11px] text-warm-gray mb-2">
             Preferred side (drive/right or revés/left) only matters if you use "Auto (by side)" pairing below — every other
             pairing mode ignores it.
           </p>
         )}
         <div className="space-y-2">
           {players.map((p) => (
-            <div key={p.tempId} className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2">
+            <div key={p.tempId} className="flex items-center justify-between rounded-2xl border border-line bg-surface px-3 py-2">
               <div className="flex items-center gap-2">
-                <button onClick={() => onToggleGender(p.tempId)} className="flex items-center gap-2 text-sm font-bold">
+                <button onClick={() => onToggleGender(p.tempId)} className="flex items-center gap-2 text-sm font-semibold text-ink">
                   <span
-                    className={`w-4 h-4 rounded-full text-[9px] font-bold text-white flex items-center justify-center ${
-                      p.gender === "M" ? "bg-blue-500" : "bg-pink-500"
+                    className={`w-4 h-4 rounded-full text-[10px] font-bold flex items-center justify-center ${
+                      p.gender === "M" ? "bg-graphite text-ivory" : "bg-gold text-graphite"
                     }`}
                   >
                     {p.gender}
@@ -872,8 +875,8 @@ function PlayersStep({
                 {isTeamSparring && (
                   <button
                     onClick={() => onToggleTeamSide(p.tempId)}
-                    className={`text-[9px] font-bold rounded px-1.5 py-0.5 ${
-                      p.teamSide === "B" ? "bg-amber-100 text-amber-700" : "bg-sky-100 text-sky-700"
+                    className={`text-[10px] font-bold rounded px-1.5 py-0.5 ${
+                      p.teamSide === "B" ? "bg-gold-soft text-gold-ink border border-gold/30" : "bg-graphite text-ivory"
                     }`}
                   >
                     Team {p.teamSide ?? "A"}
@@ -882,19 +885,19 @@ function PlayersStep({
                 {isFixedPartner && (
                   <button
                     onClick={() => onTogglePreferredSide(p.tempId)}
-                    className="text-[9px] font-bold rounded px-1.5 py-0.5 bg-slate-100 text-slate-600"
+                    className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-surface-2 border border-line text-ink-2"
                   >
                     {(p.preferredSide ?? "right") === "left" ? "Left" : "Right"}
                   </button>
                 )}
               </div>
-              <button onClick={() => onRemove(p.tempId)} className="text-slate-400 text-sm">
+              <button onClick={() => onRemove(p.tempId)} className="text-warm-gray text-sm">
                 ✕
               </button>
             </div>
           ))}
         </div>
-        <p className="text-[10px] text-slate-400 mt-2">
+        <p className="text-[11px] text-warm-gray mt-2">
           Minimum 4 players. Gender defaults to Male
           {needsGenderMix
             ? " — set it accurately here, since this format keeps every team one man + one woman."
@@ -920,15 +923,15 @@ function FixedPartnerToggle({
   onToggle: () => void;
 }) {
   return (
-    <div className={`rounded-xl border px-3 py-3 ${available ? "border-slate-300" : "border-dashed border-slate-200"}`}>
+    <div className={`rounded-2xl border bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(13,13,13,0.04)] ${available ? "border-line" : "border-dashed border-line"}`}>
       <button
         onClick={() => available && onToggle()}
         disabled={!available}
         className="w-full flex items-center justify-between text-left disabled:cursor-not-allowed"
       >
         <div>
-          <div className={`font-bold text-sm ${available ? "" : "text-slate-300"}`}>Fixed Partner</div>
-          <div className={`text-[10px] ${available ? "text-slate-500" : "text-slate-300"}`}>
+          <div className={`font-semibold text-sm ${available ? "text-ink" : "text-warm-gray/60"}`}>Fixed Partner</div>
+          <div className="text-[11px] text-warm-gray">
             {available
               ? "Lock partners for the whole session — only opponents rotate."
               : "Only available with Americano or Mexicano as the base format."}
@@ -936,11 +939,11 @@ function FixedPartnerToggle({
         </div>
         <div
           className={`w-10 h-6 rounded-full shrink-0 ml-3 relative transition-colors ${
-            enabled ? "bg-accent" : available ? "bg-slate-300" : "bg-slate-200"
+            enabled ? "bg-graphite" : available ? "bg-stone" : "bg-stone/60"
           }`}
         >
           <div
-            className={`absolute top-0.5 w-5 h-5 rounded-full bg-white shadow transition-transform ${
+            className={`absolute top-0.5 w-5 h-5 rounded-full bg-surface shadow transition-transform ${
               enabled ? "translate-x-4" : "translate-x-0.5"
             }`}
           />
@@ -984,14 +987,14 @@ function FixedPartnerPairingStep({
   return (
     <div className="space-y-3">
       <div>
-        <p className="text-xs font-bold uppercase text-slate-500 mb-1">Pairing</p>
-        <div className="flex bg-slate-100 rounded-xl p-1">
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1">Pairing</p>
+        <div className="flex rounded-full bg-surface border border-line p-1">
           {MODE_OPTIONS.map((opt) => (
             <button
               key={opt.value}
               onClick={() => onSetPairingMode(opt.value)}
-              className={`flex-1 py-2 rounded-lg text-[10px] font-bold ${
-                pairingMode === opt.value ? "bg-white shadow" : "text-slate-500"
+              className={`flex-1 rounded-full py-2 text-[11px] font-semibold ${
+                pairingMode === opt.value ? "bg-graphite text-ivory" : "text-warm-gray"
               }`}
             >
               {opt.label}
@@ -1002,7 +1005,7 @@ function FixedPartnerPairingStep({
 
       {pairingMode === "manual" ? (
         <div className="space-y-2">
-          <p className="text-[10px] text-slate-400">
+          <p className="text-[11px] text-warm-gray">
             Tap a player, then tap who they're partnering with. Already-paired players are greyed out — unpair them below first
             to change a pairing.
           </p>
@@ -1012,12 +1015,12 @@ function FixedPartnerPairingStep({
                 key={p.tempId}
                 onClick={() => onTapPlayer(p.tempId)}
                 disabled={pairedTempIds.has(p.tempId)}
-                className={`rounded-lg border px-2 py-1 text-xs font-bold ${
+                className={`rounded-lg border px-2 py-1 text-xs font-semibold ${
                   pairedTempIds.has(p.tempId)
-                    ? "border-slate-200 text-slate-300 cursor-not-allowed"
+                    ? "border-dashed border-line text-warm-gray/50 cursor-not-allowed"
                     : manualPairPending === p.tempId
-                      ? "border-accent bg-accent text-white"
-                      : "border-slate-300"
+                      ? "border-graphite bg-graphite text-ivory"
+                      : "border-line bg-surface text-ink"
                 }`}
               >
                 {p.name}
@@ -1026,30 +1029,30 @@ function FixedPartnerPairingStep({
           </div>
         </div>
       ) : (
-        <button onClick={onShuffle} className="w-full rounded-xl border border-slate-300 py-2 text-xs font-bold">
+        <button onClick={onShuffle} className="w-full flex items-center justify-center rounded-full px-4 py-3 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform">
           🔀 Shuffle pairs again
         </button>
       )}
 
       <div>
-        <p className="text-xs font-bold uppercase text-slate-500 mb-1">
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1">
           Pairs ({resolvedPairs.length})
           {pairingMode !== "manual" ? " — auto-generated, updates automatically if the roster changes" : ""}
         </p>
         {resolvedPairs.length === 0 ? (
-          <p className="text-xs text-slate-400">No pairs yet.</p>
+          <p className="text-xs text-warm-gray">No pairs yet.</p>
         ) : (
           <div className="space-y-1.5">
             {resolvedPairs.map((pair) => (
               <div
                 key={pair.pairId}
-                className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-xs font-semibold"
+                className="flex items-center justify-between rounded-2xl border border-line bg-surface px-3 py-2 text-xs font-semibold text-ink"
               >
                 <span>
                   {nameByTempId.get(pair.playerA) ?? "?"} & {nameByTempId.get(pair.playerB) ?? "?"}
                 </span>
                 {pairingMode === "manual" && (
-                  <button onClick={() => onUnpair(pair.pairId)} className="text-slate-400">
+                  <button onClick={() => onUnpair(pair.pairId)} className="text-warm-gray">
                     ✕
                   </button>
                 )}
@@ -1058,7 +1061,7 @@ function FixedPartnerPairingStep({
           </div>
         )}
         {unpairedPlayerIds.length > 0 && (
-          <p className="text-[10px] text-amber-800 bg-amber-50 border border-amber-300 rounded-lg px-2 py-1.5 mt-2">
+          <p className="text-[11px] text-gold-ink bg-gold-soft border border-gold/30 rounded-lg px-2 py-1.5 mt-2">
             {unpairedPlayerIds.length} player{unpairedPlayerIds.length > 1 ? "s" : ""} not yet paired —{" "}
             {unpairedPlayerIds.map((id) => nameByTempId.get(id) ?? "?").join(", ")} won't be scheduled until paired.
             {pairingMode !== "manual" && " An odd total player count always leaves exactly one out."}
@@ -1112,18 +1115,18 @@ function CourtsStep({
   return (
     <div className="space-y-3">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-bold uppercase text-slate-500">Court count</span>
+        <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray">Court count</span>
         <div className="flex items-center gap-3">
           <button
             onClick={() => setCourtCount(Math.max(1, courtCount - 1))}
-            className="w-7 h-7 rounded-lg border border-slate-300 font-bold"
+            className="w-8 h-8 rounded-full border border-line text-ink font-semibold"
           >
             −
           </button>
-          <b>{courtCount}</b>
+          <b className="font-mono tnum text-ink">{courtCount}</b>
           <button
             onClick={() => setCourtCount(Math.min(6, courtCount + 1))}
-            className="w-7 h-7 rounded-lg border border-slate-300 font-bold"
+            className="w-8 h-8 rounded-full border border-line text-ink font-semibold"
           >
             +
           </button>
@@ -1132,10 +1135,10 @@ function CourtsStep({
 
       {isTeamSparring && (
         <div
-          className={`rounded-xl border px-3 py-2 text-xs font-semibold ${
+          className={`rounded-2xl border px-4 py-3 text-xs font-semibold ${
             courtCount <= maxCourtsByTeamBalance
-              ? "border-accent bg-accent-soft text-accent-dark"
-              : "border-amber-400 bg-amber-50 text-amber-800"
+              ? "border-line bg-surface-2 text-ink-2"
+              : "border-gold/40 bg-gold-soft text-gold-ink"
           }`}
         >
           Team A: {teamACount} players · Team B: {teamBCount} players
@@ -1145,7 +1148,7 @@ function CourtsStep({
           {courtCount > maxCourtsByTeamBalance && maxCourtsByTeamBalance >= 1 && (
             <button
               onClick={() => setCourtCount(maxCourtsByTeamBalance)}
-              className="block mt-2 w-full rounded-lg bg-white border border-amber-400 py-1.5 font-bold"
+              className="mt-2 w-full flex items-center justify-center rounded-full px-4 py-2 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform"
             >
               Reduce to {maxCourtsByTeamBalance} court{maxCourtsByTeamBalance === 1 ? "" : "s"}
             </button>
@@ -1157,11 +1160,11 @@ function CourtsStep({
       )}
 
       {needsUpfrontSchedule && (
-        <div className="rounded-xl border border-slate-200 px-3 py-2">
+        <div className="rounded-2xl border border-line bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
           <div className="flex items-center justify-between">
             <div>
-              <span className="text-xs font-bold uppercase text-slate-500 block">Rounds</span>
-              <span className="text-[10px] text-slate-400">
+              <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray block">Rounds</span>
+              <span className="text-[11px] text-warm-gray">
                 {roundCountTouched
                   ? "Custom — overriding the auto-calculated schedule length."
                   : isTeamSparring
@@ -1174,21 +1177,21 @@ function CourtsStep({
             <div className="flex items-center gap-3 shrink-0 ml-2">
               <button
                 onClick={() => onChangeRoundCount(Math.max(1, roundCount - 1))}
-                className="w-7 h-7 rounded-lg border border-slate-300 font-bold"
+                className="w-8 h-8 rounded-full border border-line text-ink font-semibold"
               >
                 −
               </button>
-              <b>{roundCount}</b>
+              <b className="font-mono tnum text-ink">{roundCount}</b>
               <button
                 onClick={() => onChangeRoundCount(Math.min(30, roundCount + 1))}
-                className="w-7 h-7 rounded-lg border border-slate-300 font-bold"
+                className="w-8 h-8 rounded-full border border-line text-ink font-semibold"
               >
                 +
               </button>
             </div>
           </div>
           {roundCountTouched && roundCount !== recommendedRoundCount && (
-            <button onClick={onResetRoundCount} className="mt-2 text-[10px] font-bold text-accent-dark underline">
+            <button onClick={onResetRoundCount} className="mt-2 text-[11px] font-semibold text-gold-ink underline">
               Reset to auto-calculated ({recommendedRoundCount})
             </button>
           )}
@@ -1196,7 +1199,7 @@ function CourtsStep({
       )}
 
       {courtsOk ? (
-        <div className="rounded-xl border border-accent bg-accent-soft text-accent-dark text-xs font-bold px-3 py-2">
+        <div className="rounded-2xl border border-win/30 bg-win-soft text-win text-xs font-semibold px-4 py-3">
           ✓ Enough players for {courtCount} court{courtCount > 1 ? "s" : ""} ({playerCount} active, {minPlayersNeeded} needed).
         </div>
       ) : playerCount < minPlayersNeeded ? (
@@ -1204,12 +1207,12 @@ function CourtsStep({
         // players) is already explained by the team-balance panel above —
         // this generic panel only covers the plain "not enough players at
         // all" case, so the two messages never contradict each other.
-        <div className="rounded-xl border border-amber-400 bg-amber-50 text-amber-800 text-xs font-semibold px-3 py-2">
+        <div className="rounded-2xl border border-gold/40 bg-gold-soft text-gold-ink text-xs font-semibold px-4 py-3">
           {courtCount} courts need {minPlayersNeeded} players (4 per court) — you have {playerCount}, short by{" "}
           {minPlayersNeeded - playerCount}.
           <button
             onClick={() => setCourtCount(suggestedCourts)}
-            className="block mt-2 w-full rounded-lg bg-white border border-amber-400 py-1.5 font-bold"
+            className="mt-2 w-full flex items-center justify-center rounded-full px-4 py-2 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform"
           >
             Reduce to {suggestedCourts} court{suggestedCourts > 1 ? "s" : ""}
           </button>
@@ -1218,13 +1221,13 @@ function CourtsStep({
 
       <div className="space-y-2">
         {Array.from({ length: courtCount }, (_, i) => (
-          <div key={i} className="flex items-center justify-between rounded-xl border border-slate-200 px-3 py-2 text-sm">
+          <div key={i} className="flex items-center justify-between rounded-2xl border border-line bg-surface px-3 py-2 text-sm text-ink">
             <span>Court {i + 1}</span>
-            <span className="text-[10px] font-bold text-accent-dark bg-accent-soft rounded-full px-2 py-0.5">Available</span>
+            <span className="text-[11px] font-semibold text-warm-gray bg-surface-2 border border-line rounded-full px-2 py-0.5">Available</span>
           </div>
         ))}
       </div>
-      <p className="text-[10px] text-slate-400">
+      <p className="text-[11px] text-warm-gray">
         Renaming courts and marking them unavailable mid-session comes with the Manage menu (next build pass).
       </p>
     </div>
@@ -1279,10 +1282,10 @@ function ReviewStep({
 
   return (
     <div className="space-y-3">
-      <div className="rounded-xl border border-slate-200 px-3 py-2 text-xs leading-relaxed">
-        <b>{name || "Untitled session"}</b>
+      <div className="rounded-2xl border border-line bg-surface shadow-[0_1px_2px_rgba(13,13,13,0.04)] px-4 py-3 text-xs leading-relaxed text-ink-2">
+        <b className="text-graphite">{name || "Untitled session"}</b>
         <br />
-        {formatLabel} · {players.length} players · {courts.length} courts
+        {formatLabel} · <span className="font-mono tnum">{players.length}</span> players · <span className="font-mono tnum">{courts.length}</span> courts
         <br />
         {scoringLabel} · {rankingBasis === "points_first" ? "Points-first" : "Wins-first"} ranking
         {isTeamSparring && (
@@ -1294,13 +1297,13 @@ function ReviewStep({
       </div>
 
       {!courtsOk && (
-        <div className="rounded-xl border border-amber-400 bg-amber-50 text-amber-800 text-xs font-semibold px-3 py-2">
+        <div className="rounded-2xl border border-loss/30 bg-loss-soft text-loss text-xs font-semibold px-4 py-3">
           {players.length < minPlayersNeeded
             ? `${courts.length} courts need ${minPlayersNeeded} players — you have ${players.length}.`
             : "Your two teams aren't balanced enough to fill every court — go back to the Players or Courts step to fix this."}{" "}
           Starting is blocked until this is fixed.
           {players.length >= minPlayersNeeded ? null : (
-            <button onClick={onReduceCourts} className="block mt-2 w-full rounded-lg bg-white border border-amber-400 py-1.5 font-bold">
+            <button onClick={onReduceCourts} className="mt-2 w-full flex items-center justify-center rounded-full px-4 py-2 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform">
               Reduce to {suggestedCourts} court{suggestedCourts > 1 ? "s" : ""}
             </button>
           )}
@@ -1308,13 +1311,13 @@ function ReviewStep({
       )}
 
       <div>
-        <p className="text-xs font-bold uppercase text-slate-500 mb-1">Draw preview — Round 1</p>
+        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1">Draw preview — Round 1</p>
         {!previewRound || previewRound.matches.length === 0 ? (
-          <p className="text-xs text-slate-400">Add at least 4 players to see a preview.</p>
+          <p className="text-xs text-warm-gray">Add at least 4 players to see a preview.</p>
         ) : (
           <div className="space-y-2">
             {previewRound.matches.map((m, i) => (
-              <div key={i} className="rounded-xl border border-slate-200 px-3 py-2 text-xs">
+              <div key={i} className="rounded-2xl border border-line bg-surface px-3 py-2 text-xs text-ink">
                 Court {m.courtIndex + 1}: {format === "team_sparring" ? "Team A — " : ""}
                 {m.teamA.map((id) => nameByTempId.get(id)).join(" & ")} vs{" "}
                 {format === "team_sparring" ? "Team B — " : ""}
@@ -1322,13 +1325,13 @@ function ReviewStep({
               </div>
             ))}
             {previewRound.restingIds.length > 0 && (
-              <p className="text-xs text-slate-500">
+              <p className="text-xs text-ink-2">
                 Resting: {previewRound.restingIds.map((id) => nameByTempId.get(id)).join(", ")}
               </p>
             )}
-            <p className="text-[10px] text-slate-400 italic">{previewRound.explanation}</p>
+            <p className="text-[11px] text-warm-gray italic">{previewRound.explanation}</p>
             {previewRounds.length > 1 && (
-              <p className="text-xs font-bold text-accent-dark">
+              <p className="text-xs font-semibold text-ink-2">
                 + {previewRounds.length - 1} more round{previewRounds.length - 1 > 1 ? "s" : ""} generated automatically —
                 the whole schedule is ready the moment you start.
               </p>
@@ -1337,12 +1340,12 @@ function ReviewStep({
         )}
       </div>
 
-      {startError && <p className="text-xs text-red-600">{startError}</p>}
+      {startError && <p className="text-[13px] text-loss">{startError}</p>}
 
       <button
         onClick={onStart}
         disabled={!courtsOk || previewRounds.length === 0 || starting}
-        className="w-full rounded-xl py-3 font-bold text-white bg-gradient-to-br from-accent to-accent-dark disabled:opacity-40"
+        className="w-full flex items-center justify-center rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-40"
       >
         {starting ? "Starting…" : "Start Session"}
       </button>

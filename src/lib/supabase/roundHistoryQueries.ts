@@ -43,7 +43,7 @@ export async function getRoundHistory(sessionId: string): Promise<RoundHistoryEn
     { data: players, error: playersError },
     { data: rounds, error: roundsError },
   ] = await Promise.all([
-    supabase.from("courts").select("id, display_name").eq("session_id", sessionId),
+    supabase.from("courts").select("id, display_name, ordinal").eq("session_id", sessionId),
     supabase.from("players").select("id, display_name").eq("session_id", sessionId),
     supabase.from("rounds").select("id, sequence, status").eq("session_id", sessionId).order("sequence", { ascending: false }),
   ]);
@@ -52,6 +52,7 @@ export async function getRoundHistory(sessionId: string): Promise<RoundHistoryEn
   if (roundsError) throw roundsError;
 
   const courtNameById = new Map((courts ?? []).map((c) => [c.id, c.display_name]));
+  const courtOrdinalById = new Map((courts ?? []).map((c) => [c.id, c.ordinal]));
   const playerNameById = new Map((players ?? []).map((p) => [p.id, p.display_name]));
   const roundList = rounds ?? [];
   const roundIds = roundList.map((r) => r.id);
@@ -89,6 +90,10 @@ export async function getRoundHistory(sessionId: string): Promise<RoundHistoryEn
   return roundList.map((round) => {
     const roundMatches = matches
       .filter((m) => m.round_id === round.id)
+      // Stable order by court number. Without this the list follows whatever
+      // order Postgres returns the rows in, which shifts after a score UPDATE —
+      // so the match you just scored appears to jump. Court ordinal is fixed.
+      .sort((a, b) => (courtOrdinalById.get(a.court_id) ?? 0) - (courtOrdinalById.get(b.court_id) ?? 0))
       .map((m) => {
         const parts = participantsByMatch.get(m.id) ?? [];
         const teamA = parts.filter((p) => p.side === "A");

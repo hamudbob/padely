@@ -48,20 +48,26 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="mx-auto max-w-sm min-h-screen bg-white px-4 py-8">
-      <h1 className="text-xl font-extrabold mb-4">Log in / Sign up</h1>
-      <div className="flex bg-slate-100 rounded-xl p-1 mb-4">
+    <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+      {/* Brand header */}
+      <div className="font-wordmark text-[22px] font-semibold text-graphite flex items-baseline leading-none mb-6">
+        Padelier
+        <span className="ml-[3px] w-[7px] h-[7px] rounded-full bg-gold inline-block" aria-hidden />
+      </div>
+      <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1]">Welcome back.</h1>
+      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-2 mb-5">Log in / Sign up</p>
+      <div className="flex rounded-full bg-surface border border-line p-1 mb-4">
         <button
           type="button"
           onClick={() => setMode("login")}
-          className={`flex-1 py-2 rounded-lg text-sm font-bold ${mode === "login" ? "bg-white shadow" : "text-slate-500"}`}
+          className={`flex-1 rounded-full py-2 text-[12.5px] font-semibold ${mode === "login" ? "bg-graphite text-ivory" : "text-warm-gray"}`}
         >
           Log in
         </button>
         <button
           type="button"
           onClick={() => setMode("signup")}
-          className={`flex-1 py-2 rounded-lg text-sm font-bold ${mode === "signup" ? "bg-white shadow" : "text-slate-500"}`}
+          className={`flex-1 rounded-full py-2 text-[12.5px] font-semibold ${mode === "signup" ? "bg-graphite text-ivory" : "text-warm-gray"}`}
         >
           Sign up
         </button>
@@ -69,7 +75,7 @@ export default function LoginPage() {
       <form onSubmit={handleSubmit} className="space-y-3">
         {mode === "signup" && (
           <input
-            className="w-full rounded-xl border border-slate-300 px-3 py-2"
+            className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
             placeholder="Name"
             value={name}
             onChange={(e) => setName(e.target.value)}
@@ -77,7 +83,7 @@ export default function LoginPage() {
           />
         )}
         <input
-          className="w-full rounded-xl border border-slate-300 px-3 py-2"
+          className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
           placeholder="Email"
           type="email"
           value={email}
@@ -85,7 +91,7 @@ export default function LoginPage() {
           required
         />
         <input
-          className="w-full rounded-xl border border-slate-300 px-3 py-2"
+          className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
           placeholder="Password"
           type="password"
           value={password}
@@ -93,12 +99,12 @@ export default function LoginPage() {
           minLength={8}
           required
         />
-        {info && <p className="text-sm text-accent-dark">{info}</p>}
-        {error && <p className="text-sm text-red-600">{error}</p>}
+        {info && <p className="text-[13px] text-win">{info}</p>}
+        {error && <p className="text-[13px] text-loss">{error}</p>}
         <button
           type="submit"
           disabled={loading}
-          className="w-full rounded-xl px-4 py-3 font-bold text-white bg-gradient-to-br from-accent to-accent-dark shadow disabled:opacity-50"
+          className="w-full flex items-center justify-center gap-2 rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-50"
         >
           {loading ? "Please wait…" : "Continue"}
         </button>

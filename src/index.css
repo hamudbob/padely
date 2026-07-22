@@ -2,10 +2,91 @@
 @tailwind components;
 @tailwind utilities;
 
-html, body, #root {
+html,
+body,
+#root {
   height: 100%;
 }
+
 body {
-  background: #eef2f1;
-  color: #0f172a;
+  /* Padelier ground: warm ivory surface, near-black warm ink, Inter interface font. */
+  background: #f7f5f2; /* ivory */
+  color: #141412; /* ink */
+  font-family: "Inter", system-ui, sans-serif;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  /* Native-app feel: no rubber-band chaining, no tap flash, no accidental
+     text selection on controls, and no 300ms tap delay. */
+  overscroll-behavior-y: none;
+  -webkit-tap-highlight-color: transparent;
+}
+
+button,
+a,
+[role="button"] {
+  -webkit-tap-highlight-color: transparent;
+  touch-action: manipulation; /* removes the double-tap-to-zoom delay */
+}
+
+button {
+  user-select: none;
+}
+
+/* Scores and standings use Space Grotesk with tabular figures so digits never
+   jitter as they change. Apply with `.tnum` alongside font-mono. */
+.tnum {
+  font-feature-settings: "tnum" 1;
+  font-variant-numeric: tabular-nums;
+}
+
+/* Safe-area helpers for notch / home-indicator phones (0 on desktop). Use
+   `.safe-y` on a screen root to keep content clear of the hardware. */
+.safe-top {
+  padding-top: max(2rem, env(safe-area-inset-top));
+}
+.safe-bottom {
+  padding-bottom: max(2rem, env(safe-area-inset-bottom));
+}
+
+/* --- Purposeful, brand-light motion (CSS-only, no dependency) --- */
+@media (prefers-reduced-motion: no-preference) {
+  .anim-rise {
+    animation: rise 0.34s cubic-bezier(0.22, 0.8, 0.24, 1) both;
+  }
+  .anim-fade {
+    animation: fade 0.3s ease both;
+  }
+  .anim-pop {
+    animation: pop 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.25) both;
+  }
+  /* stagger helper for lists */
+  .anim-rise:nth-child(1) { animation-delay: 0.02s; }
+  .anim-rise:nth-child(2) { animation-delay: 0.05s; }
+  .anim-rise:nth-child(3) { animation-delay: 0.08s; }
+  .anim-rise:nth-child(4) { animation-delay: 0.11s; }
+  .anim-rise:nth-child(5) { animation-delay: 0.14s; }
+  .anim-rise:nth-child(6) { animation-delay: 0.17s; }
+  .anim-rise:nth-child(n + 7) { animation-delay: 0.19s; }
+}
+@keyframes rise {
+  from { opacity: 0; transform: translateY(8px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+@keyframes fade {
+  from { opacity: 0; }
+  to { opacity: 1; }
+}
+@keyframes pop {
+  0% { transform: scale(0.6); opacity: 0; }
+  60% { transform: scale(1.12); opacity: 1; }
+  100% { transform: scale(1); }
+}
+.skeleton {
+  background: linear-gradient(100deg, #efece7 30%, #f6f4f0 50%, #efece7 70%);
+  background-size: 200% 100%;
+  animation: shimmer 1.3s infinite linear;
+}
+@keyframes shimmer {
+  from { background-position: 200% 0; }
+  to { background-position: -200% 0; }
 }
