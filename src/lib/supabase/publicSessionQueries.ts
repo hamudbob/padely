@@ -17,6 +17,16 @@ export interface PublicSessionData {
   players: { id: string; displayName: string; status: string }[];
   standings: { playerId: string; totalPoints: number; wins: number; draws: number; losses: number; adjustmentTotal: number }[];
   rounds: { id: string; sequence: number; status: string }[];
+  /** Every round's matches (per-court scores), tagged with round sequence so the spectator can page through rounds. */
+  matches: {
+    roundSequence: number;
+    courtName: string;
+    teamA: string[];
+    teamB: string[];
+    scoreA: number | null;
+    scoreB: number | null;
+    status: string;
+  }[];
 }
 
 export async function getPublicSession(publicToken: string): Promise<PublicSessionData | null> {
@@ -32,6 +42,15 @@ export async function getPublicSession(publicToken: string): Promise<PublicSessi
     players?: { id: string; display_name: string; status: string }[];
     standings?: { player_id: string; total_points: number; wins: number; draws: number; losses: number; adjustment_total: number }[];
     rounds?: { id: string; sequence: number; status: string }[];
+    matches?: {
+      round_sequence: number;
+      court_name: string;
+      team_a: string[] | null;
+      team_b: string[] | null;
+      score_a: number | null;
+      score_b: number | null;
+      status: string;
+    }[];
   };
   return {
     session: {
@@ -51,5 +70,14 @@ export async function getPublicSession(publicToken: string): Promise<PublicSessi
       adjustmentTotal: s.adjustment_total,
     })),
     rounds: (d.rounds ?? []).map((r) => ({ id: r.id, sequence: r.sequence, status: r.status })),
+    matches: (d.matches ?? []).map((m) => ({
+      roundSequence: m.round_sequence,
+      courtName: m.court_name,
+      teamA: m.team_a ?? [],
+      teamB: m.team_b ?? [],
+      scoreA: m.score_a,
+      scoreB: m.score_b,
+      status: m.status,
+    })),
   };
 }
