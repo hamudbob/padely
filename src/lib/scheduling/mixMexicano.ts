@@ -15,7 +15,7 @@
 // Mix Americano get, since later rounds literally can't be computed until
 // earlier ones are scored.
 
-import { Match, PlayerFairnessState, PlayerId, RoundResult, Rng } from "./types";
+import { Match, MatchHistory, PlayerFairnessState, PlayerId, RoundResult, Rng, pairKey } from "./types";
 import { selectPlayersForRound, hasUnavoidableConsecutiveRest } from "./fairness";
 
 export type Gender = "M" | "F";
@@ -42,30 +42,36 @@ function isMixedTeam(team: [PlayerId, PlayerId], genderById: Map<PlayerId, Gende
 function bestGenderSplit(
   group: [PlayerId, PlayerId, PlayerId, PlayerId],
   genderById: Map<PlayerId, Gender>,
+  history?: MatchHistory,
 ): { teamA: [PlayerId, PlayerId]; teamB: [PlayerId, PlayerId] } {
   const [a, b, c, d] = group;
   const candidates: [[PlayerId, PlayerId], [PlayerId, PlayerId]][] = [
-    [
-      [a, d],
-      [b, c],
-    ], // default: rank1+rank4 vs rank2+rank3
-    [
-      [a, b],
-      [c, d],
-    ],
-    [
-      [a, c],
-      [b, d],
-    ],
+    [[a, d], [b, c]], // default: rank1+rank4 vs rank2+rank3 (most balanced)
+    [[a, b], [c, d]],
+    [[a, c], [b, d]],
   ];
+  const repeatCost = (teamA: [PlayerId, PlayerId], teamB: [PlayerId, PlayerId]): number => {
+    if (!history) return 0;
+    let partnerRepeat = 0;
+    let opponentRepeat = 0;
+    if (history.partnerPairsSeen.has(pairKey(teamA[0], teamA[1]))) partnerRepeat++;
+    if (history.partnerPairsSeen.has(pairKey(teamB[0], teamB[1]))) partnerRepeat++;
+    for (const x of teamA) for (const y of teamB) if (history.opponentPairsSeen.has(pairKey(x, y))) opponentRepeat++;
+    return partnerRepeat * 100 + opponentRepeat * 10;
+  };
+  // Gender-mix is the hard priority; among the equally-mixed splits, prefer the
+  // freshest (fewest repeat partners/opponents); the balanced default is first
+  // so it wins any remaining tie. Never fails — always returns a valid split.
   let best = candidates[0];
-  let bestMixedCount = -1;
-  for (const candidate of candidates) {
-    const [teamA, teamB] = candidate;
+  let bestMixed = -1;
+  let bestCost = Infinity;
+  for (const [teamA, teamB] of candidates) {
     const mixedCount = (isMixedTeam(teamA, genderById) ? 1 : 0) + (isMixedTeam(teamB, genderById) ? 1 : 0);
-    if (mixedCount > bestMixedCount) {
-      bestMixedCount = mixedCount;
-      best = candidate;
+    const cost = repeatCost(teamA, teamB);
+    if (mixedCount > bestMixed || (mixedCount === bestMixed && cost < bestCost)) {
+      bestMixed = mixedCount;
+      bestCost = cost;
+      best = [teamA, teamB];
     }
   }
   return { teamA: best[0], teamB: best[1] };
@@ -79,13 +85,16 @@ export interface GenerateMixMexicanoRoundInput {
   standings: StandingLookup;
   /** True only for round 1 (or whenever nobody has a meaningful standing yet). */
   isFirstRound: boolean;
+  /** Partner/opponent history — used as a tiebreak to rotate partners among
+   * equally gender-mixed splits. Optional. */
+  history?: MatchHistory;
   rng: Rng;
   /** Round-1-only: how many randomized groupings to try when maximizing gender mixing. */
   tries?: number;
 }
 
 export function generateMixMexicanoRound(input: GenerateMixMexicanoRoundInput): RoundResult {
-  const { activePlayerIds, genderById, statsById, courtsAvailable, standings, isFirstRound, rng, tries = 300 } = input;
+  const { activePlayerIds, genderById, statsById, courtsAvailable, standings, isFirstRound, history, rng, tries = 300 } = input;
 
   // STEP 1 — who plays. Identical fairness rule as every other format here;
   // rank and gender play no part.
@@ -140,7 +149,7 @@ export function generateMixMexicanoRound(input: GenerateMixMexicanoRoundInput): 
   const matches: Match[] = [];
   for (let i = 0; i + 3 < ranked.length; i += 4) {
     const group = ranked.slice(i, i + 4) as [PlayerId, PlayerId, PlayerId, PlayerId];
-    const { teamA, teamB } = bestGenderSplit(group, genderById);
+    const { teamA, teamB } = bestGenderSplit(group, genderById, history);
     matches.push({ courtIndex: Math.floor(i / 4), teamA, teamB });
   }
 

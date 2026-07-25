@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useNavigate } from "react-router-dom";
+import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Database } from "../../lib/supabase/database.types";
 import { mulberry32, PlayerFairnessState, PlayerId, RoundResult } from "../../lib/scheduling/types";
 import { generateAmericanoSchedule } from "../../lib/scheduling/americano";
@@ -18,7 +18,7 @@ import {
   generateFixedPartnerRankedRound,
 } from "../../lib/scheduling/fixedPartner";
 import { generateInitialRounds } from "../../lib/scheduling/initialSchedule";
-import { createLobby, finalizeAndStart, deleteSession, DraftCourt, DraftPlayer } from "../../lib/supabase/sessionActions";
+import { createLobby, finalizeAndStart, deleteSession, saveLobbyState, getResumableLobbies, DraftCourt, DraftPlayer } from "../../lib/supabase/sessionActions";
 import { listJoinRequests, acknowledgeJoinRequest, rejectJoinRequest, JoinRequest } from "../../lib/supabase/joinRequestQueries";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 
@@ -124,6 +124,8 @@ function recommendedFixedPartnerRounds(pairCount: number, courts: number): numbe
 
 export default function CreateSessionPage() {
   const navigate = useNavigate();
+  const [searchParams] = useSearchParams();
+  const resumeId = searchParams.get("resume");
   const { user } = useHostSession();
   const [step, setStep] = useState(0);
   const [name, setName] = useState("");
@@ -169,19 +171,106 @@ export default function CreateSessionPage() {
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [copiedLink, setCopiedLink] = useState(false);
 
-  // Refs so the unmount cleanup sees the latest values. If the host leaves the
-  // wizard (back button, browser back, route change) without starting, the
-  // draft session that was minted for the join code is deleted — no orphan.
+  // Refs so the unmount cleanup sees the latest values.
   const lobbyIdRef = useRef<string | null>(null);
   const startedRef = useRef(false);
+  const playersRef = useRef<DraftPlayer[]>([]);
   useEffect(() => {
     lobbyIdRef.current = lobbyId;
   }, [lobbyId]);
   useEffect(() => {
+    playersRef.current = players;
+  }, [players]);
+  // On leaving the wizard without starting: only DELETE the draft if it's
+  // EMPTY (nobody added or joined). A lobby that already has people in it is
+  // KEPT — its state is saved live (persist effect below) and it shows up on
+  // Home as "Resume setup", so an accidental back can never wipe a live lobby
+  // again. Truly-empty drafts are still swept so nothing orphans.
+  useEffect(() => {
     return () => {
-      if (lobbyIdRef.current && !startedRef.current) void deleteSession(lobbyIdRef.current);
+      if (lobbyIdRef.current && !startedRef.current && playersRef.current.length === 0) {
+        void deleteSession(lobbyIdRef.current);
+      }
     };
   }, []);
+
+  // Live-save the lobby (roster + config) to the draft, debounced, so an exit
+  // of any kind never loses it. Only once a draft exists and the Players step
+  // (the lobby) has been reached.
+  useEffect(() => {
+    if (!lobbyId || step < 2) return;
+    const snapshot = {
+      name,
+      format,
+      scoringFormat,
+      rankingBasis,
+      courtCount,
+      roundCount,
+      teamScoreMode,
+      fixedPartnerEnabled,
+      pairingMode,
+      manualPairs,
+      players,
+    };
+    const t = setTimeout(() => {
+      void saveLobbyState(lobbyId, snapshot).catch(() => {
+        /* best-effort — a failed save must never break setup */
+      });
+    }, 600);
+    return () => clearTimeout(t);
+  }, [lobbyId, step, name, format, scoringFormat, rankingBasis, courtCount, roundCount, teamScoreMode, fixedPartnerEnabled, pairingMode, manualPairs, players]);
+
+  // Resume: if the wizard was opened from a "Resume setup" card (?resume=<id>),
+  // hydrate the whole lobby back from the draft and land on the Players step
+  // with everyone still there. Runs once.
+  const hydratedRef = useRef(false);
+  useEffect(() => {
+    if (!resumeId || hydratedRef.current) return;
+    hydratedRef.current = true;
+    let active = true;
+    getResumableLobbies()
+      .then((lobbies) => {
+        if (!active) return;
+        const lobby = lobbies.find((l) => l.sessionId === resumeId);
+        if (!lobby) return; // draft gone or expired — just carry on with a fresh session
+        const s = lobby.draftState as {
+          name?: string;
+          format?: SessionFormat;
+          scoringFormat?: ScoringFormat;
+          rankingBasis?: RankingBasis;
+          courtCount?: number;
+          roundCount?: number;
+          teamScoreMode?: TeamScoreMode;
+          fixedPartnerEnabled?: boolean;
+          pairingMode?: "manual" | "auto_random" | "auto_position";
+          manualPairs?: Pair[];
+          players?: DraftPlayer[];
+        };
+        if (typeof s.name === "string") setName(s.name);
+        if (s.format) setFormat(s.format);
+        if (s.scoringFormat) setScoringFormat(s.scoringFormat);
+        if (s.rankingBasis) setRankingBasis(s.rankingBasis);
+        if (typeof s.courtCount === "number") setCourtCount(s.courtCount);
+        if (typeof s.roundCount === "number") {
+          setRoundCount(s.roundCount);
+          setRoundCountTouched(true);
+        }
+        if (s.teamScoreMode) setTeamScoreMode(s.teamScoreMode);
+        if (typeof s.fixedPartnerEnabled === "boolean") setFixedPartnerEnabled(s.fixedPartnerEnabled);
+        if (s.pairingMode) setPairingMode(s.pairingMode);
+        if (Array.isArray(s.manualPairs)) setManualPairs(s.manualPairs);
+        if (Array.isArray(s.players)) setPlayers(s.players);
+        setLobbyId(lobby.sessionId);
+        setJoinCode(lobby.joinCode);
+        setStep(2); // land back in the lobby
+      })
+      .catch(() => {
+        /* resume failed — start fresh rather than block */
+      });
+    return () => {
+      active = false;
+    };
+  }, [resumeId]);
 
   const courts: DraftCourt[] = useMemo(
     () => Array.from({ length: courtCount }, (_, i) => ({ tempId: `court-${i}`, name: `Court ${i + 1}` })),
@@ -393,6 +482,22 @@ export default function CreateSessionPage() {
     } catch {
       /* clipboard unavailable — the code is shown as a fallback */
     }
+  }
+
+  // Intentionally throw away this lobby (and everyone in it) and go Home. Marks
+  // startedRef so the unmount cleanup won't also try to touch it.
+  async function discardLobby() {
+    startedRef.current = true;
+    const id = lobbyId;
+    setLobbyId(null);
+    if (id) {
+      try {
+        await deleteSession(id);
+      } catch {
+        /* already gone / offline — nothing to do */
+      }
+    }
+    navigate("/");
   }
 
   const hostName = ((user?.user_metadata?.name as string | undefined)?.trim() || (user?.email ?? "").split("@")[0] || "Me").trim();
@@ -665,6 +770,12 @@ export default function CreateSessionPage() {
               </div>
               <p className="text-[11px] text-warm-gray mt-2 leading-snug">
                 Players enter this code (or open your link) to add themselves — accept them below. Not on the app? Just type their name. QR coming soon.
+              </p>
+              <p className="text-[11px] text-warm-gray mt-2 leading-snug">
+                Leaving this screen keeps the lobby — reopen it any time from <span className="font-semibold text-ink-2">Resume setup</span> on Home.
+                <button type="button" onClick={discardLobby} className="ml-1 font-semibold text-loss active:opacity-70">
+                  Discard lobby
+                </button>
               </p>
             </div>
           )}

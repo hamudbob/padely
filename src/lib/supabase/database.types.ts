@@ -41,6 +41,9 @@ export interface Database {
           team_score_mode: "by_point" | "by_win" | "by_round" | null;
           /** Set only when the host locks partners for the whole session (Players step toggle, Americano/Mexicano base only). Null otherwise. */
           fixed_partner_style: "round_robin" | "rank_based" | null;
+          /** Draft/lobby only — the create wizard's serialized in-progress state (roster + config),
+           * saved live so an accidental exit never loses it. Null once the session goes live. */
+          draft_state: Record<string, unknown> | null;
           created_by: string;
           created_at: string;
           updated_at: string;

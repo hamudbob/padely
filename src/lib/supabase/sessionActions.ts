@@ -509,6 +509,97 @@ export async function deleteSession(sessionId: string): Promise<void> {
 }
 
 /**
+ * Live-saves the create wizard's in-progress lobby state (roster + config) onto
+ * the draft session, so an accidental exit (back button, closed tab, phone
+ * back) never loses the players who've been added or who joined. Best-effort:
+ * a failed save must never break the wizard, so callers swallow errors.
+ */
+export type LobbyState = Record<string, unknown> & { players?: unknown[] };
+export async function saveLobbyState(sessionId: string, state: LobbyState): Promise<void> {
+  const { error } = await supabase.from("sessions").update({ draft_state: state }).eq("id", sessionId);
+  if (error) throw error;
+}
+
+export interface ResumableLobby {
+  sessionId: string;
+  joinCode: string;
+  name: string;
+  playerCount: number;
+  updatedAt: string;
+  draftState: LobbyState;
+}
+
+/**
+ * Draft lobbies the host can resume — a draft they left with at least one
+ * player already added/joined. Surfaced on Home as "Resume setup" so a dropped
+ * lobby is one tap from being back exactly as it was.
+ */
+export async function getResumableLobbies(): Promise<ResumableLobby[]> {
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError) throw userError;
+  if (!userData.user) return [];
+  const { data: teamRow, error: teamError } = await supabase
+    .from("teams")
+    .select("id")
+    .eq("owner_id", userData.user.id)
+    .maybeSingle();
+  if (teamError) throw teamError;
+  if (!teamRow) return [];
+
+  const { data: drafts, error } = await supabase
+    .from("sessions")
+    .select("id, name, join_code, updated_at, draft_state")
+    .eq("team_id", teamRow.id)
+    .eq("status", "draft")
+    .not("draft_state", "is", null)
+    .order("updated_at", { ascending: false });
+  if (error) throw error;
+
+  return (drafts ?? [])
+    .map((s) => {
+      const draftState = (s.draft_state ?? {}) as LobbyState;
+      const players = Array.isArray(draftState.players) ? draftState.players : [];
+      return {
+        sessionId: s.id,
+        joinCode: s.join_code,
+        name: s.name,
+        playerCount: players.length,
+        updatedAt: s.updated_at,
+        draftState,
+      };
+    })
+    .filter((l) => l.playerCount > 0); // only lobbies that actually have people in them
+}
+
+/**
+ * Housekeeping: hard-deletes the host's own draft lobbies older than
+ * `olderThanDays` (default 10). Called opportunistically when Home loads, so
+ * abandoned drafts (and their cascaded join_requests) never pile up — no server
+ * cron needed. Best-effort; failures are swallowed by the caller.
+ */
+export async function sweepStaleDrafts(olderThanDays = 10): Promise<number> {
+  const { data: userData, error: userError } = await supabase.auth.getUser();
+  if (userError || !userData.user) return 0;
+  const { data: teamRow, error: teamError } = await supabase
+    .from("teams")
+    .select("id")
+    .eq("owner_id", userData.user.id)
+    .maybeSingle();
+  if (teamError || !teamRow) return 0;
+
+  const cutoff = new Date(Date.now() - olderThanDays * 24 * 60 * 60 * 1000).toISOString();
+  const { data: deleted, error } = await supabase
+    .from("sessions")
+    .delete()
+    .eq("team_id", teamRow.id)
+    .eq("status", "draft")
+    .lt("created_at", cutoff)
+    .select("id");
+  if (error) throw error;
+  return (deleted ?? []).length;
+}
+
+/**
  * Creates a session in DRAFT (lobby) state — config, courts, typed players and
  * (Fixed Partner) pairs — but does NOT generate any rounds and does NOT go
  * live. The join code is active immediately, so players can join the lobby

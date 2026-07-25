@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { listHostSessions, HostSessionSummary } from "../../lib/supabase/hostSessionsQueries";
+import { getResumableLobbies, sweepStaleDrafts, ResumableLobby } from "../../lib/supabase/sessionActions";
 
 const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
@@ -19,29 +20,54 @@ function greetingFor(date: Date): string {
   return "Good evening";
 }
 
-function formatSessionDate(iso: string): string {
-  const date = new Date(iso);
-  const today = new Date();
-  const isToday = date.toDateString() === today.toDateString();
-  if (isToday) return `Today · ${date.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}`;
-  return date.toLocaleDateString([], { month: "short", day: "numeric" });
+function firstNameOf(user: { user_metadata?: { name?: unknown }; email?: string } | null): string {
+  const name = (user?.user_metadata?.name as string | undefined)?.trim();
+  if (name) return name.split(/\s+/)[0];
+  return (user?.email || "").split("@")[0] || "there";
 }
 
+function initialsOf(user: { user_metadata?: { name?: unknown }; email?: string } | null): string {
+  const name = (user?.user_metadata?.name as string | undefined)?.trim();
+  if (name) {
+    const parts = name.split(/\s+/);
+    const a = parts[0]?.[0] ?? "";
+    const b = parts.length > 1 ? parts[parts.length - 1]?.[0] ?? "" : "";
+    return (a + b).toUpperCase() || "?";
+  }
+  return (user?.email || "?").charAt(0).toUpperCase();
+}
+
+// "15 JUL"
+function shortDate(iso: string): string {
+  return new Date(iso)
+    .toLocaleDateString("en-GB", { day: "2-digit", month: "short" })
+    .toUpperCase();
+}
+
+const HERO_GRADIENT = "linear-gradient(168deg,#FBFAF8 0%,#F7F0E3 130%)";
+const GOLD_HAIRLINE = "linear-gradient(90deg,#BFA36A,rgba(191,163,106,0))";
+const CREATE_CARD_GRADIENT = "linear-gradient(165deg,#FBFAF8,#F7F0E3)";
+
 /**
- * Home / Sessions — first Padelier-branded screen. Same behaviour as before
- * (a logged-in host can reopen any past session, live or ended, not just start
- * a new one) restyled to the brand: ivory ground, Fraunces greeting, graphite
- * primary action, Court Lime reserved for what's live.
+ * Home — three states, per the "Padelier Home" design:
+ *   A. Logged-out landing (hero + CTAs + how-it-works)
+ *   B. Logged-in, no sessions (dashed create/join cards)
+ *   C. Logged-in, has sessions (live card + session history)
+ * Bound to real data (host session list). The design's per-court live scores
+ * and per-session placement aren't in the home query yet, so those two accents
+ * are omitted rather than faked.
  */
 export default function HomePage() {
   const { user } = useHostSession();
   const [sessions, setSessions] = useState<HostSessionSummary[] | null>(null);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  const [resumable, setResumable] = useState<ResumableLobby[]>([]);
 
   useEffect(() => {
     if (!user) {
       setSessions(null);
+      setResumable([]);
       return;
     }
     setSessionsLoading(true);
@@ -50,130 +76,292 @@ export default function HomePage() {
       .then(setSessions)
       .catch((err) => setSessionsError(err instanceof Error ? err.message : "Could not load your sessions."))
       .finally(() => setSessionsLoading(false));
+    // Opportunistic housekeeping: sweep the host's own drafts older than 10
+    // days, then surface any lobby they left mid-setup as "Resume setup".
+    // Both best-effort — a failure here must never block the home screen.
+    sweepStaleDrafts(10)
+      .catch(() => 0)
+      .then(() => getResumableLobbies())
+      .then(setResumable)
+      .catch(() => setResumable([]));
   }, [user]);
 
   const liveSessions = (sessions ?? []).filter((s) => s.status === "live");
   const pastSessions = (sessions ?? []).filter((s) => s.status !== "live");
   const greeting = greetingFor(new Date());
+  const hasAny = liveSessions.length > 0 || pastSessions.length > 0;
 
-  return (
-    <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 safe-top safe-bottom anim-fade">
-      {/* Wordmark + host avatar */}
-      <div className="flex items-center justify-between mb-6">
-        <div className="font-wordmark text-[22px] font-semibold text-graphite flex items-baseline leading-none">
-          Padelier
-          <span className="ml-[3px] w-[7px] h-[7px] rounded-full bg-gold inline-block" aria-hidden />
-        </div>
-        {user && (
-          <Link
-            to="/profile"
-            aria-label="Your dashboard"
-            className="w-9 h-9 rounded-full bg-graphite text-ivory flex items-center justify-center text-sm font-semibold uppercase active:scale-95 transition-transform"
-          >
-            {((user.user_metadata?.name as string | undefined)?.trim() || user.email || "?").charAt(0)}
-          </Link>
-        )}
-      </div>
+  const shell = "mx-auto max-w-sm min-h-screen bg-ivory flex flex-col safe-top safe-bottom anim-fade";
 
-      {/* Hero */}
-      <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1]">
-        {user ? `${greeting}.` : "The art of a great game."}
-      </h1>
-      <p className="text-[13.5px] text-ink-2 mt-1.5 mb-6 leading-relaxed">
-        {user
-          ? liveSessions.length > 0
-            ? `${liveSessions.length} session${liveSessions.length > 1 ? "s" : ""} running — everyone's getting a fair game.`
-            : "Fair rotations, live scoring, real standings."
-          : "Fair rotations. Real standings. Zero napkin math."}
-      </p>
-
-      {/* Primary actions */}
-      <div className="space-y-2.5">
+  /* ── App bar ─────────────────────────────────────────── */
+  const appBar = (
+    <div className="flex items-center justify-between px-6 pt-4 pb-2.5">
+      <span className="font-wordmark text-[21px] font-semibold text-ink flex items-baseline leading-none">
+        Padelier
+        <span className="text-gold">.</span>
+      </span>
+      {user ? (
         <Link
-          to="/create"
-          className="flex items-center justify-center gap-2 rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform"
+          to="/profile"
+          aria-label="Your dashboard"
+          className="w-9 h-9 rounded-full bg-gold-soft border border-line flex items-center justify-center font-mono text-sm font-semibold text-gold-ink active:scale-95 transition-transform"
         >
-          <span className="text-lg leading-none">+</span> Create session
+          {initialsOf(user)}
         </Link>
-        <Link
-          to="/join"
-          className="flex items-center justify-center rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform"
-        >
-          Join by code
+      ) : (
+        <Link to="/login" className="text-sm font-medium text-ink-2 active:opacity-70">
+          Log in
         </Link>
-        {!user && (
-          <Link
-            to="/login"
-            className="flex items-center justify-center rounded-full px-4 py-3 font-semibold text-ink-2 border border-dashed border-stone"
-          >
-            Log in / Sign up
-          </Link>
-        )}
-      </div>
+      )}
+    </div>
+  );
 
-      {/* Your sessions */}
-      {user && (
-        <div className="mt-9">
-          <div className="flex items-center justify-between mb-3">
-            <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray">Your sessions</p>
-            {liveSessions.length > 0 && (
-              <span className="inline-flex items-center gap-1.5 text-[10px] font-semibold rounded-full px-2.5 py-1 bg-graphite text-ivory">
-                <span className="w-1.5 h-1.5 rounded-full bg-court-lime" aria-hidden />
-                {liveSessions.length} live
-              </span>
-            )}
+  /* ── STATE A: Logged-out landing ─────────────────────── */
+  if (!user) {
+    return (
+      <div className={shell}>
+        {appBar}
+        <div className="flex-1 flex flex-col">
+          {/* Hero */}
+          <div
+            className="relative mx-4 mt-1.5 rounded-[22px] border border-line px-6 pt-[26px] pb-7 overflow-hidden"
+            style={{ background: HERO_GRADIENT }}
+          >
+            <div className="absolute top-0 left-6 right-6 h-0.5" style={{ background: GOLD_HAIRLINE }} aria-hidden />
+            <p className="text-[11px] font-semibold uppercase tracking-[0.2em] text-gold-ink mb-4">Padel, run right</p>
+            <h1 className="font-serif text-[41px] font-medium leading-[1.02] tracking-[-0.01em] text-ink text-balance">
+              The art of a great game.
+            </h1>
+            <p className="text-sm leading-relaxed text-ink-2 mt-4 max-w-[280px]">
+              Fair rounds, one-tap scores, a live leaderboard — from the first serve to the final table.
+            </p>
           </div>
 
-          {sessionsLoading && !sessions && (
-            <div className="rounded-2xl border border-line bg-surface overflow-hidden">
-              {[0, 1, 2].map((i) => (
-                <div key={i} className="flex items-center gap-3 px-4 py-3.5 border-t border-line first:border-t-0">
-                  <span className="w-2 h-2 rounded-full skeleton shrink-0" />
-                  <div className="flex-1 space-y-1.5">
-                    <div className="h-3 w-1/3 rounded skeleton" />
-                    <div className="h-2.5 w-2/3 rounded skeleton" />
+          {/* CTAs */}
+          <div className="flex flex-col gap-2.5 px-4 pt-5">
+            <Link
+              to="/create"
+              className="flex items-center justify-between rounded-2xl bg-graphite text-ivory px-4 py-4 text-[15px] font-semibold active:scale-[0.99] transition-transform"
+            >
+              Create a session
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#BFA36A" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                <path d="M5 12h14M13 6l6 6-6 6" />
+              </svg>
+            </Link>
+            <Link
+              to="/join"
+              className="flex items-center justify-between rounded-2xl bg-surface border border-line text-ink px-4 py-4 text-[15px] font-semibold active:scale-[0.99] transition-transform"
+            >
+              Join a game
+              <span className="font-mono text-[13px] tracking-[0.08em] text-warm-gray">6-digit code</span>
+            </Link>
+          </div>
+
+          <div className="h-px bg-line mx-6 mt-[22px]" />
+
+          {/* How it works */}
+          <div className="px-6 pt-5">
+            <p className="text-[11px] font-semibold uppercase tracking-[0.18em] text-warm-gray mb-4">How it works</p>
+            <div className="flex flex-col gap-4">
+              {[
+                { n: "01", t: "Create", s: "Name it, pick a format, add players." },
+                { n: "02", t: "Play", s: "The app draws fair rounds; tap to score." },
+                { n: "03", t: "Rank", s: "A live leaderboard, right to the last game." },
+              ].map((step) => (
+                <div key={step.n} className="flex gap-[15px] items-baseline">
+                  <span className="font-mono font-semibold text-[15px] text-gold min-w-[20px]">{step.n}</span>
+                  <div>
+                    <div className="font-serif font-semibold text-base text-ink">{step.t}</div>
+                    <div className="text-[13px] leading-[1.45] text-warm-gray">{step.s}</div>
                   </div>
                 </div>
               ))}
             </div>
-          )}
-          {sessionsError && <p className="text-sm text-loss">{sessionsError}</p>}
+          </div>
+          <div className="flex-1" />
+        </div>
+      </div>
+    );
+  }
 
-          {sessions && sessions.length === 0 && (
-            <div className="rounded-2xl border border-dashed border-line bg-surface px-4 py-8 text-center">
-              <p className="text-sm text-warm-gray">No sessions yet — create one above to get started.</p>
-            </div>
-          )}
+  /* ── Logged-in header (greeting) ─────────────────────── */
+  const firstName = firstNameOf(user);
 
-          {sessions && sessions.length > 0 && (
-            <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-              {[...liveSessions, ...pastSessions].map((s) => (
-                <Link
-                  key={s.id}
-                  to={`/session/${s.id}/host`}
-                  className="anim-rise flex items-center gap-3 px-4 py-3.5 border-t border-line first:border-t-0 active:bg-surface-2 transition-colors"
-                >
-                  <span
-                    className={`w-2 h-2 rounded-full shrink-0 ${
-                      s.status === "live" ? "bg-court-lime shadow-[0_0_0_3px_rgba(196,226,75,0.28)]" : "bg-stone"
-                    }`}
-                    aria-hidden
-                  />
-                  <div className="flex-1 min-w-0">
-                    <b className="block text-[15px] font-semibold text-graphite truncate">{s.name}</b>
-                    <p className="text-[11px] text-warm-gray mt-0.5 truncate">
-                      {FORMAT_LABELS[s.format] ?? s.format} · Code <span className="font-mono tnum">{s.joinCode}</span> · {formatSessionDate(s.createdAt)}
-                    </p>
-                  </div>
-                  <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M9 18l6-6-6-6" />
-                  </svg>
-                </Link>
-              ))}
-            </div>
+  return (
+    <div className={shell}>
+      {appBar}
+
+      <div className="flex-1 flex flex-col">
+        <div className="px-6 pt-3.5">
+          <h1 className="font-serif text-[30px] font-medium leading-[1.05] tracking-[-0.01em] text-ink">
+            {greeting}, {firstName}.
+          </h1>
+          {sessions && !hasAny && resumable.length === 0 && (
+            <p className="text-sm leading-relaxed text-warm-gray mt-2">
+              Let's set up your first session — a fair draw is seconds away.
+            </p>
           )}
         </div>
-      )}
+
+        {/* Resume setup — a lobby the host left mid-setup, everyone still in it */}
+        {resumable.length > 0 && (
+          <div className="px-4 pt-4 flex flex-col gap-2.5">
+            {resumable.map((l) => (
+              <Link
+                key={l.sessionId}
+                to={`/create?resume=${l.sessionId}`}
+                className="anim-rise relative block rounded-[20px] border-[1.5px] border-dashed px-[22px] py-4 active:scale-[0.99] transition-transform"
+                style={{ background: CREATE_CARD_GRADIENT, borderColor: "#D8C79A" }}
+              >
+                <div className="flex items-center justify-between gap-3">
+                  <div className="min-w-0">
+                    <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-gold-ink">Resume setup</p>
+                    <p className="font-serif font-semibold text-[17px] text-ink truncate mt-0.5">{l.name || "Untitled session"}</p>
+                    <p className="text-[12px] text-warm-gray mt-0.5">
+                      {l.playerCount} {l.playerCount === 1 ? "player" : "players"} waiting · code <span className="font-mono">{l.joinCode}</span>
+                    </p>
+                  </div>
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8A6D33" strokeWidth="2" strokeLinecap="round" className="shrink-0" aria-hidden>
+                    <path d="M5 12h14M13 6l6 6-6 6" />
+                  </svg>
+                </div>
+              </Link>
+            ))}
+          </div>
+        )}
+
+        {/* Loading */}
+        {sessionsLoading && !sessions && (
+          <div className="px-4 pt-5 flex flex-col gap-2.5">
+            <div className="h-[150px] rounded-[20px] skeleton" />
+            <div className="h-[68px] rounded-2xl skeleton" />
+            <div className="h-[68px] rounded-2xl skeleton" />
+          </div>
+        )}
+        {sessionsError && <p className="text-sm text-loss px-6 pt-4">{sessionsError}</p>}
+
+        {/* ── STATE B: Logged-in, no sessions ──────────────── */}
+        {sessions && !hasAny && (
+          <div className="flex-1 flex flex-col px-6">
+            {/* Primary dashed create card */}
+            <Link
+              to="/create"
+              className="mt-[26px] rounded-[20px] border-[1.5px] border-dashed px-[22px] py-[26px] active:scale-[0.99] transition-transform"
+              style={{ background: CREATE_CARD_GRADIENT, borderColor: "#D8C79A" }}
+            >
+              <div className="w-[46px] h-[46px] rounded-[14px] bg-graphite flex items-center justify-center mb-[18px]">
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="#BFA36A" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <path d="M12 5v14M5 12h14" />
+                </svg>
+              </div>
+              <div className="font-serif font-semibold text-xl text-ink">Create a session</div>
+              <div className="text-[13.5px] leading-[1.5] text-ink-2 mt-[7px] max-w-[250px]">
+                Name it, pick a play &amp; scoring format, add players. We'll handle the rounds.
+              </div>
+              <div className="mt-4 inline-flex items-center gap-[7px] text-[13px] font-semibold text-gold-ink">
+                Start setup
+                <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="#8A6D33" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <path d="M5 12h14M13 6l6 6-6 6" />
+                </svg>
+              </div>
+            </Link>
+
+            {/* Secondary dashed join card */}
+            <Link
+              to="/join"
+              className="mt-3.5 rounded-[20px] bg-surface border-[1.5px] border-dashed border-line px-[22px] py-5 flex items-center gap-4 active:scale-[0.99] transition-transform"
+            >
+              <div className="w-[42px] h-[42px] rounded-xl bg-ivory border border-line flex items-center justify-center shrink-0">
+                <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#4A4944" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                  <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" />
+                </svg>
+              </div>
+              <div>
+                <div className="font-serif font-semibold text-base text-ink">Join a game</div>
+                <div className="text-[13px] text-warm-gray mt-0.5">Have a 6-digit code? Hop in.</div>
+              </div>
+            </Link>
+
+            <div className="flex-1" />
+            <p className="text-xs leading-[1.5] text-[#B7B2A8] text-center px-5 py-6">
+              Just watching? <Link to="/watch" className="font-semibold text-gold-ink">Watch a live session by code.</Link>
+            </p>
+          </div>
+        )}
+
+        {/* ── STATE C: Logged-in, has sessions ─────────────── */}
+        {sessions && hasAny && (
+          <div className="flex-1 flex flex-col">
+            {/* Live cards */}
+            {liveSessions.length > 0 && (
+              <div className="px-4 pt-[18px] flex flex-col gap-3">
+                {liveSessions.map((s) => (
+                  <Link
+                    key={s.id}
+                    to={`/session/${s.id}/host`}
+                    className="anim-rise relative block rounded-[20px] bg-surface border border-line overflow-hidden shadow-[0_12px_30px_-18px_rgba(20,20,18,0.28)] active:scale-[0.99] transition-transform"
+                  >
+                    <span className="absolute left-0 top-0 bottom-0 w-1 bg-court-lime" aria-hidden />
+                    <div className="pl-[26px] pr-[22px] py-5">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center gap-2">
+                          <span className="relative w-2 h-2 inline-flex items-center justify-center" aria-hidden>
+                            <span className="absolute w-2 h-2 rounded-full bg-court-lime animate-ping" />
+                            <span className="w-2 h-2 rounded-full bg-[#A9CC2E]" />
+                          </span>
+                          <span className="font-mono font-semibold text-[11px] tracking-[0.16em] text-[#5F7A0E]">LIVE</span>
+                        </div>
+                        <span className="text-xs text-warm-gray">Code {s.joinCode}</span>
+                      </div>
+                      <div className="font-serif font-semibold text-[22px] text-ink mt-3">{s.name}</div>
+                      <div className="text-[13px] text-warm-gray mt-0.5">{FORMAT_LABELS[s.format] ?? s.format}</div>
+                      <div className="mt-4 flex items-center justify-between">
+                        <span className="text-[13px] font-semibold text-ink">Resume hosting</span>
+                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#141412" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                          <path d="M9 6l6 6-6 6" />
+                        </svg>
+                      </div>
+                    </div>
+                  </Link>
+                ))}
+              </div>
+            )}
+
+            {/* Session history */}
+            {pastSessions.length > 0 && (
+              <>
+                <div className="flex items-center justify-between px-6 pt-[26px] pb-3">
+                  <span className="text-[11px] font-semibold uppercase tracking-[0.16em] text-warm-gray">Your sessions</span>
+                  <Link to="/create" className="text-[13px] font-semibold text-gold-ink active:opacity-70">New</Link>
+                </div>
+                <div className="px-4 flex flex-col gap-2.5">
+                  {pastSessions.map((s) => (
+                    <Link
+                      key={s.id}
+                      to={`/session/${s.id}/host`}
+                      className="anim-rise bg-surface border border-line rounded-2xl px-[18px] py-[15px] flex items-center gap-3.5 active:bg-surface-2 transition-colors"
+                    >
+                      <div className="flex-1 min-w-0">
+                        <div className="font-serif font-semibold text-base text-ink truncate">{s.name}</div>
+                        <div className="flex items-center gap-2 mt-[5px]">
+                          <span className="font-mono text-[11px] text-warm-gray">{shortDate(s.createdAt)}</span>
+                          <span className="text-[11px] text-gold-ink bg-gold-soft px-2 py-0.5 rounded-full">
+                            {FORMAT_LABELS[s.format] ?? s.format}
+                          </span>
+                        </div>
+                      </div>
+                      <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#C4BEB4" strokeWidth="2" strokeLinecap="round" className="shrink-0" aria-hidden>
+                        <path d="M9 6l6 6-6 6" />
+                      </svg>
+                    </Link>
+                  ))}
+                </div>
+              </>
+            )}
+            <div className="flex-1 min-h-[24px]" />
+          </div>
+        )}
+      </div>
     </div>
   );
 }

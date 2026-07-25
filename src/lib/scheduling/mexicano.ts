@@ -20,6 +20,7 @@ import {
   Rng,
 } from "./types";
 import { selectPlayersForRound, hasUnavoidableConsecutiveRest } from "./fairness";
+import { chooseCourtSplit } from "./courtSplit";
 
 export interface StandingLookup {
   /** Current points or wins (whatever the session's ranking_basis is) — higher is better. */
@@ -33,11 +34,14 @@ export interface GenerateMexicanoRoundInput {
   standings: StandingLookup;
   /** True only for round 1 (or whenever nobody has a meaningful standing yet). */
   isFirstRound: boolean;
+  /** Partner/opponent history so within-court pairing can rotate partners and
+   * avoid repeats. Optional — without it, pairing falls back to balanced-only. */
+  history?: MatchHistory;
   rng: Rng;
 }
 
 export function generateMexicanoRound(input: GenerateMexicanoRoundInput): RoundResult {
-  const { activePlayerIds, statsById, courtsAvailable, standings, isFirstRound, rng } = input;
+  const { activePlayerIds, statsById, courtsAvailable, standings, isFirstRound, history, rng } = input;
 
   // STEP 1 — who plays. Identical fairness rule as Americano; rank plays no part.
   const { playingIds, restingIds, courtsUsed } = selectPlayersForRound(
@@ -70,11 +74,12 @@ export function generateMexicanoRound(input: GenerateMexicanoRoundInput): RoundR
   const matches: Match[] = [];
   for (let i = 0; i + 3 < ranked.length; i += 4) {
     const group = ranked.slice(i, i + 4); // [rank1, rank2, rank3, rank4] within this group
-    matches.push({
-      courtIndex: Math.floor(i / 4),
-      teamA: [group[0], group[3]], // rank1 + rank4
-      teamB: [group[1], group[2]], // rank2 + rank3
-    });
+    // Partners are chosen by a soft rule: prefer a split that avoids repeat
+    // partnerships (then repeat opponents), with the balanced 1st+4th vs
+    // 2nd+3rd as the tiebreak. It never fails — if every split repeats, it
+    // takes the least-repeating one.
+    const { teamA, teamB } = chooseCourtSplit(group, history);
+    matches.push({ courtIndex: Math.floor(i / 4), teamA, teamB });
   }
 
   const consecutiveRests = hasUnavoidableConsecutiveRest(restingIds, statsById);
@@ -92,7 +97,7 @@ export function generateMexicanoRound(input: GenerateMexicanoRoundInput): RoundR
   explanationParts.push(
     isFirstRound
       ? "Round 1 pairing is randomized (deterministic session seed) since nobody has a standing yet."
-      : "Players on court are grouped into nearby-rank groups of 4 (rank1+rank4 vs rank2+rank3) based on current standings.",
+      : "Players on court are grouped into nearby-rank groups of 4 by current standings; partners rotate each round to avoid repeats while keeping the two teams balanced.",
   );
 
   return { courtsUsed, matches, restingIds, explanation: explanationParts.join(" ") };

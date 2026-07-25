@@ -166,15 +166,17 @@ export async function getSessionStandings(sessionId: string): Promise<SessionSta
   // race-6→3). It stands in for "an even, average game" for each match a
   // subject didn't play, so a rester's Points total stays comparable.
   const neutralRestPoints = Math.floor(scoreRangeForFormat(session.scoring_format as ScoringFormat).max / 2);
-  const computed = computeStandings(subjectIds, completedMatches, adjustments, session.ranking_basis);
-  const maxMatches = computed.reduce((mx, r) => Math.max(mx, r.matchesPlayed), 0);
+  // Compensation is folded into totalPoints INSIDE computeStandings now, so the
+  // table both SHOWS and SORTS BY the same compensated total the round draw
+  // uses — one true number, table and courts can never disagree again.
+  const computed = computeStandings(subjectIds, completedMatches, adjustments, session.ranking_basis, neutralRestPoints);
 
   const rows: StandingsRow[] = computed.map((r) => ({
     ...r,
     playerName: isFixedPartner ? pairLabelById.get(r.subjectId) ?? "?" : nameById.get(r.subjectId) ?? "?",
     teamSide: isFixedPartner ? null : teamSideById.get(r.subjectId) ?? null,
-    compensatedPoints: r.totalPoints + Math.max(0, maxMatches - r.matchesPlayed) * neutralRestPoints,
-    pointAvg: r.matchesPlayed > 0 ? r.totalPoints / r.matchesPlayed : 0,
+    compensatedPoints: r.totalPoints, // == scored points + adjustments + rest compensation
+    pointAvg: r.matchesPlayed > 0 ? r.points / r.matchesPlayed : 0, // raw scored average (compensation excluded)
     winPct: r.matchesPlayed > 0 ? r.wins / r.matchesPlayed : 0,
   }));
 

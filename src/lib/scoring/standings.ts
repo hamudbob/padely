@@ -25,7 +25,12 @@ export interface StandingRow {
   subjectId: string;
   points: number; // raw scored points/games, excluding adjustments
   adjustmentTotal: number;
-  totalPoints: number; // points + adjustmentTotal — what's displayed and sorted on
+  /** Neutral rest compensation: for every match a subject is short of the
+   * highest match count in the field, `restCompensationPerMissedMatch` points
+   * are credited so sitting out (or joining late) is neither a reward nor a
+   * penalty. Shown as the gold "+N" on the table. Folded into totalPoints. */
+  restCompensation: number;
+  totalPoints: number; // points + adjustmentTotal + restCompensation — the ONE number everything sorts on
   wins: number;
   draws: number;
   losses: number;
@@ -38,8 +43,12 @@ export function computeStandings(
   matches: CompletedMatchResult[],
   adjustments: AdjustmentEntry[],
   basis: RankingBasis,
+  /** Points credited per match a subject is short of the field's max match
+   * count (floor(scoreTarget/2) in practice — 2 for best-of-4). Default 0
+   * keeps the pure scored-points behaviour. */
+  restCompensationPerMissedMatch = 0,
 ): StandingRow[] {
-  const base = new Map<string, Omit<StandingRow, "rank" | "totalPoints" | "adjustmentTotal">>();
+  const base = new Map<string, Omit<StandingRow, "rank" | "totalPoints" | "adjustmentTotal" | "restCompensation">>();
   for (const id of subjectIds) {
     base.set(id, { subjectId: id, points: 0, wins: 0, draws: 0, losses: 0, matchesPlayed: 0 });
   }
@@ -68,10 +77,18 @@ export function computeStandings(
     adjTotals.set(adj.subjectId, (adjTotals.get(adj.subjectId) ?? 0) + adj.amount);
   }
 
+  // Neutral rest compensation is relative to the field's busiest player: a
+  // subject who has played `maxMatches - matchesPlayed` fewer games than the
+  // leader is credited that many "average games". A late joiner is just a
+  // subject with a low matchesPlayed, so they get compensated exactly like a
+  // rester — no special-casing needed.
+  const maxMatches = subjectIds.reduce((mx, id) => Math.max(mx, base.get(id)!.matchesPlayed), 0);
+
   const rows: Omit<StandingRow, "rank">[] = subjectIds.map((id) => {
     const b = base.get(id)!;
     const adjustmentTotal = adjTotals.get(id) ?? 0;
-    return { ...b, adjustmentTotal, totalPoints: b.points + adjustmentTotal };
+    const restCompensation = Math.max(0, maxMatches - b.matchesPlayed) * restCompensationPerMissedMatch;
+    return { ...b, adjustmentTotal, restCompensation, totalPoints: b.points + adjustmentTotal + restCompensation };
   });
 
   const primary = (r: Omit<StandingRow, "rank">) => (basis === "points_first" ? r.totalPoints : r.wins);
@@ -80,10 +97,15 @@ export function computeStandings(
   rows.sort((x, y) => {
     if (primary(y) !== primary(x)) return primary(y) - primary(x);
     if (secondary(y) !== secondary(x)) return secondary(y) - secondary(x);
+    // fewer losses breaks the next tie — a drawn record beats a lost one at equal points
+    if (x.losses !== y.losses) return x.losses - y.losses;
     const h2h = headToHeadResult(headToHead, x.subjectId, y.subjectId);
     if (h2h === "x") return -1;
     if (h2h === "y") return 1;
-    return 0; // genuinely tied -> shared rank, stable order otherwise
+    // Final tiebreak: stable by subjectId, so a tied player's position never
+    // "jumps" between rounds just because the field changed (correction:
+    // the reference app's volatile ordering is exactly what we're avoiding).
+    return x.subjectId < y.subjectId ? -1 : x.subjectId > y.subjectId ? 1 : 0;
   });
 
   // assign shared ranks: equal (primary, secondary, and no decisive head-to-head) => same rank
@@ -96,6 +118,7 @@ export function computeStandings(
       const tied =
         primary(prev) === primary(cur) &&
         secondary(prev) === secondary(cur) &&
+        prev.losses === cur.losses &&
         headToHeadResult(headToHead, prev.subjectId, cur.subjectId) === "tie";
       if (!tied) rank = i + 1;
     }
@@ -105,7 +128,7 @@ export function computeStandings(
 }
 
 function applyResult(
-  base: Map<string, Omit<StandingRow, "rank" | "totalPoints" | "adjustmentTotal">>,
+  base: Map<string, Omit<StandingRow, "rank" | "totalPoints" | "adjustmentTotal" | "restCompensation">>,
   id: string,
   scored: number,
   won: boolean,

@@ -23,6 +23,7 @@ import {
   RoundResult,
 } from "../scheduling/types";
 import { computeStandings, CompletedMatchResult } from "../scoring/standings";
+import { scoreRangeForFormat, ScoringFormat } from "../scoring/formats";
 
 export interface GenerateNextRoundResult {
   roundId: string;
@@ -232,9 +233,17 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
         outcome: m.outcome as "win_a" | "win_b" | "draw",
       };
     });
-  const standingsRows = computeStandings(activePlayerIds, finalMatches, [], session.ranking_basis);
+  // Seed pairing by the SAME compensated points the Standings table shows —
+  // never wins. Mexicano is a points ladder; ranking by wins collapses in
+  // low-win formats (best-of-4) and mis-seeds the courts. Compensation folds
+  // in so a rester/late-joiner isn't wrongly at the bottom. We force
+  // "points_first" here (the session's wins/points toggle only affects the
+  // *display*, not the draw), and seed by the deterministic standings ORDER so
+  // the courts and the table can never disagree.
+  const restComp = Math.floor(scoreRangeForFormat(session.scoring_format as ScoringFormat).max / 2);
+  const standingsRows = computeStandings(activePlayerIds, finalMatches, [], "points_first", restComp);
   const rankValueById = new Map<PlayerId, number>(
-    standingsRows.map((r) => [r.subjectId, session.ranking_basis === "points_first" ? r.totalPoints : r.wins]),
+    standingsRows.map((r, i) => [r.subjectId, standingsRows.length - i]), // higher = better; unique, so no tie churn
   );
 
   const newSequence = latestRound.sequence + 1;
@@ -310,6 +319,7 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
                       courtsAvailable: availableCourts.length,
                       standings: standingsLookup,
                       isFirstRound: false,
+                      history,
                       rng,
                     })
                   : generateMexicanoRound({
@@ -318,6 +328,7 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
                       courtsAvailable: availableCourts.length,
                       standings: standingsLookup,
                       isFirstRound: false,
+                      history,
                       rng,
                     });
 
