@@ -12,7 +12,9 @@ import { supabase } from "./client";
  * rank client-side. See PublicLivePage for the derivation.
  */
 export interface PublicSessionData {
-  session: { name: string; format: string; scoringFormat: string; status: "draft" | "live" | "ended" };
+  /** `id` present since migration 0010 — used to key the Realtime broadcast
+   * channel. May be "" if the RPC predates 0010 (falls back to poll-only). */
+  session: { id: string; name: string; format: string; scoringFormat: string; status: "draft" | "live" | "ended" };
   courts: { id: string; displayName: string; available: boolean }[];
   players: { id: string; displayName: string; status: string }[];
   standings: { playerId: string; totalPoints: number; wins: number; draws: number; losses: number; adjustmentTotal: number }[];
@@ -37,7 +39,7 @@ export async function getPublicSession(publicToken: string): Promise<PublicSessi
   // with a typed cast + snake→camel mapping to PublicSessionData; everything the
   // component consumes downstream is fully typed via this interface.
   const d = data as {
-    session?: { name?: string; format?: string; scoring_format?: string; status?: PublicSessionData["session"]["status"] };
+    session?: { id?: string; name?: string; format?: string; scoring_format?: string; status?: PublicSessionData["session"]["status"] };
     courts?: { id: string; display_name: string; available: boolean }[];
     players?: { id: string; display_name: string; status: string }[];
     standings?: { player_id: string; total_points: number; wins: number; draws: number; losses: number; adjustment_total: number }[];
@@ -54,6 +56,7 @@ export async function getPublicSession(publicToken: string): Promise<PublicSessi
   };
   return {
     session: {
+      id: d.session?.id ?? "",
       name: d.session?.name ?? "",
       format: d.session?.format ?? "",
       scoringFormat: d.session?.scoring_format ?? "",

@@ -1,4 +1,5 @@
 import { submitMatchScore } from "./scoreActions";
+import { notifyLiveUpdate } from "./liveChannel";
 import { ScoringFormat } from "../scoring/formats";
 
 /**
@@ -203,6 +204,9 @@ export async function flush(): Promise<void> {
         });
         removeByClientId(item.clientId);
         emit();
+        // The score is now on the server — ping any spectators watching this
+        // session so their live view refetches immediately (best-effort).
+        notifyLiveUpdate(item.sessionId);
       } catch (err) {
         if (isPermanentError(err)) {
           // Poison item — count it and move on so healthy scores still go up.

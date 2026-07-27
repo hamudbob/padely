@@ -19,6 +19,7 @@ import {
   clearPendingForSession,
 } from "../../lib/supabase/scoreSyncQueue";
 import { supabase } from "../../lib/supabase/client";
+import { notifyLiveUpdate } from "../../lib/supabase/liveChannel";
 
 /**
  * Overlays any locally-queued (not-yet-synced) scores on top of the server's
@@ -570,6 +571,7 @@ export default function HostLivePage() {
       load();
       loadRoundHistory();
       if (tab === "standings" || isTeamSparring) loadStandings();
+      notifyLiveUpdate(sessionId); // push the new round to spectators
     } catch (err) {
       setRoundError(err instanceof Error ? err.message : "Could not generate the next round.");
     } finally {
@@ -598,6 +600,7 @@ export default function HostLivePage() {
       load();
       loadRoundHistory();
       loadStandings();
+      notifyLiveUpdate(sessionId); // push the redrawn/deleted round to spectators
     } catch (err) {
       setRoundError(err instanceof Error ? err.message : "Could not update the round.");
     } finally {
@@ -629,6 +632,7 @@ export default function HostLivePage() {
       await confirmJoinRequest(sessionId, request);
       loadJoinRequests();
       load(); // roster now includes the new player
+      notifyLiveUpdate(sessionId); // spectators see the new player on the board
     } catch (err) {
       setManageError(err instanceof Error ? err.message : "Could not add that player.");
     } finally {
@@ -740,6 +744,7 @@ export default function HostLivePage() {
     setEndSessionError(null);
     try {
       await endSession(sessionId);
+      notifyLiveUpdate(sessionId); // flip any watchers to the final/ended view
       setShowEndConfirm(false);
       navigate(`/session/${sessionId}/final`); // straight to the podium; rounds/standings stay reachable from there
     } catch (err) {

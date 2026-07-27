@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
-import { listHostSessions, HostSessionSummary } from "../../lib/supabase/hostSessionsQueries";
+import { getHostHomeSummary, HostHomeSession, HostHomeStats } from "../../lib/supabase/hostHomeQueries";
 import { getResumableLobbies, sweepStaleDrafts, ResumableLobby } from "../../lib/supabase/sessionActions";
 
 const FORMAT_LABELS: Record<string, string> = {
@@ -18,6 +18,13 @@ function greetingFor(date: Date): string {
   if (h < 12) return "Good morning";
   if (h < 18) return "Good afternoon";
   return "Good evening";
+}
+
+// "Monday · 27 Jul"
+function dateKicker(date: Date): string {
+  const weekday = date.toLocaleDateString("en-GB", { weekday: "long" });
+  const day = date.toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  return `${weekday} · ${day}`;
 }
 
 function firstNameOf(user: { user_metadata?: { name?: unknown }; email?: string } | null): string {
@@ -44,22 +51,32 @@ function shortDate(iso: string): string {
     .toUpperCase();
 }
 
+// "1st" / "2nd" / "3rd" / "4th"…
+function ordinal(n: number): string {
+  const s = ["th", "st", "nd", "rd"];
+  const v = n % 100;
+  return n + (s[(v - 20) % 10] ?? s[v] ?? s[0]);
+}
+
 const HERO_GRADIENT = "linear-gradient(168deg,#FBFAF8 0%,#F7F0E3 130%)";
 const GOLD_HAIRLINE = "linear-gradient(90deg,#BFA36A,rgba(191,163,106,0))";
 const CREATE_CARD_GRADIENT = "linear-gradient(165deg,#FBFAF8,#F7F0E3)";
+const LIVE_CARD_GRADIENT = "linear-gradient(160deg,#141412,#242320)";
+const LIME_HAIRLINE = "linear-gradient(90deg,#C4E24B,rgba(196,226,75,0))";
 
 /**
  * Home — three states, per the "Padelier Home" design:
  *   A. Logged-out landing (hero + CTAs + how-it-works)
- *   B. Logged-in, no sessions (dashed create/join cards)
- *   C. Logged-in, has sessions (live card + session history)
- * Bound to real data (host session list). The design's per-court live scores
- * and per-session placement aren't in the home query yet, so those two accents
- * are omitted rather than faked.
+ *   B. Logged-in, no sessions (create/join cards + how-it-works)
+ *   C. Logged-in, has sessions (greeting + stat strip + live card + quick
+ *      actions + history with finishing place)
+ * Bound to real data via getHostHomeSummary (one batched pass that also computes
+ * the host's finishing place per session and account-level stats).
  */
 export default function HomePage() {
   const { user } = useHostSession();
-  const [sessions, setSessions] = useState<HostSessionSummary[] | null>(null);
+  const [sessions, setSessions] = useState<HostHomeSession[] | null>(null);
+  const [stats, setStats] = useState<HostHomeStats | null>(null);
   const [sessionsError, setSessionsError] = useState<string | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [resumable, setResumable] = useState<ResumableLobby[]>([]);
@@ -67,13 +84,17 @@ export default function HomePage() {
   useEffect(() => {
     if (!user) {
       setSessions(null);
+      setStats(null);
       setResumable([]);
       return;
     }
     setSessionsLoading(true);
     setSessionsError(null);
-    listHostSessions()
-      .then(setSessions)
+    getHostHomeSummary()
+      .then((summary) => {
+        setSessions(summary.sessions);
+        setStats(summary.stats);
+      })
       .catch((err) => setSessionsError(err instanceof Error ? err.message : "Could not load your sessions."))
       .finally(() => setSessionsLoading(false));
     // Opportunistic housekeeping: sweep the host's own drafts older than 10
@@ -88,7 +109,8 @@ export default function HomePage() {
 
   const liveSessions = (sessions ?? []).filter((s) => s.status === "live");
   const pastSessions = (sessions ?? []).filter((s) => s.status !== "live");
-  const greeting = greetingFor(new Date());
+  const now = new Date();
+  const greeting = greetingFor(now);
   const hasAny = liveSessions.length > 0 || pastSessions.length > 0;
 
   const shell = "mx-auto max-w-sm min-h-screen bg-ivory flex flex-col safe-top safe-bottom anim-fade";
@@ -186,6 +208,11 @@ export default function HomePage() {
 
   /* ── Logged-in header (greeting) ─────────────────────── */
   const firstName = firstNameOf(user);
+  const statusLine = liveSessions.length > 0
+    ? `${liveSessions.length === 1 ? "One session" : `${liveSessions.length} sessions`} live now — pick up where you left off.`
+    : hasAny
+      ? "No session running — start a fresh draw when you're ready."
+      : "Let's set up your first session — a fair draw is seconds away.";
 
   return (
     <div className={shell}>
@@ -193,15 +220,30 @@ export default function HomePage() {
 
       <div className="flex-1 flex flex-col">
         <div className="px-6 pt-3.5">
+          <p className="text-[10.5px] font-bold uppercase tracking-[0.2em] text-gold-ink mb-2">{dateKicker(now)}</p>
           <h1 className="font-serif text-[30px] font-medium leading-[1.05] tracking-[-0.01em] text-ink">
             {greeting}, {firstName}.
           </h1>
-          {sessions && !hasAny && resumable.length === 0 && (
-            <p className="text-sm leading-relaxed text-warm-gray mt-2">
-              Let's set up your first session — a fair draw is seconds away.
-            </p>
+          {sessions && (
+            <p className="text-sm leading-relaxed text-warm-gray mt-2">{statusLine}</p>
           )}
         </div>
+
+        {/* Stat strip — only once there's real history to summarise */}
+        {stats && hasAny && (
+          <div className="flex gap-2.5 px-6 pt-[18px]">
+            {[
+              { n: String(stats.sessionsHosted), l: "Sessions hosted" },
+              { n: String(stats.activeThisMonth), l: "This month", em: true },
+              { n: String(stats.gamesPlayed), l: "Games played" },
+            ].map((st) => (
+              <div key={st.l} className="flex-1 bg-surface border border-line rounded-2xl px-3.5 py-3">
+                <div className="font-mono tnum font-bold text-[22px] text-ink leading-none">{st.n}</div>
+                <div className="text-[11px] text-warm-gray mt-1.5 leading-tight">{st.l}</div>
+              </div>
+            ))}
+          </div>
+        )}
 
         {/* Resume setup — a lobby the host left mid-setup, everyone still in it */}
         {resumable.length > 0 && (
@@ -282,6 +324,26 @@ export default function HomePage() {
               </div>
             </Link>
 
+            {/* How it works — so a fresh account isn't left staring at empty space */}
+            <div className="mt-8">
+              <p className="text-[11px] font-semibold uppercase tracking-[0.16em] text-warm-gray mb-4">How it works</p>
+              <div className="flex flex-col gap-4">
+                {[
+                  { n: "01", t: "Create", s: "Name it, pick a format, add players." },
+                  { n: "02", t: "Play", s: "The app draws fair rounds; tap to score." },
+                  { n: "03", t: "Rank", s: "A live leaderboard, right to the last game." },
+                ].map((step) => (
+                  <div key={step.n} className="flex gap-[15px] items-baseline">
+                    <span className="font-mono font-semibold text-[15px] text-gold min-w-[20px]">{step.n}</span>
+                    <div>
+                      <div className="font-serif font-semibold text-base text-ink">{step.t}</div>
+                      <div className="text-[13px] leading-[1.45] text-warm-gray">{step.s}</div>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+
             <div className="flex-1" />
             <p className="text-xs leading-[1.5] text-[#B7B2A8] text-center px-5 py-6">
               Just watching? <Link to="/watch" className="font-semibold text-gold-ink">Watch a live session by code.</Link>
@@ -292,40 +354,77 @@ export default function HomePage() {
         {/* ── STATE C: Logged-in, has sessions ─────────────── */}
         {sessions && hasAny && (
           <div className="flex-1 flex flex-col">
-            {/* Live cards */}
+            {/* Live cards — premium dark treatment */}
             {liveSessions.length > 0 && (
               <div className="px-4 pt-[18px] flex flex-col gap-3">
                 {liveSessions.map((s) => (
                   <Link
                     key={s.id}
                     to={`/session/${s.id}/host`}
-                    className="anim-rise relative block rounded-[20px] bg-surface border border-line overflow-hidden shadow-[0_12px_30px_-18px_rgba(20,20,18,0.28)] active:scale-[0.99] transition-transform"
+                    className="anim-rise relative block rounded-[22px] overflow-hidden text-ivory active:scale-[0.99] transition-transform shadow-[0_18px_40px_-22px_rgba(20,20,18,0.7)]"
+                    style={{ background: LIVE_CARD_GRADIENT }}
                   >
-                    <span className="absolute left-0 top-0 bottom-0 w-1 bg-court-lime" aria-hidden />
-                    <div className="pl-[26px] pr-[22px] py-5">
+                    <span className="absolute top-0 left-[22px] right-[22px] h-0.5" style={{ background: LIME_HAIRLINE }} aria-hidden />
+                    <div className="px-[22px] pt-[22px] pb-5">
                       <div className="flex items-center justify-between">
                         <div className="flex items-center gap-2">
                           <span className="relative w-2 h-2 inline-flex items-center justify-center" aria-hidden>
                             <span className="absolute w-2 h-2 rounded-full bg-court-lime animate-ping" />
                             <span className="w-2 h-2 rounded-full bg-[#A9CC2E]" />
                           </span>
-                          <span className="font-mono font-semibold text-[11px] tracking-[0.16em] text-[#5F7A0E]">LIVE</span>
+                          <span className="font-mono font-semibold text-[10.5px] tracking-[0.16em] text-[#cfe86a]">LIVE</span>
                         </div>
-                        <span className="text-xs text-warm-gray">Code {s.joinCode}</span>
+                        <span className="text-[12px] text-ivory/55">Code {s.joinCode}</span>
                       </div>
-                      <div className="font-serif font-semibold text-[22px] text-ink mt-3">{s.name}</div>
-                      <div className="text-[13px] text-warm-gray mt-0.5">{FORMAT_LABELS[s.format] ?? s.format}</div>
-                      <div className="mt-4 flex items-center justify-between">
-                        <span className="text-[13px] font-semibold text-ink">Resume hosting</span>
-                        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#141412" strokeWidth="2" strokeLinecap="round" aria-hidden>
-                          <path d="M9 6l6 6-6 6" />
-                        </svg>
+                      <div className="font-serif font-medium text-[24px] text-ivory mt-3.5">{s.name}</div>
+                      <div className="text-[12.5px] text-ivory/60 mt-1">
+                        {FORMAT_LABELS[s.format] ?? s.format}
+                        {s.roundCount > 0 && <> · Round <span className="font-mono tnum">{s.roundCount}</span> in play</>}
+                      </div>
+                      <div className="mt-5 pt-4 border-t border-white/10 flex items-center justify-between">
+                        <span className="text-[12.5px] text-ivory/70">
+                          <span className="font-mono tnum text-ivory">{s.playerCount}</span> {s.playerCount === 1 ? "player" : "players"}
+                        </span>
+                        <span className="inline-flex items-center gap-2 text-[13px] font-semibold text-ivory">
+                          Resume hosting
+                          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#BFA36A" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                            <path d="M9 6l6 6-6 6" />
+                          </svg>
+                        </span>
                       </div>
                     </div>
                   </Link>
                 ))}
               </div>
             )}
+
+            {/* Quick actions */}
+            <div className="flex gap-2.5 px-4 pt-3.5">
+              <Link
+                to="/create"
+                className="flex-1 bg-surface border border-line rounded-2xl px-4 py-[15px] active:scale-[0.99] transition-transform"
+              >
+                <div className="w-[34px] h-[34px] rounded-[11px] bg-graphite flex items-center justify-center mb-2.5">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#BFA36A" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                    <path d="M12 5v14M5 12h14" />
+                  </svg>
+                </div>
+                <div className="font-serif font-semibold text-[15px] text-ink">New session</div>
+                <div className="text-[11.5px] text-warm-gray mt-0.5">Set up a fresh draw</div>
+              </Link>
+              <Link
+                to="/join"
+                className="flex-1 bg-surface border border-line rounded-2xl px-4 py-[15px] active:scale-[0.99] transition-transform"
+              >
+                <div className="w-[34px] h-[34px] rounded-[11px] bg-gold-soft flex items-center justify-center mb-2.5">
+                  <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#8A6D33" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                    <path d="M15 3h4a2 2 0 0 1 2 2v14a2 2 0 0 1-2 2h-4M10 17l5-5-5-5M15 12H3" />
+                  </svg>
+                </div>
+                <div className="font-serif font-semibold text-[15px] text-ink">Join a game</div>
+                <div className="text-[11.5px] text-warm-gray mt-0.5">Have a 6-digit code?</div>
+              </Link>
+            </div>
 
             {/* Session history */}
             {pastSessions.length > 0 && (
@@ -339,13 +438,32 @@ export default function HomePage() {
                     <Link
                       key={s.id}
                       to={s.status === "ended" ? `/session/${s.id}/final` : `/session/${s.id}/host`}
-                      className="anim-rise bg-surface border border-line rounded-2xl px-[18px] py-[15px] flex items-center gap-3.5 active:bg-surface-2 transition-colors"
+                      className="anim-rise bg-surface border border-line rounded-2xl px-[16px] py-[14px] flex items-center gap-3.5 active:bg-surface-2 transition-colors"
                     >
+                      {/* Finishing-place medal (only when the host actually played) */}
+                      {s.myRank != null ? (
+                        <div
+                          className={`w-[42px] h-[42px] rounded-xl flex flex-col items-center justify-center shrink-0 border ${
+                            s.myRank === 1 ? "bg-gold-soft border-[#e6d6ac]" : "bg-surface-2 border-line"
+                          }`}
+                        >
+                          <span className={`font-mono tnum font-bold text-[13px] leading-none ${s.myRank === 1 ? "text-gold-ink" : "text-ink"}`}>
+                            {ordinal(s.myRank)}
+                          </span>
+                          <span className="text-[8.5px] text-warm-gray mt-0.5">of {s.fieldSize}</span>
+                        </div>
+                      ) : (
+                        <div className="w-[42px] h-[42px] rounded-xl bg-surface-2 border border-line flex items-center justify-center shrink-0">
+                          <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#C4BEB4" strokeWidth="2" strokeLinecap="round" aria-hidden>
+                            <path d="M6 9h12M6 15h12M4 5h16v14H4z" />
+                          </svg>
+                        </div>
+                      )}
                       <div className="flex-1 min-w-0">
-                        <div className="font-serif font-semibold text-base text-ink truncate">{s.name}</div>
+                        <div className="font-serif font-semibold text-[15.5px] text-ink truncate">{s.name}</div>
                         <div className="flex items-center gap-2 mt-[5px]">
-                          <span className="font-mono text-[11px] text-warm-gray">{shortDate(s.createdAt)}</span>
-                          <span className="text-[11px] text-gold-ink bg-gold-soft px-2 py-0.5 rounded-full">
+                          <span className="font-mono text-[10.5px] text-warm-gray">{shortDate(s.createdAt)}</span>
+                          <span className="text-[10.5px] text-gold-ink bg-gold-soft px-2 py-0.5 rounded-full">
                             {FORMAT_LABELS[s.format] ?? s.format}
                           </span>
                         </div>
@@ -358,7 +476,11 @@ export default function HomePage() {
                 </div>
               </>
             )}
-            <div className="flex-1 min-h-[24px]" />
+
+            <div className="flex-1 min-h-[16px]" />
+            <p className="text-xs leading-[1.5] text-[#B7B2A8] text-center px-5 py-6">
+              Just watching? <Link to="/watch" className="font-semibold text-gold-ink">Watch a live session by code.</Link>
+            </p>
           </div>
         )}
       </div>

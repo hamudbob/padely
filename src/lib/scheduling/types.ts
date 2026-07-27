@@ -21,6 +21,11 @@ export interface PlayerFairnessState {
   playerId: PlayerId;
   matchesPlayed: number;
   restedLastRound: boolean;
+  /** Rounds played in a row since this player's last rest (or since they joined).
+   * Drives the soft consecutive-play cap — a player at the cap is pushed to the
+   * front of the rest queue so nobody plays an exhausting streak. Optional:
+   * defaults to 0 (no streak known) so older construction sites still compile. */
+  consecutivePlayed?: number;
 }
 
 export interface Match {

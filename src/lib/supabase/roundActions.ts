@@ -145,12 +145,66 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
   const restedLastRoundSet = new Set(
     (allRests ?? []).filter((r) => r.round_id === latestRound.id).map((r) => r.player_id),
   );
+
+  // Per-round participation, oldest→newest, so we can measure (a) each player's
+  // consecutive-play streak (for the soft rest cap) and (b) how many rounds a
+  // player has missed (for easing mid-session joiners into the rotation).
+  const roundIdByMatchId = new Map<string, string>(matches.map((m) => [m.id, m.round_id]));
+  const playedByRound = new Map<string, Set<PlayerId>>();
+  for (const p of participants) {
+    const rid = roundIdByMatchId.get(p.match_id);
+    if (!rid) continue;
+    const set = playedByRound.get(rid) ?? new Set<PlayerId>();
+    set.add(p.player_id);
+    playedByRound.set(rid, set);
+  }
+  const restedByRound = new Map<string, Set<PlayerId>>();
+  for (const r of allRests ?? []) {
+    const set = restedByRound.get(r.round_id) ?? new Set<PlayerId>();
+    set.add(r.player_id);
+    restedByRound.set(r.round_id, set);
+  }
+  const orderedRoundIds = rounds.map((r) => r.id); // ascending by sequence (query order)
+
+  // Field play rate so far = (total on-court slots) / (total eligible-player
+  // rounds). Used to estimate how many games a joiner would plausibly have
+  // played had they been present, so they enter mid-pack instead of being the
+  // lone lowest (which is what made a late joiner play every round to catch up).
+  let totalPlaySlots = 0;
+  let totalRosterRounds = 0;
+  for (const rid of orderedRoundIds) {
+    const played = playedByRound.get(rid)?.size ?? 0;
+    const rested = restedByRound.get(rid)?.size ?? 0;
+    totalPlaySlots += played;
+    totalRosterRounds += played + rested;
+  }
+  const playRate = totalRosterRounds > 0 ? totalPlaySlots / totalRosterRounds : 1;
+
   const statsById = new Map<PlayerId, PlayerFairnessState>();
   for (const id of activePlayerIds) {
+    // Consecutive games since last rest: count trailing rounds (newest first)
+    // the player was on court, stopping at the first round they rested OR
+    // weren't in the session for.
+    let consecutivePlayed = 0;
+    for (let i = orderedRoundIds.length - 1; i >= 0; i--) {
+      if (playedByRound.get(orderedRoundIds[i])?.has(id)) consecutivePlayed++;
+      else break;
+    }
+    // Rounds this player was eligible for (played or rested); the rest were
+    // before they joined. Estimate the games they'd have played in those missed
+    // rounds at the field rate, and seed it as effective matchesPlayed so the
+    // rest-equalizer treats them like a peer, not a zero.
+    let roundsPresent = 0;
+    for (const rid of orderedRoundIds) {
+      if (playedByRound.get(rid)?.has(id) || restedByRound.get(rid)?.has(id)) roundsPresent++;
+    }
+    const missedRounds = Math.max(0, orderedRoundIds.length - roundsPresent);
+    const joinOffset = Math.round(missedRounds * playRate);
     statsById.set(id, {
       playerId: id,
-      matchesPlayed: matchesPlayedById.get(id) ?? 0,
+      matchesPlayed: (matchesPlayedById.get(id) ?? 0) + joinOffset,
       restedLastRound: restedLastRoundSet.has(id),
+      consecutivePlayed,
     });
   }
 

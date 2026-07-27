@@ -18,11 +18,18 @@ export interface RestSelectionResult {
   courtsUsed: number;
 }
 
+/** Soft cap: after this many games in a row, a player is due a forced rest so
+ * nobody gets stuck on court for an exhausting streak (most visible for a
+ * late joiner who'd otherwise play every round to catch up). "Soft" because it
+ * only reorders WHO rests, never HOW MANY — so it can't leave a court short. */
+export const MAX_CONSECUTIVE_PLAYED = 3;
+
 export function selectPlayersForRound(
   activePlayerIds: PlayerId[],
   stateById: Map<PlayerId, PlayerFairnessState>,
   courtsAvailable: number,
   rng: Rng,
+  maxConsecutivePlayed: number = MAX_CONSECUTIVE_PLAYED,
 ): RestSelectionResult {
   const n = activePlayerIds.length;
   const courtsUsed = Math.min(Math.max(0, courtsAvailable), Math.floor(n / 4));
@@ -37,23 +44,34 @@ export function selectPlayersForRound(
   }
 
   const withKeys = activePlayerIds.map((id) => {
-    const s = stateById.get(id) ?? { playerId: id, matchesPlayed: 0, restedLastRound: false };
+    const s = stateById.get(id) ?? { playerId: id, matchesPlayed: 0, restedLastRound: false, consecutivePlayed: 0 };
+    const consecutivePlayed = s.consecutivePlayed ?? 0;
     return {
       id,
       matchesPlayed: s.matchesPlayed,
       restedLastRound: s.restedLastRound,
+      // A player who's played the cap-many games in a row is "due" a rest and
+      // jumps the rest queue regardless of total games played.
+      dueForRest: consecutivePlayed >= maxConsecutivePlayed,
+      consecutivePlayed,
       tie: rng(),
     };
   });
 
   // Sort "most deserving of a rest" first:
-  //  1) highest matchesPlayed rests first — this is what equalizes playing time
+  //  0) anyone at the consecutive-play cap rests first (the soft streak cap) —
+  //     among several capped players, the longest streak goes first.
+  //  1) highest matchesPlayed rests next — this is what equalizes playing time
   //     (matchesPlayed + rests == rounds elapsed for everyone, so equalizing
   //     matchesPlayed automatically equalizes rest counts too).
   //  2) tie -> prefer resting someone who did NOT rest last round, to avoid
   //     back-to-back rests when an alternative exists.
   //  3) tie -> seeded random, so the same inputs always produce the same round.
   withKeys.sort((a, b) => {
+    if (a.dueForRest !== b.dueForRest) return a.dueForRest ? -1 : 1;
+    if (a.dueForRest && b.dueForRest && b.consecutivePlayed !== a.consecutivePlayed) {
+      return b.consecutivePlayed - a.consecutivePlayed;
+    }
     if (b.matchesPlayed !== a.matchesPlayed) return b.matchesPlayed - a.matchesPlayed;
     if (a.restedLastRound !== b.restedLastRound) return a.restedLastRound ? 1 : -1;
     return b.tie - a.tie;
