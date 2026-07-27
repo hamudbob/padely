@@ -360,7 +360,7 @@ export default function ProfilePage() {
               {[...hostedSessions].map((s) => (
                 <Link
                   key={s.id}
-                  to={`/session/${s.id}/host`}
+                  to={s.status === "ended" ? `/session/${s.id}/final` : `/session/${s.id}/host`}
                   className="flex items-center gap-3 px-4 py-3.5 border-t border-line first:border-t-0 active:bg-surface-2 transition-colors"
                 >
                   <span

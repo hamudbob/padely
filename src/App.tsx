@@ -7,7 +7,6 @@ import JoinPage from "./features/join/JoinPage";
 import WatchPage from "./features/watch/WatchPage";
 import CreateSessionPage from "./features/create-session/CreateSessionPage";
 import HostLivePage from "./features/host-live/HostLivePage";
-import LobbyPage from "./features/lobby/LobbyPage";
 import PublicLivePage from "./features/public-live/PublicLivePage";
 import FinalSummaryPage from "./features/final-summary/FinalSummaryPage";
 
@@ -31,14 +30,6 @@ export default function App() {
         element={
           <RequireHost>
             <CreateSessionPage />
-          </RequireHost>
-        }
-      />
-      <Route
-        path="/session/:sessionId/lobby"
-        element={
-          <RequireHost>
-            <LobbyPage />
           </RequireHost>
         }
       />

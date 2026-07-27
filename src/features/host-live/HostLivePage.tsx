@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { Link, useParams, useNavigate } from "react-router-dom";
 import { getHostLiveSnapshot, HostLiveSnapshot } from "../../lib/supabase/sessionQueries";
 import { generateNextRound, regenerateCurrentRound, deleteCurrentRound } from "../../lib/supabase/roundActions";
 import { endSession } from "../../lib/supabase/sessionActions";
@@ -150,6 +150,7 @@ function initialsOf(name: string): string {
  */
 export default function HostLivePage() {
   const { sessionId } = useParams();
+  const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("round");
   const [snapshot, setSnapshot] = useState<HostLiveSnapshot | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -740,7 +741,7 @@ export default function HostLivePage() {
     try {
       await endSession(sessionId);
       setShowEndConfirm(false);
-      load(); // status flips to "ended" — the whole page (including round 0) goes read-only
+      navigate(`/session/${sessionId}/final`); // straight to the podium; rounds/standings stay reachable from there
     } catch (err) {
       setEndSessionError(err instanceof Error ? err.message : "Could not end this session.");
     } finally {

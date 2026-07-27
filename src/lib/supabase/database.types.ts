@@ -104,6 +104,9 @@ export interface Database {
           team_side?: "A" | "B" | null;
           preferred_side?: "left" | "right" | null;
           email?: string | null;
+          /** Set when we know the account behind this player (host adding themselves,
+           * or a signed-in self-join) so their session history is attributable. */
+          linked_user_id?: string | null;
           status?: "active" | "late" | "left";
         };
         // Partial<Row>, not Partial<Insert> — Insert omits server/lifecycle

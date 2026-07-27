@@ -455,6 +455,7 @@ export default function CreateSessionPage() {
         gender: r.gender,
         teamSide: nextAutoTeamSide(prev),
         preferredSide: r.preferredSide === "L" ? "left" : r.preferredSide === "R" ? "right" : undefined,
+        email: r.email ?? undefined,
       },
     ]);
     setJoinRequests((prev) => prev.filter((x) => x.id !== r.id));
@@ -504,7 +505,19 @@ export default function CreateSessionPage() {
   const hostAlreadyIn = players.some((p) => p.name.trim().toLowerCase() === hostName.toLowerCase());
   function addMe() {
     if (hostAlreadyIn) return;
-    setPlayers((prev) => [...prev, { tempId: nextTempId("p"), name: hostName, gender: "M", teamSide: nextAutoTeamSide(prev) }]);
+    // Stamp the host's own account onto their player row so THIS session shows
+    // up in their profile history (the reason a host's own games didn't count).
+    setPlayers((prev) => [
+      ...prev,
+      {
+        tempId: nextTempId("p"),
+        name: hostName,
+        gender: "M",
+        teamSide: nextAutoTeamSide(prev),
+        email: user?.email ?? undefined,
+        linkedUserId: user?.id ?? null,
+      },
+    ]);
   }
 
   // Auto-balances new players onto whichever team currently has fewer —

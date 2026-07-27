@@ -47,27 +47,38 @@ export function computeStandings(
    * count (floor(scoreTarget/2) in practice — 2 for best-of-4). Default 0
    * keeps the pure scored-points behaviour. */
   restCompensationPerMissedMatch = 0,
+  /** If provided, ONLY these subjects receive rest compensation. Used to keep a
+   * player who LEFT on the board with the points they earned, without crediting
+   * them for rounds played after they left. Undefined = everyone eligible. */
+  compensateOnlyIds?: Set<string>,
 ): StandingRow[] {
   const base = new Map<string, Omit<StandingRow, "rank" | "totalPoints" | "adjustmentTotal" | "restCompensation">>();
   for (const id of subjectIds) {
     base.set(id, { subjectId: id, points: 0, wins: 0, draws: 0, losses: 0, matchesPlayed: 0 });
   }
 
-  // head-to-head ledger: for each pair of subjects that met directly, who won.
-  const headToHead = new Map<string, "a" | "b" | "draw">(); // key = pairKey(subjectA, subjectB) using the order subjectA<subjectB
+  // Head-to-head ledger: the FULL record between each pair of subjects who met
+  // directly — { firstWins, secondWins } where "first" is the lexicographically
+  // smaller id. Accumulated across every meeting (not last-write-wins), so if X
+  // beats Y once and loses once, it's an even h2h — not decided by whoever
+  // played most recently.
+  const headToHead = new Map<string, { firstWins: number; secondWins: number }>();
 
   for (const m of matches) {
     for (const id of m.sideA) applyResult(base, id, m.scoreA, m.outcome === "win_a", m.outcome === "draw");
     for (const id of m.sideB) applyResult(base, id, m.scoreB, m.outcome === "win_b", m.outcome === "draw");
 
-    // record head-to-head for every sideA-vs-sideB subject pairing in this match
+    if (m.outcome === "draw") continue; // a draw decides nothing head-to-head
     for (const a of m.sideA) {
       for (const b of m.sideB) {
         const key = a < b ? `${a}|${b}` : `${b}|${a}`;
+        const rec = headToHead.get(key) ?? { firstWins: 0, secondWins: 0 };
         const aIsFirst = a < b;
-        const result: "a" | "b" | "draw" =
-          m.outcome === "draw" ? "draw" : m.outcome === "win_a" ? (aIsFirst ? "a" : "b") : aIsFirst ? "b" : "a";
-        headToHead.set(key, result);
+        const aWon = m.outcome === "win_a";
+        // credit the winner of THIS encounter to whichever slot they occupy
+        if ((aWon && aIsFirst) || (!aWon && !aIsFirst)) rec.firstWins += 1;
+        else rec.secondWins += 1;
+        headToHead.set(key, rec);
       }
     }
   }
@@ -87,7 +98,8 @@ export function computeStandings(
   const rows: Omit<StandingRow, "rank">[] = subjectIds.map((id) => {
     const b = base.get(id)!;
     const adjustmentTotal = adjTotals.get(id) ?? 0;
-    const restCompensation = Math.max(0, maxMatches - b.matchesPlayed) * restCompensationPerMissedMatch;
+    const eligible = !compensateOnlyIds || compensateOnlyIds.has(id);
+    const restCompensation = eligible ? Math.max(0, maxMatches - b.matchesPlayed) * restCompensationPerMissedMatch : 0;
     return { ...b, adjustmentTotal, restCompensation, totalPoints: b.points + adjustmentTotal + restCompensation };
   });
 
@@ -144,14 +156,15 @@ function applyResult(
 }
 
 function headToHeadResult(
-  ledger: Map<string, "a" | "b" | "draw">,
+  ledger: Map<string, { firstWins: number; secondWins: number }>,
   subjectX: string,
   subjectY: string,
 ): "x" | "y" | "tie" {
   const key = subjectX < subjectY ? `${subjectX}|${subjectY}` : `${subjectY}|${subjectX}`;
   const entry = ledger.get(key);
-  if (!entry || entry === "draw") return "tie"; // "no decisive direct result -> preserve shared rank" (PRD §4)
+  if (!entry || entry.firstWins === entry.secondWins) return "tie"; // never met, or an even record → no decisive result (PRD §4)
   const xIsFirst = subjectX < subjectY;
-  if (entry === "a") return xIsFirst ? "x" : "y";
-  return xIsFirst ? "y" : "x";
+  const firstWonMore = entry.firstWins > entry.secondWins;
+  // the pair's "first" (smaller id) won more → they rank ahead
+  return firstWonMore === xIsFirst ? "x" : "y";
 }

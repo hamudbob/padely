@@ -25,6 +25,12 @@ export async function signUpHost({ name, email, password }: HostCredentials & { 
   return data;
 }
 
+/** Re-send the sign-up confirmation email (for the "didn't get it / check spam" case). */
+export async function resendConfirmation(email: string) {
+  const { error } = await supabase.auth.resend({ type: "signup", email });
+  if (error) throw error;
+}
+
 export async function signInHost({ email, password }: HostCredentials) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
   if (error) throw error;
@@ -82,8 +88,3 @@ export async function updateHostPrefs(prefs: { gender?: "M" | "F"; preferredSide
   return res.user;
 }
 
-export async function getCurrentHost() {
-  const { data, error } = await supabase.auth.getUser();
-  if (error) throw error;
-  return data.user;
-}

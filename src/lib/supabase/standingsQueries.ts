@@ -48,7 +48,12 @@ export async function getSessionStandings(sessionId: string): Promise<SessionSta
     { data: adjustmentRows, error: adjustmentsError },
   ] = await Promise.all([
     supabase.from("sessions").select("ranking_basis, format, fixed_partner_style, scoring_format").eq("id", sessionId).single(),
-    supabase.from("players").select("id, display_name, team_side").eq("session_id", sessionId).eq("status", "active"),
+    // ALL players, including those who left — a player who leaves keeps the
+    // points they earned on the board (they used to vanish entirely). `status`
+    // is read so left players can be marked, and so only currently-active
+    // players receive rest compensation (a leaver isn't credited for rounds
+    // after they left).
+    supabase.from("players").select("id, display_name, team_side, status").eq("session_id", sessionId),
     supabase.from("rounds").select("id").eq("session_id", sessionId),
     supabase.from("adjustments").select("player_id, pair_id, amount").eq("session_id", sessionId),
   ]);
@@ -66,7 +71,10 @@ export async function getSessionStandings(sessionId: string): Promise<SessionSta
   // is kept for backward compat with pre-rework session rows.
   const isFixedPartner = session.fixed_partner_style !== null || session.format === "fixed_partner";
 
+  // All players are subjects now (left players stay on the board); only the
+  // currently-active ones are eligible for rest compensation.
   const activePlayerIds = (players ?? []).map((p) => p.id);
+  const activeCompensationIds = new Set((players ?? []).filter((p) => p.status === "active").map((p) => p.id));
   const nameById = new Map((players ?? []).map((p) => [p.id, p.display_name]));
   const teamSideById = new Map((players ?? []).map((p) => [p.id, p.team_side]));
   const roundIds = (rounds ?? []).map((r) => r.id);
@@ -169,7 +177,17 @@ export async function getSessionStandings(sessionId: string): Promise<SessionSta
   // Compensation is folded into totalPoints INSIDE computeStandings now, so the
   // table both SHOWS and SORTS BY the same compensated total the round draw
   // uses — one true number, table and courts can never disagree again.
-  const computed = computeStandings(subjectIds, completedMatches, adjustments, session.ranking_basis, neutralRestPoints);
+  const computed = computeStandings(
+    subjectIds,
+    completedMatches,
+    adjustments,
+    session.ranking_basis,
+    neutralRestPoints,
+    // Only active players earn compensation; a player who left keeps the points
+    // they scored but isn't credited for rounds after their exit. (Fixed Partner
+    // pairs don't have a leave flow, so everyone stays eligible there.)
+    isFixedPartner ? undefined : activeCompensationIds,
+  );
 
   const rows: StandingsRow[] = computed.map((r) => ({
     ...r,

@@ -31,10 +31,16 @@ export interface PendingScore {
   editedBy: string;
   reason?: string;
   enqueuedAt: number;
+  /** How many times a PERMANENT-looking upload error has been seen for this
+   * item. Transient/offline failures don't count. At MAX_ATTEMPTS the item is
+   * "parked" (dead-lettered): skipped by flush and excluded from the pending
+   * count, so one un-syncable score can never block the rest or Next Round. */
+  attempts?: number;
 }
 
 const STORAGE_KEY = "padelier:pendingScores:v1";
 const RETRY_INTERVAL_MS = 15000;
+const MAX_ATTEMPTS = 5;
 
 function makeClientId(): string {
   return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`;
@@ -82,8 +88,32 @@ export function getPending(sessionId?: string): PendingScore[] {
   return sessionId ? queue.filter((q) => q.sessionId === sessionId) : [...queue];
 }
 
+/** Scores still trying to sync (excludes parked/dead-lettered ones), so a
+ * poison item never keeps this above 0 forever — Next Round waits on this. */
 export function pendingCountFor(sessionId: string): number {
-  return queue.filter((q) => q.sessionId === sessionId).length;
+  return queue.filter((q) => q.sessionId === sessionId && (q.attempts ?? 0) < MAX_ATTEMPTS).length;
+}
+
+/** Scores that gave up after repeated permanent errors — surfaced so the host
+ * can retry or discard them (they're never silently dropped). */
+export function failedCountFor(sessionId: string): number {
+  return queue.filter((q) => q.sessionId === sessionId && (q.attempts ?? 0) >= MAX_ATTEMPTS).length;
+}
+
+/** Un-park every failed score for a session and try again (host "Retry sync"). */
+export function retryFailedForSession(sessionId: string): void {
+  let changed = false;
+  for (const q of queue) {
+    if (q.sessionId === sessionId && (q.attempts ?? 0) >= MAX_ATTEMPTS) {
+      q.attempts = 0;
+      changed = true;
+    }
+  }
+  if (changed) {
+    persist();
+    emit();
+    void flush();
+  }
 }
 
 /**
@@ -128,22 +158,40 @@ function removeByClientId(clientId: string): void {
 }
 
 /**
- * Try to upload every queued score in order. Safe to call anytime — it's a
- * no-op when already running, offline, or empty. Stops on the first failure
- * and leaves the rest queued for the next retry (interval / online event).
+ * A permanent error is one retrying can't fix — a deleted match, a validation
+ * failure, any server data error (it came back with a code). A transient error
+ * is a fetch/offline failure (no code): retrying later WILL work. We only count
+ * attempts (toward parking) for permanent errors, and we stop the whole cycle
+ * on a transient one (the network's down, so the rest would fail too).
+ */
+function isPermanentError(err: unknown): boolean {
+  const code = (err as { code?: string } | null)?.code;
+  if (code) return true; // Supabase/PostgREST responded with a data error
+  const msg = (err instanceof Error ? err.message : String(err)).toLowerCase();
+  return /not found|already|invalid|must|enter |between|non-negative|cannot|expired/.test(msg);
+}
+
+/**
+ * Upload queued scores. Safe to call anytime — no-op when already running,
+ * offline, or empty. Each score syncs INDEPENDENTLY: a permanently-failing one
+ * is retried a few times then parked (so it can never block the scores behind
+ * it, or Next Round). A transient/offline failure stops the cycle to retry the
+ * whole batch when the connection is back.
  */
 export async function flush(): Promise<void> {
   if (flushing) return;
-  if (queue.length === 0) return;
   if (typeof navigator !== "undefined" && "onLine" in navigator && !navigator.onLine) return;
+  if (!queue.some((q) => (q.attempts ?? 0) < MAX_ATTEMPTS)) return; // nothing live to send
 
   flushing = true;
   emit();
   try {
     // Snapshot up front; enqueue() may mutate `queue` while we await.
     for (const item of [...queue]) {
-      // It may have been replaced/removed by a newer enqueue mid-flush.
-      if (!queue.some((q) => q.clientId === item.clientId)) continue;
+      // Re-read the live row: it may have been replaced/removed by a newer
+      // enqueue, or already parked.
+      const current = queue.find((q) => q.clientId === item.clientId);
+      if (!current || (current.attempts ?? 0) >= MAX_ATTEMPTS) continue;
       try {
         await submitMatchScore({
           matchId: item.matchId,
@@ -155,9 +203,15 @@ export async function flush(): Promise<void> {
         });
         removeByClientId(item.clientId);
         emit();
-      } catch {
-        // Likely offline / transient — keep this and everything after it and
-        // bail; a later retry picks up where we left off.
+      } catch (err) {
+        if (isPermanentError(err)) {
+          // Poison item — count it and move on so healthy scores still go up.
+          current.attempts = (current.attempts ?? 0) + 1;
+          persist();
+          emit();
+          continue;
+        }
+        // Transient / offline — leave everything as-is and retry the batch later.
         break;
       }
     }

@@ -187,9 +187,15 @@ export default function FinalSummaryPage() {
       >
         Share result
       </button>
+      <Link
+        to={`/session/${sessionId ?? ""}/host`}
+        className="block w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-white/25 text-ivory/90 bg-transparent active:scale-[0.99] transition-transform"
+      >
+        View all rounds &amp; scores
+      </Link>
       <button
         onClick={() => navigate("/")}
-        className="w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-white/40 text-ivory bg-transparent active:scale-[0.99] transition-transform"
+        className="w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold text-ivory/70 bg-transparent active:opacity-70"
       >
         Back to sessions
       </button>

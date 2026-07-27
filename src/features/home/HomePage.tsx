@@ -338,7 +338,7 @@ export default function HomePage() {
                   {pastSessions.map((s) => (
                     <Link
                       key={s.id}
-                      to={`/session/${s.id}/host`}
+                      to={s.status === "ended" ? `/session/${s.id}/final` : `/session/${s.id}/host`}
                       className="anim-rise bg-surface border border-line rounded-2xl px-[18px] py-[15px] flex items-center gap-3.5 active:bg-surface-2 transition-colors"
                     >
                       <div className="flex-1 min-w-0">

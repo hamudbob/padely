@@ -47,15 +47,12 @@ export interface MatchHistory {
   partnerPairsSeen: Set<string>;
   /** Every opponent pair (across the net from each other) seen previously. */
   opponentPairsSeen: Set<string>;
-  /** courtIndex a player last appeared on, for light court-repeat spreading. */
-  lastCourtByPlayer: Map<PlayerId, number>;
 }
 
 export function emptyHistory(): MatchHistory {
   return {
     partnerPairsSeen: new Set(),
     opponentPairsSeen: new Set(),
-    lastCourtByPlayer: new Map(),
   };
 }
 
@@ -68,9 +65,6 @@ export function recordRoundInHistory(history: MatchHistory, round: RoundResult):
       for (const b of m.teamB) {
         history.opponentPairsSeen.add(pairKey(a, b));
       }
-    }
-    for (const p of [...m.teamA, ...m.teamB]) {
-      history.lastCourtByPlayer.set(p, m.courtIndex);
     }
   }
 }

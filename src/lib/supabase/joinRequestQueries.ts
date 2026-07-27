@@ -27,7 +27,7 @@ export async function listJoinRequests(sessionId: string): Promise<JoinRequest[]
     .eq("status", "pending")
     .order("created_at", { ascending: true });
   if (error) throw error;
-  return (data ?? []).map((r) => ({
+  const mapped = (data ?? []).map((r) => ({
     id: r.id,
     displayName: r.display_name,
     gender: r.gender,
@@ -36,6 +36,16 @@ export async function listJoinRequests(sessionId: string): Promise<JoinRequest[]
     email: r.email,
     createdAt: r.created_at,
   }));
+  // Collapse duplicates: if someone taps "join" more than once they create
+  // several pending rows, and the host was seeing the same person repeated.
+  // Keep only the most recent pending request per person (keyed by email when
+  // present, else name). Rows are ascending by created_at, so a later row wins.
+  const byPerson = new Map<string, (typeof mapped)[number]>();
+  for (const r of mapped) {
+    const key = (r.email?.trim().toLowerCase() || r.displayName.trim().toLowerCase()) + "|" + (r.teamSide ?? "");
+    byPerson.set(key, r);
+  }
+  return [...byPerson.values()].sort((a, b) => a.createdAt.localeCompare(b.createdAt));
 }
 
 /**
