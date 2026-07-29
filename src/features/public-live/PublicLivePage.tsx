@@ -46,6 +46,8 @@ export default function PublicLivePage() {
   // Keep the latest fetch in a ref so background refetches never race the token.
   const tokenRef = useRef<string | undefined>(publicToken);
   tokenRef.current = publicToken;
+  const updatedTimer = useRef<number | null>(null);
+  const lastRefetchAt = useRef(0); // throttles live refetches (anti-amplification)
 
   const load = useCallback(
     async (silent: boolean) => {
@@ -65,7 +67,8 @@ export default function PublicLivePage() {
           setData(d);
           if (silent) {
             setJustUpdated(true);
-            window.setTimeout(() => setJustUpdated(false), 1200);
+            if (updatedTimer.current != null) window.clearTimeout(updatedTimer.current);
+            updatedTimer.current = window.setTimeout(() => setJustUpdated(false), 1200);
           }
         }
       } catch (err) {
@@ -82,6 +85,11 @@ export default function PublicLivePage() {
     void load(false);
   }, [publicToken, load]);
 
+  // Clear the "· updated" flash timer on unmount.
+  useEffect(() => () => {
+    if (updatedTimer.current != null) window.clearTimeout(updatedTimer.current);
+  }, []);
+
   const sessionId = data?.session.id ?? "";
   const isLive = data?.session.status === "live";
 
@@ -90,7 +98,15 @@ export default function PublicLivePage() {
   // poll and focus-refetch are belt-and-braces for a dropped ping.
   useEffect(() => {
     if (!isLive) return;
-    const refetch = () => void load(true);
+    // Throttle: a live refetch runs at most once every 2.5s, so a burst of
+    // realtime pings (including any spoofed on the public channel) collapses to
+    // a single RPC call instead of amplifying into a refetch storm.
+    const refetch = () => {
+      const now = Date.now();
+      if (now - lastRefetchAt.current < 2500) return;
+      lastRefetchAt.current = now;
+      void load(true);
+    };
 
     const unsub = sessionId ? subscribeLiveUpdates(sessionId, refetch) : undefined;
     const interval = window.setInterval(refetch, SAFETY_POLL_MS);
@@ -145,19 +161,19 @@ export default function PublicLivePage() {
     );
   }
 
-  const { session, players, standings, rounds, matches } = data;
-  const nameById = new Map(players.map((p) => [p.id, p.displayName]));
+  const { session, standings, rounds, matches } = data;
 
-  // Leaderboard (points → wins → fewer losses; the RPC returns no rank/name).
-  const board = [...standings]
-    .sort((a, b) => b.totalPoints - a.totalPoints || b.wins - a.wins || a.losses - b.losses)
-    .map((s, i) => ({
-      rank: i + 1,
-      name: nameById.get(s.playerId) ?? "Player",
-      points: s.totalPoints,
-      wins: s.wins,
-      losses: s.losses,
-    }));
+  // Leaderboard rows are already ranked by assembleStandings — the SAME engine
+  // the host uses (rest compensation, ranking_basis, integer wins, Fixed-Partner
+  // pair collapse, zero-match players all handled server-side-of-truth). Just map
+  // for display, preserving the computed order and shared ranks.
+  const board = standings.map((s) => ({
+    rank: s.rank,
+    name: s.playerName,
+    points: s.totalPoints,
+    wins: s.wins,
+    losses: s.losses,
+  }));
 
   // Court scores grouped by round.
   const roundSeqs = [...new Set(matches.map((m) => m.roundSequence))].sort((a, b) => a - b);

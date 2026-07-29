@@ -277,6 +277,31 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["score_edits"]["Insert"]>;
         Relationships: [];
       };
+      audit_events: {
+        Row: {
+          id: string;
+          session_id: string;
+          actor_id: string;
+          entity_type: string;
+          entity_id: string;
+          old_value: Record<string, unknown> | null;
+          new_value: Record<string, unknown> | null;
+          reason: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          session_id: string;
+          actor_id: string;
+          entity_type: string;
+          entity_id: string;
+          old_value?: Record<string, unknown> | null;
+          new_value?: Record<string, unknown> | null;
+          reason?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["audit_events"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: {
       standings_live: {

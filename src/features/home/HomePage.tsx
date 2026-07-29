@@ -105,7 +105,11 @@ export default function HomePage() {
       .then(() => getResumableLobbies())
       .then(setResumable)
       .catch(() => setResumable([]));
-  }, [user]);
+    // Depend on the user *id*, not the whole user object: supabase hands back a
+    // fresh user reference on every hourly TOKEN_REFRESHED, which would
+    // otherwise re-run this entire batched summary load for no reason.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const liveSessions = (sessions ?? []).filter((s) => s.status === "live");
   const pastSessions = (sessions ?? []).filter((s) => s.status !== "live");
@@ -345,7 +349,7 @@ export default function HomePage() {
             </div>
 
             <div className="flex-1" />
-            <p className="text-xs leading-[1.5] text-[#B7B2A8] text-center px-5 py-6">
+            <p className="text-xs leading-[1.5] text-warm-gray text-center px-5 py-6">
               Just watching? <Link to="/watch" className="font-semibold text-gold-ink">Watch a live session by code.</Link>
             </p>
           </div>
@@ -478,7 +482,7 @@ export default function HomePage() {
             )}
 
             <div className="flex-1 min-h-[16px]" />
-            <p className="text-xs leading-[1.5] text-[#B7B2A8] text-center px-5 py-6">
+            <p className="text-xs leading-[1.5] text-warm-gray text-center px-5 py-6">
               Just watching? <Link to="/watch" className="font-semibold text-gold-ink">Watch a live session by code.</Link>
             </p>
           </div>

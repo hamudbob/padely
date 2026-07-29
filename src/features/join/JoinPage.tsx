@@ -134,6 +134,10 @@ export default function JoinPage() {
   // this email and the fields are still untouched.
   async function handleEmailBlur() {
     if (!email.trim()) return;
+    // Guest prefill is only available to a signed-in user for their OWN email
+    // (lookup_guest is bound to the caller's JWT since 0011 — no anon lookups).
+    // An anon joiner simply types their details; they're never blocked.
+    if (!user || email.trim().toLowerCase() !== (user.email ?? "").toLowerCase()) return;
     try {
       const guest = await lookupGuest(email);
       if (!guest) return;

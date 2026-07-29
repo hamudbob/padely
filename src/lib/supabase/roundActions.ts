@@ -79,7 +79,10 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
 
   const [courtsResult, playersResult, roundsResult, pairsResult] = await Promise.all([
     supabase.from("courts").select("id, ordinal, available").eq("session_id", sessionId).eq("available", true).order("ordinal", { ascending: true }),
-    supabase.from("players").select("id, status, team_side, gender").eq("session_id", sessionId).eq("status", "active"),
+    // Ordered so activePlayerIds has a STABLE order — the seeded RNG consumes
+    // it positionally, so an unordered fetch could make "Refresh" (same seed)
+    // draw differently just because DB row order shifted after an edit.
+    supabase.from("players").select("id, status, team_side, gender").eq("session_id", sessionId).eq("status", "active").order("joined_at", { ascending: true }).order("id", { ascending: true }),
     supabase.from("rounds").select("id, sequence, status").eq("session_id", sessionId).order("sequence", { ascending: true }),
     fetchPairs(),
   ]);

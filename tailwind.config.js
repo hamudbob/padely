@@ -11,7 +11,7 @@ export default {
         "ink-2": "#4A4944", // secondary / supporting text
         ivory: "#F7F5F2", // primary surface — warmer than white
         stone: "#D6D3CE", // structure: dividers, tracks, quiet fills
-        "warm-gray": "#8A8A8A", // captions, metadata
+        "warm-gray": "#6B6A66", // captions, metadata — darkened from #8A8A8A to clear WCAG AA (≥4.5:1 on ivory)
         line: "#E2DDD4", // hairline borders
         surface: "#FFFFFF",
         "surface-2": "#FBFAF8",

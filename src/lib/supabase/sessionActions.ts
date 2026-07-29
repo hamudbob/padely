@@ -271,7 +271,12 @@ export async function deleteSession(sessionId: string): Promise<void> {
  */
 export type LobbyState = Record<string, unknown> & { players?: unknown[] };
 export async function saveLobbyState(sessionId: string, state: LobbyState): Promise<void> {
-  const { error } = await supabase.from("sessions").update({ draft_state: state }).eq("id", sessionId);
+  // Bump updated_at too — getResumableLobbies orders by it, so without this an
+  // edited older draft wouldn't rise to the top of the "Resume setup" list.
+  const { error } = await supabase
+    .from("sessions")
+    .update({ draft_state: state, updated_at: new Date().toISOString() })
+    .eq("id", sessionId);
   if (error) throw error;
 }
 

@@ -186,6 +186,11 @@ export async function flush(): Promise<void> {
 
   flushing = true;
   emit();
+  // Sessions that had at least one score reach the server this flush — we ping
+  // spectators ONCE per session after the drain, not once per score, so a
+  // reconnect that uploads N queued scores doesn't fan out N full-RPC refetches
+  // to every watcher.
+  const touchedSessions = new Set<string>();
   try {
     // Snapshot up front; enqueue() may mutate `queue` while we await.
     for (const item of [...queue]) {
@@ -204,9 +209,9 @@ export async function flush(): Promise<void> {
         });
         removeByClientId(item.clientId);
         emit();
-        // The score is now on the server — ping any spectators watching this
-        // session so their live view refetches immediately (best-effort).
-        notifyLiveUpdate(item.sessionId);
+        // The score is now on the server — remember the session so we ping its
+        // spectators once, after the whole drain (best-effort).
+        touchedSessions.add(item.sessionId);
       } catch (err) {
         if (isPermanentError(err)) {
           // Poison item — count it and move on so healthy scores still go up.
@@ -222,6 +227,9 @@ export async function flush(): Promise<void> {
   } finally {
     flushing = false;
     emit();
+    // One ping per touched session, after the drain — coalesces a burst of
+    // reconnect uploads into a single spectator refetch per session.
+    for (const sessionId of touchedSessions) notifyLiveUpdate(sessionId);
   }
 }
 

@@ -73,21 +73,44 @@ export async function getHostHomeSummary(): Promise<HostHomeSummary> {
   const sessions = sessionRows ?? [];
   if (sessions.length === 0) return EMPTY;
 
-  const sessionIds = sessions.map((s) => s.id);
+  // Placement/round enrichment (the expensive per-session standings computation)
+  // is bounded to the live sessions plus the most recent ended ones, so this
+  // landing-screen query can't grow without limit as a host's history piles up.
+  // Older sessions still list — they just show no finishing-place medal (myRank
+  // null, which the UI already renders as a neutral state). The proper unbounded
+  // fix is snapshotting placement onto the session row at endSession() (needs a
+  // small migration); this is the safe interim bound.
+  const ENRICH_RECENT_ENDED = 25;
+  const liveIds = sessions.filter((s) => s.status === "live").map((s) => s.id);
+  const endedIds = sessions.filter((s) => s.status !== "live").map((s) => s.id).slice(0, ENRICH_RECENT_ENDED);
+  const enrichIds = [...liveIds, ...endedIds];
+  const enrichSet = new Set(enrichIds);
 
-  // Batched children — players / rounds / adjustments / pairs keyed by session,
-  // then matches by round, then participants by match. Six queries total, flat
-  // regardless of how many sessions the host has.
+  if (enrichIds.length === 0) {
+    // No sessions to enrich (shouldn't happen given the guard above), but keep
+    // the shape correct.
+    return {
+      sessions: sessions.map((s) => ({
+        id: s.id, name: s.name, format: s.format, status: s.status, joinCode: s.join_code,
+        createdAt: s.created_at, endedAt: s.ended_at, playerCount: 0, roundCount: 0, fieldSize: 0, myRank: null, myGames: 0,
+      })),
+      stats: { sessionsHosted: sessions.length, activeThisMonth: 0, gamesPlayed: 0 },
+    };
+  }
+
+  // Batched children — only for the enriched window. players / rounds /
+  // adjustments / pairs keyed by session, then matches by round, then
+  // participants by match. Flat regardless of how many sessions the host has.
   const [
     { data: players, error: playersError },
     { data: rounds, error: roundsError },
     { data: adjustments, error: adjustmentsError },
     { data: pairs, error: pairsError },
   ] = await Promise.all([
-    supabase.from("players").select("id, session_id, display_name, team_side, status, email, linked_user_id").in("session_id", sessionIds),
-    supabase.from("rounds").select("id, session_id").in("session_id", sessionIds),
-    supabase.from("adjustments").select("session_id, player_id, pair_id, amount").in("session_id", sessionIds),
-    supabase.from("pairs").select("id, session_id, player_a_id, player_b_id").in("session_id", sessionIds),
+    supabase.from("players").select("id, session_id, display_name, team_side, status, email, linked_user_id").in("session_id", enrichIds),
+    supabase.from("rounds").select("id, session_id").in("session_id", enrichIds),
+    supabase.from("adjustments").select("session_id, player_id, pair_id, amount").in("session_id", enrichIds),
+    supabase.from("pairs").select("id, session_id, player_a_id, player_b_id").in("session_id", enrichIds),
   ]);
   if (playersError) throw playersError;
   if (roundsError) throw roundsError;
@@ -147,6 +170,13 @@ export async function getHostHomeSummary(): Promise<HostHomeSummary> {
   const emailLc = user.email?.trim().toLowerCase() ?? null;
 
   const enriched: HostHomeSession[] = sessions.map((s) => {
+    // Sessions outside the enrichment window list without a placement medal.
+    if (!enrichSet.has(s.id)) {
+      return {
+        id: s.id, name: s.name, format: s.format, status: s.status, joinCode: s.join_code,
+        createdAt: s.created_at, endedAt: s.ended_at, playerCount: 0, roundCount: 0, fieldSize: 0, myRank: null, myGames: 0,
+      };
+    }
     const sessionPlayers = playersBySession.get(s.id) ?? [];
     const sessionPairs = pairsBySession.get(s.id) ?? [];
 
@@ -202,12 +232,25 @@ export async function getHostHomeSummary(): Promise<HostHomeSummary> {
     };
   });
 
+  // All-time games played by the host — accurate even for sessions outside the
+  // enrichment window, via a cheap head-count of the host's own participant rows
+  // (no standings computation needed).
+  const allSessionIds = sessions.map((s) => s.id);
+  let gamesPlayed = 0;
+  const orFilter = emailLc ? `linked_user_id.eq.${user.id},email.eq.${emailLc}` : `linked_user_id.eq.${user.id}`;
+  const { data: hostPlayerRows } = await supabase.from("players").select("id").in("session_id", allSessionIds).or(orFilter);
+  const hostPlayerIds = (hostPlayerRows ?? []).map((r) => r.id);
+  if (hostPlayerIds.length > 0) {
+    const { count } = await supabase.from("match_participants").select("*", { count: "exact", head: true }).in("player_id", hostPlayerIds);
+    gamesPlayed = count ?? 0;
+  }
+
   const now = new Date();
   const monthStart = new Date(now.getFullYear(), now.getMonth(), 1).getTime();
   const stats: HostHomeStats = {
-    sessionsHosted: enriched.length,
-    activeThisMonth: enriched.filter((s) => new Date(s.createdAt).getTime() >= monthStart).length,
-    gamesPlayed: enriched.reduce((sum, s) => sum + s.myGames, 0),
+    sessionsHosted: sessions.length,
+    activeThisMonth: sessions.filter((s) => new Date(s.created_at).getTime() >= monthStart).length,
+    gamesPlayed,
   };
 
   return { sessions: enriched, stats };
