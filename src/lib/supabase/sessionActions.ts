@@ -1,4 +1,6 @@
 import { supabase } from "./client";
+import { applySessionRatings } from "./ratingActions";
+import { applySessionResults } from "./resultActions";
 import type { Database } from "./database.types";
 import type { RoundResult } from "../scheduling/types";
 import { Pair, buildPairByPlayerId, pairLabel } from "../scheduling/fixedPartner";
@@ -41,6 +43,8 @@ export interface SessionDraft {
   /** Set only when the host locked partners for the session — 'round_robin'
    * (Americano base) or 'rank_based' (Mexicano base). Undefined otherwise. */
   fixedPartnerStyle?: "round_robin" | "rank_based";
+  /** Optional club (team) this session is being played for (0018). */
+  clubId?: string | null;
 }
 
 function randomJoinCode(): string {
@@ -73,6 +77,8 @@ export interface CreateLobbyInput {
   rankingBasis: RankingBasis;
   teamScoreMode?: "by_point" | "by_win" | "by_round";
   fixedPartnerStyle?: "round_robin" | "rank_based";
+  /** Optional club (team) this session is being played for (0018). */
+  clubId?: string | null;
 }
 
 export async function createLobby(input: CreateLobbyInput): Promise<StartSessionResult> {
@@ -106,6 +112,7 @@ export async function createLobby(input: CreateLobbyInput): Promise<StartSession
         min_players_per_court: 4,
         team_score_mode: input.teamScoreMode ?? null,
         fixed_partner_style: input.fixedPartnerStyle ?? null,
+        club_id: input.clubId ?? null,
         created_by: user.id,
       })
       .select("id")
@@ -144,6 +151,7 @@ export async function finalizeAndStart(
       ranking_basis: draft.rankingBasis,
       team_score_mode: draft.teamScoreMode ?? null,
       fixed_partner_style: draft.fixedPartnerStyle ?? null,
+      club_id: draft.clubId ?? null,
       scheduling_seed: schedulingSeed,
     })
     .eq("id", sessionId);
@@ -250,6 +258,17 @@ export async function endSession(sessionId: string): Promise<void> {
     .update({ status: "ended", ended_at: new Date().toISOString() })
     .eq("id", sessionId);
   if (error) throw error;
+  // Apply each account player's global rating for this session. Best-effort and
+  // idempotent (guarded by sessions.ratings_applied) — a failure must never
+  // block ending, and a later retry can't double-count.
+  await applySessionRatings(sessionId).catch((e) => {
+    console.warn("Rating update deferred for session", sessionId, e);
+  });
+  // Record the club league results for this session (no-op for non-team
+  // sessions). Best-effort + replace semantics — safe to retry, never blocks.
+  await applySessionResults(sessionId).catch((e) => {
+    console.warn("League results deferred for session", sessionId, e);
+  });
 }
 
 /**

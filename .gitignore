@@ -9,3 +9,4 @@ vite.config.js
 vite.config.d.ts
 _to_delete/
 _to_delete/
+_git_stale_locks/

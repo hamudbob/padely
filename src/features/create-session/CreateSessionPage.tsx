@@ -20,6 +20,8 @@ import {
 import { generateInitialRounds } from "../../lib/scheduling/initialSchedule";
 import { createLobby, finalizeAndStart, deleteSession, saveLobbyState, getResumableLobbies, DraftCourt, DraftPlayer } from "../../lib/supabase/sessionActions";
 import { listJoinRequests, acknowledgeJoinRequest, rejectJoinRequest, JoinRequest } from "../../lib/supabase/joinRequestQueries";
+import { getMyTeams, MyTeam } from "../../lib/supabase/teamQueries";
+import { getEventGoing, linkEventSession } from "../../lib/supabase/eventQueries";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 
 type SessionFormat = Database["public"]["Tables"]["sessions"]["Row"]["format"];
@@ -128,7 +130,17 @@ export default function CreateSessionPage() {
   const resumeId = searchParams.get("resume");
   const { user } = useHostSession();
   const [step, setStep] = useState(0);
-  const [name, setName] = useState("");
+  // Prefill from a scheduled team session (Start from event → /create?club=&name=).
+  const [name, setName] = useState(() => searchParams.get("name") ?? "");
+  // Optional team this session is played for (0018) — drives the club league
+  // later. null = an ad-hoc session belonging to no team. myTeams is loaded once
+  // on mount; the picker only renders if the host actually belongs to a team.
+  const [clubId, setClubId] = useState<string | null>(() => searchParams.get("club"));
+  const [myTeams, setMyTeams] = useState<MyTeam[]>([]);
+  const [teamsLoaded, setTeamsLoaded] = useState(false);
+  // If this create flow was launched from a scheduled event, its id — used to
+  // link the event to the started session and seed the roster from RSVPs.
+  const eventId = searchParams.get("event");
   const [format, setFormat] = useState<SessionFormat>("americano");
   const [players, setPlayers] = useState<DraftPlayer[]>([]);
   const [courtCount, setCourtCount] = useState(4);
@@ -194,6 +206,46 @@ export default function CreateSessionPage() {
     };
   }, []);
 
+  // Load the teams the host belongs to, once, so the Name step can offer to
+  // attach this session to one. Best-effort — a failure just hides the picker.
+  useEffect(() => {
+    let active = true;
+    getMyTeams()
+      .then((t) => active && setMyTeams(t))
+      .catch(() => {})
+      .finally(() => active && setTeamsLoaded(true));
+    return () => {
+      active = false;
+    };
+  }, []);
+
+  // Guard against an attached club the host isn't actually a member of (audit
+  // #4) — e.g. a crafted ?club=<uuid>. Once teams are loaded, drop any clubId
+  // that isn't one of them. The DB also enforces this (RLS with-check), so this
+  // just keeps the UI honest and unblocked.
+  useEffect(() => {
+    if (teamsLoaded && clubId && !myTeams.some((t) => t.id === clubId)) setClubId(null);
+  }, [teamsLoaded, clubId, myTeams]);
+
+  // Seed the roster from the "in" RSVPs when starting from a scheduled event.
+  const eventSeededRef = useRef(false);
+  useEffect(() => {
+    if (!eventId || eventSeededRef.current) return;
+    eventSeededRef.current = true;
+    getEventGoing(eventId)
+      .then((going) => {
+        if (going.length === 0) return;
+        setPlayers((prev) => {
+          const existing = new Set(prev.map((p) => p.linkedUserId).filter(Boolean));
+          const add: DraftPlayer[] = going
+            .filter((g) => !existing.has(g.userId))
+            .map((g) => ({ tempId: nextTempId("p"), name: g.displayName, gender: "M", linkedUserId: g.userId }));
+          return [...prev, ...add];
+        });
+      })
+      .catch(() => {});
+  }, [eventId]);
+
   // Live-save the lobby (roster + config) to the draft, debounced, so an exit
   // of any kind never loses it. Only once a draft exists and the Players step
   // (the lobby) has been reached.
@@ -201,6 +253,7 @@ export default function CreateSessionPage() {
     if (!lobbyId || step < 2) return;
     const snapshot = {
       name,
+      clubId,
       format,
       scoringFormat,
       rankingBasis,
@@ -218,7 +271,7 @@ export default function CreateSessionPage() {
       });
     }, 600);
     return () => clearTimeout(t);
-  }, [lobbyId, step, name, format, scoringFormat, rankingBasis, courtCount, roundCount, teamScoreMode, fixedPartnerEnabled, pairingMode, manualPairs, players]);
+  }, [lobbyId, step, name, clubId, format, scoringFormat, rankingBasis, courtCount, roundCount, teamScoreMode, fixedPartnerEnabled, pairingMode, manualPairs, players]);
 
   // Resume: if the wizard was opened from a "Resume setup" card (?resume=<id>),
   // hydrate the whole lobby back from the draft and land on the Players step
@@ -235,6 +288,7 @@ export default function CreateSessionPage() {
         if (!lobby) return; // draft gone or expired — just carry on with a fresh session
         const s = lobby.draftState as {
           name?: string;
+          clubId?: string | null;
           format?: SessionFormat;
           scoringFormat?: ScoringFormat;
           rankingBasis?: RankingBasis;
@@ -247,6 +301,7 @@ export default function CreateSessionPage() {
           players?: DraftPlayer[];
         };
         if (typeof s.name === "string") setName(s.name);
+        if (typeof s.clubId === "string" || s.clubId === null) setClubId(s.clubId);
         if (s.format) setFormat(s.format);
         if (s.scoringFormat) setScoringFormat(s.scoringFormat);
         if (s.rankingBasis) setRankingBasis(s.rankingBasis);
@@ -416,6 +471,7 @@ export default function CreateSessionPage() {
       rankingBasis,
       teamScoreMode: isTeamSparring ? teamScoreMode : undefined,
       fixedPartnerStyle: isFixedPartner ? fixedPartnerStyle : undefined,
+      clubId,
     })
       .then((r) => {
         setLobbyId(r.sessionId);
@@ -663,6 +719,7 @@ export default function CreateSessionPage() {
           rankingBasis,
           teamScoreMode: isTeamSparring ? teamScoreMode : undefined,
           fixedPartnerStyle: isFixedPartner ? fixedPartnerStyle : undefined,
+          clubId,
         });
         sid = created.sessionId;
         setLobbyId(sid);
@@ -680,11 +737,13 @@ export default function CreateSessionPage() {
           teamScoreMode: isTeamSparring ? teamScoreMode : undefined,
           pairs: isFixedPartner ? resolvedPairs : undefined,
           fixedPartnerStyle: isFixedPartner ? fixedPartnerStyle : undefined,
+          clubId,
         },
         previewRounds,
         schedulingSeed,
       );
       startedRef.current = true; // it's live now — don't let the unmount cleanup delete it
+      if (eventId) void linkEventSession(eventId, sid).catch(() => {}); // best-effort event↔session link
       navigate(`/session/${sid}/host`);
     } catch (err) {
       setStartError(err instanceof Error ? err.message : "Could not start the session.");
@@ -727,6 +786,40 @@ export default function CreateSessionPage() {
             maxLength={80}
           />
           <p className="text-[11px] text-warm-gray">2-80 characters, required.</p>
+
+          {myTeams.length > 0 && (
+            <div className="pt-3">
+              <label className="block text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1.5">
+                Play for a team <span className="text-warm-gray/70 font-semibold normal-case tracking-normal">(optional)</span>
+              </label>
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() => setClubId(null)}
+                  className={`rounded-full px-3.5 py-2 text-[12.5px] font-semibold border ${
+                    clubId === null ? "border-graphite bg-graphite text-ivory" : "border-line bg-surface text-ink-2"
+                  }`}
+                >
+                  No team
+                </button>
+                {myTeams.map((t) => (
+                  <button
+                    key={t.id}
+                    type="button"
+                    onClick={() => setClubId(t.id)}
+                    className={`rounded-full px-3.5 py-2 text-[12.5px] font-semibold border ${
+                      clubId === t.id ? "border-graphite bg-graphite text-ivory" : "border-line bg-surface text-ink-2"
+                    }`}
+                  >
+                    {t.name}
+                  </button>
+                ))}
+              </div>
+              <p className="text-[11px] text-warm-gray mt-2 leading-snug">
+                Attaching a session lets it count toward that team's league and show up in its history. You can leave this as No team for a casual session.
+              </p>
+            </div>
+          )}
         </div>
       )}
 

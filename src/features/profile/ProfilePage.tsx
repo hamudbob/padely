@@ -1,9 +1,12 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState, ChangeEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
-import { signOutHost, updateHostName, updateHostPrefs } from "../../lib/supabase/auth";
+import { signOutHost, updateHostPrefs } from "../../lib/supabase/auth";
 import { listHostSessions, HostSessionSummary } from "../../lib/supabase/hostSessionsQueries";
 import { getMyPlayerSessions, PlayerSession } from "../../lib/supabase/playerJoinQueries";
+import { getMyProfile, updateMyProfile, uploadAvatar, Profile } from "../../lib/supabase/profileQueries";
+import { getPlayerInsights, getRatingHistory, PlayerInsights, RatingPoint } from "../../lib/supabase/insightsQueries";
+import { getUnreadCount } from "../../lib/supabase/notificationQueries";
 
 const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
@@ -23,6 +26,60 @@ function formatSessionDate(iso: string): string {
 }
 
 type RoleTab = "host" | "player";
+
+/** Tiny rating-over-time line for the profile header. */
+function RatingSparkline({ points }: { points: number[] }) {
+  if (points.length < 2) return null;
+  const w = 112;
+  const h = 34;
+  const pad = 3;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const span = max - min || 1;
+  const step = (w - pad * 2) / (points.length - 1);
+  const d = points
+    .map((v, i) => {
+      const x = pad + i * step;
+      const y = pad + (h - pad * 2) * (1 - (v - min) / span);
+      return `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
+    })
+    .join(" ");
+  const rising = points[points.length - 1] >= points[0];
+  return (
+    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="shrink-0" aria-hidden>
+      <path d={d} fill="none" stroke={rising ? "#2E8B57" : "#D36A4A"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function MiniStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="text-center">
+      <b className="block font-mono tnum text-[19px] font-bold text-graphite leading-none">{value}</b>
+      <span className="block text-[9px] font-bold uppercase tracking-[0.08em] text-warm-gray mt-1">{label}</span>
+    </div>
+  );
+}
+
+function InsightRow({ kind, label, who, detail }: { kind: "partner" | "rival"; label: string; who: string; detail: string }) {
+  return (
+    <div className="flex items-center gap-2.5">
+      <span className={`w-[26px] h-[26px] rounded-lg flex items-center justify-center shrink-0 ${kind === "partner" ? "bg-gold-soft text-gold-ink" : "bg-loss/10 text-loss"}`} aria-hidden>
+        {kind === "partner" ? (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /></svg>
+        ) : (
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9z" /></svg>
+        )}
+      </span>
+      <div className="flex-1 min-w-0">
+        <p className="text-[9px] font-bold uppercase tracking-[0.08em] text-warm-gray leading-none">{label}</p>
+        <p className="text-[13px] font-semibold text-graphite truncate mt-0.5">
+          {who} <span className="font-normal text-warm-gray text-[11px]">· {detail}</span>
+        </p>
+      </div>
+    </div>
+  );
+}
 
 /**
  * Padelier dashboard — the personal hub reached from the home avatar. A single
@@ -50,6 +107,15 @@ export default function ProfilePage() {
   const [nameError, setNameError] = useState<string | null>(null);
 
   const [signingOut, setSigningOut] = useState(false);
+
+  // Phase 1: profile (avatar + global rating), insights, and rating trend.
+  const [profile, setProfile] = useState<Profile | null>(null);
+  const [insights, setInsights] = useState<PlayerInsights | null>(null);
+  const [history, setHistory] = useState<RatingPoint[]>([]);
+  const [avatarBusy, setAvatarBusy] = useState(false);
+  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [unread, setUnread] = useState(0);
 
   // Default playing preferences, saved to the account so a signed-in join needs
   // zero input. Seeded from metadata (default Right / Male until set).
@@ -105,7 +171,23 @@ export default function ProfilePage() {
     getMyPlayerSessions()
       .then(setPlayerSessions)
       .catch(() => setPlayerSessions([]));
-  }, [user]);
+    getMyProfile()
+      .then((p) => {
+        setProfile(p);
+        if (p && !editingName) setDisplayName(p.displayName);
+      })
+      .catch(() => setProfile(null));
+    getPlayerInsights(user.id)
+      .then(setInsights)
+      .catch(() => setInsights(null));
+    getRatingHistory(user.id)
+      .then(setHistory)
+      .catch(() => setHistory([]));
+    getUnreadCount()
+      .then(setUnread)
+      .catch(() => setUnread(0));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
 
   const hostedSessions = sessions ?? [];
   const liveCount = hostedSessions.filter((s) => s.status === "live").length;
@@ -121,13 +203,30 @@ export default function ProfilePage() {
     setSavingName(true);
     setNameError(null);
     try {
-      await updateHostName(trimmed);
-      setDisplayName(trimmed);
+      const updated = await updateMyProfile({ displayName: trimmed });
+      setProfile(updated);
+      setDisplayName(updated.displayName);
       setEditingName(false);
     } catch (err) {
       setNameError(err instanceof Error ? err.message : "Could not save your name.");
     } finally {
       setSavingName(false);
+    }
+  }
+
+  async function handleAvatarPick(e: ChangeEvent<HTMLInputElement>) {
+    const file = e.target.files?.[0];
+    e.target.value = ""; // allow re-picking the same file
+    if (!file) return;
+    setAvatarBusy(true);
+    setAvatarError(null);
+    try {
+      const url = await uploadAvatar(file);
+      setProfile((p) => (p ? { ...p, avatarUrl: url } : p));
+    } catch (err) {
+      setAvatarError(err instanceof Error ? err.message : "Couldn't upload that photo.");
+    } finally {
+      setAvatarBusy(false);
     }
   }
 
@@ -168,13 +267,46 @@ export default function ProfilePage() {
           Padelier
           <span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
         </div>
-        <div className="w-9" />
+        <Link
+          to="/notifications"
+          aria-label="Notifications"
+          className="relative w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center active:scale-95 transition-transform"
+        >
+          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
+            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
+          </svg>
+          {unread > 0 && (
+            <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-loss text-white text-[9px] font-bold flex items-center justify-center">
+              {unread > 9 ? "9+" : unread}
+            </span>
+          )}
+        </Link>
       </div>
 
       {/* Identity */}
       <div className="flex items-center gap-3.5 mb-5">
-        <div className="w-[58px] h-[58px] rounded-full bg-graphite text-ivory flex items-center justify-center text-[24px] font-semibold shrink-0">
-          {avatarLetter}
+        <div className="shrink-0">
+          <input ref={fileInputRef} type="file" accept="image/*" onChange={handleAvatarPick} className="hidden" />
+          <button
+            onClick={() => fileInputRef.current?.click()}
+            disabled={avatarBusy}
+            aria-label="Change profile photo"
+            className="relative w-[58px] h-[58px] rounded-full bg-graphite text-ivory flex items-center justify-center text-[24px] font-semibold overflow-hidden active:scale-95 transition-transform"
+          >
+            {profile?.avatarUrl ? (
+              <img src={profile.avatarUrl} alt="" className="w-full h-full object-cover" />
+            ) : (
+              avatarLetter
+            )}
+            <span className="absolute bottom-0 right-0 w-[19px] h-[19px] rounded-full bg-gold text-graphite border-2 border-ivory flex items-center justify-center" aria-hidden>
+              {avatarBusy ? (
+                <span className="w-2.5 h-2.5 border-2 border-graphite/40 border-t-graphite rounded-full animate-spin" />
+              ) : (
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round"><path d="M23 19a2 2 0 0 1-2 2H3a2 2 0 0 1-2-2V8a2 2 0 0 1 2-2h4l2-3h6l2 3h4a2 2 0 0 1 2 2z" /><circle cx="12" cy="13" r="3.2" /></svg>
+              )}
+            </span>
+          </button>
         </div>
         <div className="min-w-0 flex-1">
           {editingName ? (
@@ -236,6 +368,70 @@ export default function ProfilePage() {
         </div>
       </div>
 
+      {avatarError && <p className="text-[11px] text-loss -mt-3 mb-3">{avatarError}</p>}
+
+      {/* Level & insights */}
+      <div className="rounded-2xl border border-line bg-surface px-4 py-4 mb-5 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+        <div className="flex items-start justify-between">
+          <div>
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-gold-ink">Rating</p>
+            <div className="flex items-baseline gap-2 mt-1">
+              <span className="font-mono tnum text-[30px] font-bold text-graphite leading-none">
+                {profile ? Math.round(profile.rating) : "—"}
+              </span>
+              {history.length > 0 && Math.round(history[history.length - 1].delta) !== 0 && (
+                <span className={`font-mono tnum text-[12px] font-semibold ${history[history.length - 1].delta > 0 ? "text-win" : "text-loss"}`}>
+                  {history[history.length - 1].delta > 0 ? "+" : ""}
+                  {Math.round(history[history.length - 1].delta)}
+                </span>
+              )}
+            </div>
+            {profile && (profile.ratingDeviation > 110 || profile.ratingGames < 5) && (
+              <span className="inline-block mt-1.5 text-[9px] font-bold uppercase tracking-[0.08em] text-warm-gray bg-surface-2 border border-line px-2 py-[2px] rounded-full">
+                Provisional
+              </span>
+            )}
+          </div>
+          <RatingSparkline points={history.map((h) => h.rating)} />
+        </div>
+
+        {insights && insights.matchesPlayed > 0 ? (
+          <>
+            <div className="grid grid-cols-3 gap-2 mt-4 pt-3.5 border-t border-line">
+              <MiniStat label="Win rate" value={`${Math.round(insights.winRate * 100)}%`} />
+              <MiniStat label="Sessions" value={String(insights.sessionsPlayed)} />
+              <MiniStat label="Games" value={String(insights.matchesPlayed)} />
+            </div>
+            {(insights.bestPartner || insights.nemesis) && (
+              <div className="mt-3.5 space-y-2">
+                {insights.bestPartner && (
+                  <InsightRow kind="partner" label="Best partner" who={insights.bestPartner.label} detail={`${Math.round(insights.bestPartner.winRate * 100)}% together · ${insights.bestPartner.matches} games`} />
+                )}
+                {insights.nemesis && (
+                  <InsightRow kind="rival" label="Toughest rival" who={insights.nemesis.label} detail={`won ${Math.round(insights.nemesis.winRate * 100)}% vs · ${insights.nemesis.matches} games`} />
+                )}
+              </div>
+            )}
+            {insights.form.length > 0 && (
+              <div className="flex items-center gap-2 mt-3.5">
+                <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-warm-gray">Form</span>
+                <div className="flex gap-1">
+                  {insights.form.map((r, i) => (
+                    <span key={i} className={`w-5 h-5 rounded-md text-[10px] font-bold flex items-center justify-center ${r === "W" ? "bg-win/15 text-win" : r === "L" ? "bg-loss/15 text-loss" : "bg-surface-2 text-warm-gray border border-line"}`}>
+                      {r}
+                    </span>
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        ) : (
+          <p className="text-[12px] text-warm-gray mt-3 pt-3 border-t border-line leading-relaxed">
+            Play a session and your rating, win rate, best partner and form will show up here.
+          </p>
+        )}
+      </div>
+
       {/* Big-picture stat tiles */}
       <div className="grid grid-cols-2 gap-2 mb-5">
         {tiles.map((t) => (
@@ -248,6 +444,17 @@ export default function ProfilePage() {
 
       {/* Quick actions into each role */}
       <div className="space-y-2 mb-6">
+        <Link to="/teams" className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+          <span className="w-[34px] h-[34px] rounded-[11px] bg-gold-soft text-gold-ink flex items-center justify-center shrink-0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
+          </span>
+          <span className="min-w-0 flex-1">
+            <b className="block text-[13.5px] font-semibold text-graphite">Your teams</b>
+            <span className="block text-[11px] text-warm-gray">Clubs, members &amp; the league</span>
+          </span>
+          <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
+        </Link>
+
         <Link to="/create" className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
           <span className="w-[34px] h-[34px] rounded-[11px] bg-graphite text-gold flex items-center justify-center shrink-0">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>

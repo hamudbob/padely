@@ -44,6 +44,15 @@ export interface Database {
           /** Draft/lobby only — the create wizard's serialized in-progress state (roster + config),
            * saved live so an accidental exit never loses it. Null once the session goes live. */
           draft_state: Record<string, unknown> | null;
+          /** Set true once the global Glicko ratings for this session have been
+           * applied (0013) — the idempotency guard so a session can't double-count. */
+          ratings_applied: boolean;
+          /** Set true once the club league results for this session have been
+           * recorded (0021) — once-only guard, consistent with ratings_applied. */
+          results_applied: boolean;
+          /** Optional club this session belongs to (0018) — what a club's league
+           * + leaderboard aggregate over. Null for an ad-hoc (non-team) session. */
+          club_id: string | null;
           created_by: string;
           created_at: string;
           updated_at: string;
@@ -64,6 +73,7 @@ export interface Database {
           min_players_per_court?: number;
           team_score_mode?: Database["public"]["Tables"]["sessions"]["Row"]["team_score_mode"];
           fixed_partner_style?: Database["public"]["Tables"]["sessions"]["Row"]["fixed_partner_style"];
+          club_id?: string | null;
           created_by: string;
         };
         // Partial<Row>, not Partial<Insert> — Insert omits server/lifecycle
@@ -302,6 +312,226 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["audit_events"]["Insert"]>;
         Relationships: [];
       };
+      profiles: {
+        Row: {
+          id: string;
+          display_name: string;
+          avatar_url: string | null;
+          rating: number;
+          rating_deviation: number;
+          rating_volatility: number;
+          rating_games: number;
+          stats: Record<string, unknown> | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id: string;
+          display_name?: string;
+          avatar_url?: string | null;
+          rating?: number;
+          rating_deviation?: number;
+          rating_volatility?: number;
+          rating_games?: number;
+          stats?: Record<string, unknown> | null;
+          updated_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["profiles"]["Row"]>;
+        Relationships: [];
+      };
+      rating_history: {
+        Row: {
+          id: string;
+          user_id: string;
+          session_id: string | null;
+          rating: number;
+          delta: number;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          session_id?: string | null;
+          rating: number;
+          delta?: number;
+        };
+        Update: Partial<Database["public"]["Tables"]["rating_history"]["Insert"]>;
+        Relationships: [];
+      };
+      clubs: {
+        Row: {
+          id: string;
+          name: string;
+          club_code: string;
+          logo_url: string | null;
+          session_floor: number;
+          league_period: "monthly" | "2_month" | "3_month" | "6_month" | "yearly";
+          league_min_sessions: number;
+          /** Admin-set default sort column for the league board (0022). */
+          default_sort: string;
+          created_by: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: {
+          id?: string;
+          name: string;
+          club_code: string;
+          logo_url?: string | null;
+          session_floor?: number;
+          league_period?: Database["public"]["Tables"]["clubs"]["Row"]["league_period"];
+          league_min_sessions?: number;
+          created_by?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["clubs"]["Row"]>;
+        Relationships: [];
+      };
+      session_results: {
+        Row: {
+          session_id: string;
+          club_id: string;
+          user_id: string;
+          session_date: string;
+          rank: number;
+          field_size: number;
+          player_count: number;
+          placement_points: number;
+          podium_bonus: number;
+          wins: number;
+          losses: number;
+          draws: number;
+          scored_points: number;
+          /** Opponent-adjusted per-session performance in [0,1] (0021) — the input
+           * to Club Score. 0.5 when a member played no rated matches. */
+          perf_adj: number;
+        };
+        // Written only by apply_session_results (SECURITY DEFINER) — never a
+        // direct client insert — so the Insert/Update shapes are unused in
+        // practice, but present to satisfy the typed client.
+        Insert: Database["public"]["Tables"]["session_results"]["Row"];
+        Update: Partial<Database["public"]["Tables"]["session_results"]["Row"]>;
+        Relationships: [];
+      };
+      club_events: {
+        Row: {
+          id: string;
+          club_id: string;
+          title: string;
+          scheduled_at: string;
+          location: string | null;
+          notes: string | null;
+          status: "scheduled" | "cancelled";
+          session_id: string | null;
+          created_by: string | null;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          club_id: string;
+          title: string;
+          scheduled_at: string;
+          location?: string | null;
+          notes?: string | null;
+          status?: "scheduled" | "cancelled";
+          session_id?: string | null;
+          created_by?: string | null;
+        };
+        Update: Partial<Database["public"]["Tables"]["club_events"]["Row"]>;
+        Relationships: [];
+      };
+      club_event_rsvps: {
+        Row: {
+          event_id: string;
+          user_id: string;
+          response: "in" | "maybe" | "out";
+          responded_at: string;
+        };
+        Insert: {
+          event_id: string;
+          user_id: string;
+          response: "in" | "maybe" | "out";
+          responded_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["club_event_rsvps"]["Insert"]>;
+        Relationships: [];
+      };
+      club_members: {
+        Row: {
+          club_id: string;
+          user_id: string;
+          role: "owner" | "admin" | "member";
+          joined_at: string;
+        };
+        Insert: {
+          club_id: string;
+          user_id: string;
+          role?: "owner" | "admin" | "member";
+        };
+        Update: Partial<Database["public"]["Tables"]["club_members"]["Insert"]>;
+        Relationships: [];
+      };
+      club_join_requests: {
+        Row: {
+          id: string;
+          club_id: string;
+          user_id: string;
+          status: "pending" | "accepted" | "declined";
+          created_at: string;
+          decided_at: string | null;
+          decided_by: string | null;
+        };
+        Insert: {
+          id?: string;
+          club_id: string;
+          user_id: string;
+          status?: "pending" | "accepted" | "declined";
+        };
+        Update: Partial<Database["public"]["Tables"]["club_join_requests"]["Row"]>;
+        Relationships: [];
+      };
+      club_invites: {
+        Row: {
+          id: string;
+          club_id: string;
+          inviter_id: string | null;
+          invitee_id: string;
+          status: "pending" | "accepted" | "declined";
+          created_at: string;
+          decided_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          club_id: string;
+          inviter_id?: string | null;
+          invitee_id: string;
+          status?: "pending" | "accepted" | "declined";
+        };
+        Update: Partial<Database["public"]["Tables"]["club_invites"]["Row"]>;
+        Relationships: [];
+      };
+      notifications: {
+        Row: {
+          id: string;
+          user_id: string;
+          type: string;
+          title: string;
+          body: string | null;
+          data: Record<string, unknown> | null;
+          read: boolean;
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          user_id: string;
+          type: string;
+          title: string;
+          body?: string | null;
+          data?: Record<string, unknown> | null;
+          read?: boolean;
+        };
+        Update: Partial<Database["public"]["Tables"]["notifications"]["Insert"]>;
+        Relationships: [];
+      };
     };
     Views: {
       standings_live: {
@@ -333,6 +563,62 @@ export interface Database {
       get_public_session: {
         Args: { p_public_token: string };
         Returns: unknown; // jsonb — see schema comments for shape
+      };
+      apply_session_ratings: {
+        Args: { p_session_id: string; p_updates: unknown };
+        Returns: undefined; // void
+      };
+      apply_session_results: {
+        Args: { p_session_id: string; p_rows: unknown };
+        Returns: undefined; // void
+      };
+      get_club_sessions: {
+        Args: { p_club_id: string };
+        Returns: unknown; // setof { id, name, status, format, created_at, started_at, ended_at, public_token, created_by }
+      };
+      search_clubs: {
+        Args: { p_query: string };
+        Returns: unknown; // setof { id, name, club_code, logo_url, member_count, is_member, requested }
+      };
+      create_club_event: {
+        Args: { p_club_id: string; p_title: string; p_scheduled_at: string; p_location?: string | null; p_notes?: string | null };
+        Returns: string; // uuid
+      };
+      create_club: {
+        Args: { p_name: string };
+        Returns: unknown; // jsonb { id, code }
+      };
+      leave_club: {
+        Args: { p_club_id: string };
+        Returns: undefined;
+      };
+      club_kick_member: {
+        Args: { p_club_id: string; p_user_id: string };
+        Returns: undefined;
+      };
+      club_set_member_role: {
+        Args: { p_club_id: string; p_user_id: string; p_role: string };
+        Returns: undefined;
+      };
+      request_to_join_club: {
+        Args: { p_club_id: string };
+        Returns: unknown; // jsonb { request_id }
+      };
+      join_club_by_code: {
+        Args: { p_code: string };
+        Returns: unknown; // jsonb { club_id, name, ... }
+      };
+      respond_join_request: {
+        Args: { p_request_id: string; p_accept: boolean };
+        Returns: undefined;
+      };
+      invite_by_email: {
+        Args: { p_club_id: string; p_email: string };
+        Returns: unknown; // jsonb { invite_id }
+      };
+      respond_club_invite: {
+        Args: { p_invite_id: string; p_accept: boolean };
+        Returns: undefined;
       };
     };
   };
