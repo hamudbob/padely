@@ -163,10 +163,10 @@ export default function TeamsPage() {
         <div className="space-y-2 mb-4">
           {results.map((c) => (
             <div key={c.id} className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3">
-              <div className="flex-1 min-w-0">
+              <Link to={`/teams/${c.id}`} className="flex-1 min-w-0 active:opacity-70">
                 <b className="block text-[14px] font-semibold text-graphite truncate">{c.name}</b>
-                <p className="text-[11px] text-warm-gray mt-0.5">{c.memberCount} {c.memberCount === 1 ? "member" : "members"}</p>
-              </div>
+                <p className="text-[11px] text-warm-gray mt-0.5">{c.memberCount} {c.memberCount === 1 ? "member" : "members"} · view team</p>
+              </Link>
               {c.isMember ? (
                 <Link to={`/teams/${c.id}`} className="shrink-0 text-[12px] font-semibold text-gold-ink px-2">Open</Link>
               ) : c.requested ? (

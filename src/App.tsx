@@ -12,6 +12,9 @@ import FinalSummaryPage from "./features/final-summary/FinalSummaryPage";
 import TeamsPage from "./features/teams/TeamsPage";
 import TeamDetailPage from "./features/teams/TeamDetailPage";
 import LeaguePage from "./features/teams/LeaguePage";
+import MembersPage from "./features/teams/MembersPage";
+import EventPage from "./features/teams/EventPage";
+import PublicProfilePage from "./features/public-profile/PublicProfilePage";
 import NotificationsPage from "./features/notifications/NotificationsPage";
 
 export default function App() {
@@ -47,6 +50,8 @@ export default function App() {
       />
       <Route path="/session/:sessionId/final" element={<FinalSummaryPage />} />
       <Route path="/live/:publicToken" element={<PublicLivePage />} />
+      <Route path="/u/:userId" element={<PublicProfilePage />} />
+      <Route path="/e/:eventId" element={<EventPage />} />
       <Route
         path="/teams"
         element={
@@ -68,6 +73,14 @@ export default function App() {
         element={
           <RequireHost>
             <LeaguePage />
+          </RequireHost>
+        }
+      />
+      <Route
+        path="/teams/:teamId/members"
+        element={
+          <RequireHost>
+            <MembersPage />
           </RequireHost>
         }
       />

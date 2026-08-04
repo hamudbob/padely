@@ -584,6 +584,18 @@ export interface Database {
         Args: { p_club_id: string; p_title: string; p_scheduled_at: string; p_location?: string | null; p_notes?: string | null };
         Returns: string; // uuid
       };
+      notify_club_session_started: {
+        Args: { p_session_id: string };
+        Returns: undefined; // void
+      };
+      get_public_event: {
+        Args: { p_event_id: string };
+        Returns: unknown; // jsonb — see 0026 for shape
+      };
+      get_public_profile: {
+        Args: { p_user_id: string };
+        Returns: unknown; // jsonb { display_name, avatar_url, rating, rating_games, provisional, member_since, teams[] }
+      };
       create_club: {
         Args: { p_name: string };
         Returns: unknown; // jsonb { id, code }

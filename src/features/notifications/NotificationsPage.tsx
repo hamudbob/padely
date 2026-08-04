@@ -36,8 +36,12 @@ export default function NotificationsPage() {
 
   async function openTarget(n: AppNotification) {
     if (!n.read) markNotificationRead(n.id).catch(() => undefined);
+    const token = (n.data?.public_token as string | undefined) ?? null;
+    const eventId = (n.data?.event_id as string | undefined) ?? null;
     const clubId = (n.data?.club_id as string | undefined) ?? null;
-    if (clubId) navigate(`/teams/${clubId}`);
+    if (token) navigate(`/live/${token}`); // a started session → open the live view
+    else if (eventId) navigate(`/e/${eventId}`); // a scheduled session → open its page
+    else if (clubId) navigate(`/teams/${clubId}`);
   }
 
   function dismiss(n: AppNotification) {

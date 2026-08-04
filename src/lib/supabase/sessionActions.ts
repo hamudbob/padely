@@ -244,6 +244,15 @@ export async function finalizeAndStart(
 
   const { error: liveError } = await supabase.from("sessions").update({ status: "live", started_at: new Date().toISOString() }).eq("id", sessionId);
   if (liveError) throw liveError;
+
+  // Team session just went live → let the club's members know (best-effort).
+  if (draft.clubId) {
+    try {
+      await supabase.rpc("notify_club_session_started", { p_session_id: sessionId });
+    } catch {
+      /* notifications are non-essential — never block a successful start */
+    }
+  }
 }
 
 /**
@@ -277,9 +286,18 @@ export async function endSession(sessionId: string): Promise<void> {
  * for its join code — when the host backs out without starting. Never called on
  * a live/ended session.
  */
-export async function deleteSession(sessionId: string): Promise<void> {
-  const { error } = await supabase.from("sessions").delete().eq("id", sessionId);
-  if (error) throw error;
+export async function deleteSession(sessionId: string): Promise<number> {
+  // .select() so we can tell an actual deletion from an RLS no-op (a delete that
+  // matches no visible row returns success with zero rows under RLS). Returns the
+  // number of rows removed; callers that don't care can ignore it.
+  const { data, error } = await supabase.from("sessions").delete().eq("id", sessionId).select("id");
+  if (error) {
+    // Surface the real Postgres message (Supabase errors aren't Error instances,
+    // so a bare throw stringifies to "[object Object]").
+    const parts = [error.message, error.details, error.hint, error.code ? `code ${error.code}` : ""].filter(Boolean);
+    throw new Error(parts.join(" · "));
+  }
+  return (data ?? []).length;
 }
 
 /**

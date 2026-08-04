@@ -6,15 +6,15 @@ import { getClubLeague, shiftPeriodReference, LeagueBoard, LeagueRow, LeaguePeri
 
 type SortKey = "pointsPerSession" | "totalPoints" | "winsPerSession" | "clubScore" | "rating";
 
-const SORTS: { key: SortKey; label: string }[] = [
-  { key: "pointsPerSession", label: "Pts/session" },
-  { key: "totalPoints", label: "Total" },
-  { key: "winsPerSession", label: "Win/session" },
-  { key: "clubScore", label: "Club Score" },
-  { key: "rating", label: "Rating" },
+const SORTS: { key: SortKey; label: string; unit: string }[] = [
+  { key: "pointsPerSession", label: "Per session", unit: "/ session" },
+  { key: "totalPoints", label: "Total points", unit: "pts" },
+  { key: "winsPerSession", label: "Wins / session", unit: "/ session" },
+  { key: "clubScore", label: "Club Score", unit: "" },
+  { key: "rating", label: "Rating", unit: "" },
 ];
 
-function fmt(key: SortKey, r: LeagueRow): string {
+function fmtValue(key: SortKey, r: LeagueRow): string {
   switch (key) {
     case "pointsPerSession":
       return r.pointsPerSession.toFixed(1);
@@ -41,10 +41,10 @@ export default function LeaguePage() {
   const [boardLoading, setBoardLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [sortKey, setSortKey] = useState<SortKey>("pointsPerSession");
-  const [periodOffset, setPeriodOffset] = useState(0); // 0 = current period, −1 = previous…
+  const [periodOffset, setPeriodOffset] = useState(0);
+  const [showSort, setShowSort] = useState(false);
   const [savedDefault, setSavedDefault] = useState(false);
 
-  // Load the team once (also seeds the default sort + admin state).
   useEffect(() => {
     if (!teamId) return;
     setLoading(true);
@@ -58,7 +58,6 @@ export default function LeaguePage() {
       .finally(() => setLoading(false));
   }, [teamId, user?.id]);
 
-  // (Re)load the board whenever the team or the viewed period changes.
   useEffect(() => {
     if (!teamId || !team) return;
     setBoardLoading(true);
@@ -74,6 +73,8 @@ export default function LeaguePage() {
     return [...board.rows].sort((x, y) => (y[sortKey] as number) - (x[sortKey] as number) || y.totalPoints - x.totalPoints);
   }, [board, sortKey]);
 
+  const active = SORTS.find((s) => s.key === sortKey) ?? SORTS[0];
+
   async function saveDefaultSort() {
     if (!teamId) return;
     try {
@@ -84,11 +85,12 @@ export default function LeaguePage() {
     } catch {
       /* non-fatal */
     }
+    setShowSort(false);
   }
 
   const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-6 safe-top safe-bottom anim-fade";
   const backBar = (
-    <div className="flex items-center justify-between mb-5">
+    <div className="flex items-center justify-between mb-2">
       <Link to={teamId ? `/teams/${teamId}` : "/teams"} aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</Link>
       <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
         Padelier<span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
@@ -100,98 +102,98 @@ export default function LeaguePage() {
   if (loading) return <div className={shell}>{backBar}<p className="text-[13px] text-warm-gray mt-16 text-center">Loading league…</p></div>;
   if (error) return <div className={shell}>{backBar}<p className="text-[13px] text-loss mt-16 text-center">{error}</p></div>;
 
-  const isDefaultSort = team?.defaultSort === sortKey;
-
   return (
     <div className={shell}>
       {backBar}
 
-      <h1 className="font-serif text-[24px] font-semibold text-graphite tracking-tight mb-1">{team?.name ?? "Team"} league</h1>
-
-      {/* Period navigation */}
-      {board && (
-        <div className="flex items-center justify-between mb-3">
-          <button onClick={() => setPeriodOffset((o) => o - 1)} aria-label="Previous period" className="w-8 h-8 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center active:scale-95">‹</button>
-          <div className="text-center">
-            <span className="block rounded-full bg-graphite text-ivory text-[11px] font-bold uppercase tracking-[0.1em] px-3 py-1">{board.periodLabel}</span>
-            {periodOffset === 0 && <span className="block text-[10px] text-warm-gray mt-1">Current period</span>}
-          </div>
-          <button onClick={() => setPeriodOffset((o) => Math.min(0, o + 1))} disabled={periodOffset >= 0} aria-label="Next period" className="w-8 h-8 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center active:scale-95 disabled:opacity-30">›</button>
-        </div>
-      )}
-      <p className="text-[11px] text-warm-gray mb-3">Rating = all-time · everything else = this period</p>
-
-      {/* Sort chips */}
-      <div className="flex flex-wrap items-center gap-1.5 mb-1">
-        {SORTS.map((s) => (
-          <button
-            key={s.key}
-            onClick={() => setSortKey(s.key)}
-            className={`rounded-full px-3 py-1.5 text-[11.5px] font-semibold border ${
-              sortKey === s.key ? "border-graphite bg-graphite text-ivory" : "border-line bg-surface text-ink-2"
-            }`}
-          >
-            {s.label}
-          </button>
-        ))}
+      <div className="pt-2">
+        <h1 className="font-serif text-[28px] font-semibold text-graphite tracking-tight">League</h1>
+        <p className="text-[12.5px] text-warm-gray mt-0.5">{team?.name ?? "Team"} · winner by points / session</p>
       </div>
-      {isAdmin && (
-        <div className="mb-4 h-4">
-          {isDefaultSort ? (
-            <span className="text-[10.5px] text-warm-gray">This is the team's default sort.</span>
-          ) : (
-            <button onClick={saveDefaultSort} className="text-[10.5px] font-semibold text-gold-ink">
-              {savedDefault ? "Saved ✓" : "Set as team default"}
-            </button>
-          )}
+
+      {/* Period */}
+      {board && (
+        <div className="flex items-center justify-center gap-4 mt-4">
+          <button onClick={() => setPeriodOffset((o) => o - 1)} aria-label="Previous period" className="w-[30px] h-[30px] rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center active:scale-95">‹</button>
+          <span className="text-[13px] font-semibold text-graphite tnum">{board.periodLabel}</span>
+          <button onClick={() => setPeriodOffset((o) => Math.min(0, o + 1))} disabled={periodOffset >= 0} aria-label="Next period" className="w-[30px] h-[30px] rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center active:scale-95 disabled:opacity-30">›</button>
         </div>
       )}
-      {!isAdmin && <div className="mb-4" />}
+
+      {/* Standings header + sort */}
+      <div className="relative flex items-center justify-between mt-5 mb-2 px-0.5">
+        <h3 className="text-[13px] font-semibold text-ink-2">Standings</h3>
+        <button onClick={() => setShowSort((v) => !v)} className="text-[12.5px] font-semibold text-gold-ink active:opacity-70">
+          Sort: {active.label} ▾
+        </button>
+        {showSort && (
+          <>
+            <div className="fixed inset-0 z-20" onClick={() => setShowSort(false)} />
+            <div className="absolute right-0 top-7 z-30 w-[190px] rounded-2xl bg-surface border border-line shadow-[0_10px_30px_rgba(13,13,13,0.14)] overflow-hidden">
+              {SORTS.map((s) => (
+                <button
+                  key={s.key}
+                  onClick={() => {
+                    setSortKey(s.key);
+                    setShowSort(false);
+                  }}
+                  className={`w-full text-left px-4 py-2.5 text-[13.5px] border-t border-line first:border-t-0 ${s.key === sortKey ? "font-semibold text-graphite bg-surface-2" : "text-ink-2"}`}
+                >
+                  {s.label}
+                </button>
+              ))}
+              {isAdmin && (
+                <button onClick={saveDefaultSort} className="w-full text-left px-4 py-2.5 text-[12.5px] font-semibold text-gold-ink border-t border-line">
+                  {savedDefault ? "Saved ✓" : "Set as team default"}
+                </button>
+              )}
+            </div>
+          </>
+        )}
+      </div>
 
       {boardLoading ? (
         <p className="text-[13px] text-warm-gray mt-8 text-center">Loading…</p>
       ) : sortedRows.length === 0 ? (
-        <div className="rounded-2xl border border-dashed border-line bg-surface px-4 py-6 text-center">
+        <div className="rounded-2xl bg-surface px-4 py-6 text-center shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
           <p className="text-[13px] text-ink-2 font-semibold mb-1">No standings yet</p>
           <p className="text-[12px] text-warm-gray leading-snug">
             {board && board.totalSessions === 0
-              ? `No team sessions this period yet. Attach a session to this team when you create it, and it'll count here.`
+              ? "No team sessions this period yet. Attach a session to this team when you create it and it'll count here."
               : board && board.qualifyingSessions === 0
-                ? `${board.totalSessions} session${board.totalSessions === 1 ? "" : "s"} this period, but none reached the ${board.sessionFloor}-player turnout floor, so no points were awarded. Lower the floor in team settings or play bigger nights.`
+                ? `${board.totalSessions} session${board.totalSessions === 1 ? "" : "s"} this period, but none reached the ${board.sessionFloor}-player turnout floor, so no points were awarded.`
                 : board
-                  ? `${board.qualifyingSessions} qualifying session${board.qualifyingSessions === 1 ? "" : "s"} so far. Members appear once they've played ${board.minSessions} of them.`
+                  ? `${board.qualifyingSessions} qualifying session${board.qualifyingSessions === 1 ? "" : "s"} so far. Members appear once they've played ${board.minSessions}.`
                   : ""}
           </p>
         </div>
       ) : (
-        <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+        <div className="rounded-2xl bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
           {sortedRows.map((r, i) => (
-            <div key={r.userId} className="flex items-center gap-2.5 px-3 py-2.5 border-t border-line first:border-t-0">
-              <span className={`w-6 text-center text-[13px] font-bold tnum ${i === 0 ? "text-gold-ink" : "text-warm-gray"}`}>{i + 1}</span>
-              <div className="w-[34px] h-[34px] rounded-full bg-graphite text-ivory flex items-center justify-center text-[13px] font-semibold overflow-hidden shrink-0">
+            <Link key={r.userId} to={`/u/${r.userId}`} className="flex items-center gap-3 px-3.5 py-3 border-t border-line first:border-t-0 active:bg-surface-2 transition-colors">
+              <span className={`w-5 text-center text-[13px] font-bold tnum ${i === 0 ? "text-gold-ink" : "text-warm-gray"}`}>{i + 1}</span>
+              <div className="w-[36px] h-[36px] rounded-full bg-graphite text-ivory flex items-center justify-center text-[13px] font-semibold overflow-hidden shrink-0">
                 {r.avatarUrl ? <img src={r.avatarUrl} alt="" className="w-full h-full object-cover" /> : r.displayName.charAt(0).toUpperCase()}
               </div>
               <div className="flex-1 min-w-0">
-                <b className="block text-[14px] font-semibold text-graphite truncate">{r.displayName}</b>
-                <span className="block text-[10.5px] text-warm-gray tnum">
-                  {r.sessions} {r.sessions === 1 ? "session" : "sessions"} · {r.totalPoints} pts · CS {r.clubScore} · {Math.round(r.rating)}
-                </span>
+                <b className="block text-[14.5px] font-semibold text-graphite truncate">{r.displayName}</b>
+                <span className="block text-[11px] text-warm-gray tnum">{r.sessions} sessions · {r.totalPoints} pts · CS {r.clubScore}</span>
               </div>
-              <span className="shrink-0 font-mono tnum text-[17px] font-semibold text-graphite tabular-nums">{fmt(sortKey, r)}</span>
-            </div>
+              <div className="text-right shrink-0">
+                <span className="font-mono tnum text-[18px] font-semibold text-graphite leading-none">{fmtValue(sortKey, r)}</span>
+                {active.unit && <span className="block text-[9px] font-semibold text-warm-gray mt-0.5">{active.unit}</span>}
+              </div>
+            </Link>
           ))}
         </div>
       )}
 
-      {board && board.belowThreshold > 0 && (
-        <p className="text-[11px] text-warm-gray mt-3 leading-snug">
-          {board.belowThreshold} {board.belowThreshold === 1 ? "member has" : "members have"} played but not yet reached {board.minSessions} qualifying sessions this period — they'll appear once they do.
+      {board && (sortedRows.length > 0 || board.belowThreshold > 0) && (
+        <p className="text-[11px] text-warm-gray mt-3.5 leading-relaxed px-0.5">
+          Tap “Sort” to rank by total, wins, Club Score, or rating.
+          {board.belowThreshold > 0 ? ` ${board.belowThreshold} member${board.belowThreshold === 1 ? "" : "s"} haven't reached ${board.minSessions} qualifying sessions yet — they'll appear once they do.` : ""}
         </p>
       )}
-
-      <p className="text-[11px] text-warm-gray mt-4 leading-snug">
-        Winner is decided by <b className="font-semibold text-ink-2">points per session</b> (finishing place + podium bonus, averaged), with ties broken by most 1st-place finishes then best average rank. Club Score is a shrunk 0–100 index of how you did <i>relative to the opponents you faced</i>; Rating is your global skill (all-time), for reference only.
-      </p>
     </div>
   );
 }

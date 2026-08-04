@@ -3,6 +3,7 @@ import { Link, useNavigate } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { signOutHost, updateHostPrefs } from "../../lib/supabase/auth";
 import { listHostSessions, HostSessionSummary } from "../../lib/supabase/hostSessionsQueries";
+import { deleteSession } from "../../lib/supabase/sessionActions";
 import { getMyPlayerSessions, PlayerSession } from "../../lib/supabase/playerJoinQueries";
 import { getMyProfile, updateMyProfile, uploadAvatar, Profile } from "../../lib/supabase/profileQueries";
 import { getPlayerInsights, getRatingHistory, PlayerInsights, RatingPoint } from "../../lib/supabase/insightsQueries";
@@ -97,6 +98,11 @@ export default function ProfilePage() {
 
   const [sessions, setSessions] = useState<HostSessionSummary[] | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
+  // Multi-select delete for the host-sessions tab.
+  const [selectMode, setSelectMode] = useState(false);
+  const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
+  const [deletingSessions, setDeletingSessions] = useState(false);
+  const [deleteError, setDeleteError] = useState<string | null>(null);
   const [playerSessions, setPlayerSessions] = useState<PlayerSession[] | null>(null);
   const [tab, setTab] = useState<RoleTab>("host");
 
@@ -159,6 +165,58 @@ export default function ProfilePage() {
     } finally {
       setSavingPrefs(false);
     }
+  }
+
+  function reloadSessions() {
+    setSessionsLoading(true);
+    listHostSessions()
+      .then(setSessions)
+      .catch(() => setSessions([]))
+      .finally(() => setSessionsLoading(false));
+  }
+  function toggleSelected(id: string) {
+    setSelectedIds((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }
+  function exitSelectMode() {
+    setSelectMode(false);
+    setSelectedIds(new Set());
+  }
+  async function deleteSelected() {
+    if (selectedIds.size === 0) return;
+    const ids = [...selectedIds];
+    if (!window.confirm(`Delete ${ids.length} session${ids.length === 1 ? "" : "s"}? This permanently removes them and their scores — it can't be undone.`)) return;
+    setDeletingSessions(true);
+    setDeleteError(null);
+    const removed = new Set<string>();
+    let failed = 0;
+    let firstError: string | null = null;
+    const results = await Promise.allSettled(ids.map(async (id) => ({ id, n: await deleteSession(id) })));
+    for (const r of results) {
+      if (r.status === "fulfilled" && r.value.n > 0) removed.add(r.value.id);
+      else {
+        failed += 1;
+        if (r.status === "rejected" && !firstError) firstError = r.reason instanceof Error ? r.reason.message : String(r.reason);
+      }
+    }
+    // Optimistically drop the ones that really deleted, then reconcile from server.
+    if (removed.size > 0) setSessions((prev) => (prev ? prev.filter((s) => !removed.has(s.id)) : prev));
+    if (failed > 0) {
+      setDeleteError(
+        firstError
+          ? `Couldn't delete ${failed}: ${firstError}`
+          : `${failed} session${failed === 1 ? "" : "s"} couldn't be deleted — you may not have permission, or they were already gone.`,
+      );
+      setSelectedIds(new Set(ids.filter((id) => !removed.has(id))));
+    } else {
+      exitSelectMode();
+    }
+    setDeletingSessions(false);
+    reloadSessions();
   }
 
   useEffect(() => {
@@ -444,6 +502,18 @@ export default function ProfilePage() {
 
       {/* Quick actions into each role */}
       <div className="space-y-2 mb-6">
+        {user?.id && (
+          <Link to={`/u/${user.id}`} className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+            <span className="w-[34px] h-[34px] rounded-[11px] bg-gold-soft text-gold-ink flex items-center justify-center shrink-0">
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
+            </span>
+            <span className="min-w-0 flex-1">
+              <b className="block text-[13.5px] font-semibold text-graphite">View public profile</b>
+              <span className="block text-[11px] text-warm-gray">What others see — rating &amp; teams</span>
+            </span>
+            <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
+          </Link>
+        )}
         <Link to="/teams" className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
           <span className="w-[34px] h-[34px] rounded-[11px] bg-gold-soft text-gold-ink flex items-center justify-center shrink-0">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
@@ -563,31 +633,74 @@ export default function ProfilePage() {
           )}
 
           {sessions && hostedCount > 0 && (
-            <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-              {[...hostedSessions].map((s) => (
-                <Link
-                  key={s.id}
-                  to={s.status === "ended" ? `/session/${s.id}/final` : `/session/${s.id}/host`}
-                  className="flex items-center gap-3 px-4 py-3.5 border-t border-line first:border-t-0 active:bg-surface-2 transition-colors"
-                >
-                  <span
-                    className={`w-2 h-2 rounded-full shrink-0 ${
-                      s.status === "live" ? "bg-court-lime shadow-[0_0_0_3px_rgba(196,226,75,0.28)]" : "bg-stone"
-                    }`}
-                    aria-hidden
-                  />
-                  <div className="flex-1 min-w-0">
-                    <b className="block text-[15px] font-semibold text-graphite truncate">{s.name}</b>
-                    <p className="text-[11px] text-warm-gray mt-0.5 truncate">
-                      {FORMAT_LABELS[s.format] ?? s.format} · Code <span className="font-mono tnum">{s.joinCode}</span> · {formatSessionDate(s.createdAt)}
-                    </p>
+            <>
+              <div className="flex items-center justify-between mb-2">
+                <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray">
+                  {selectMode ? `${selectedIds.size} selected` : `${hostedCount} session${hostedCount === 1 ? "" : "s"}`}
+                </span>
+                {selectMode ? (
+                  <div className="flex items-center gap-3">
+                    <button onClick={exitSelectMode} className="text-[12px] font-semibold text-ink-2 active:opacity-70">Cancel</button>
+                    <button
+                      onClick={deleteSelected}
+                      disabled={selectedIds.size === 0 || deletingSessions}
+                      className="text-[12px] font-semibold text-loss disabled:opacity-40 active:opacity-70"
+                    >
+                      {deletingSessions ? "Deleting…" : `Delete${selectedIds.size ? ` (${selectedIds.size})` : ""}`}
+                    </button>
                   </div>
-                  <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                    <path d="M9 18l6-6-6-6" />
-                  </svg>
-                </Link>
-              ))}
-            </div>
+                ) : (
+                  <button onClick={() => setSelectMode(true)} className="text-[12px] font-semibold text-gold-ink active:opacity-70">Select</button>
+                )}
+              </div>
+              {deleteError && <p className="text-[11px] text-loss mb-2 leading-snug">{deleteError}</p>}
+              <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+                {[...hostedSessions].map((s) => {
+                  const selected = selectedIds.has(s.id);
+                  const rowClass = "flex items-center gap-3 px-4 py-3.5 border-t border-line first:border-t-0 active:bg-surface-2 transition-colors w-full text-left";
+                  const inner = (
+                    <>
+                      {selectMode && (
+                        <span
+                          className={`w-5 h-5 rounded-md border flex items-center justify-center text-[11px] font-bold shrink-0 ${
+                            selected ? "bg-graphite border-graphite text-ivory" : "border-stone bg-surface text-transparent"
+                          }`}
+                          aria-hidden
+                        >
+                          ✓
+                        </span>
+                      )}
+                      <span
+                        className={`w-2 h-2 rounded-full shrink-0 ${
+                          s.status === "live" ? "bg-court-lime shadow-[0_0_0_3px_rgba(196,226,75,0.28)]" : "bg-stone"
+                        }`}
+                        aria-hidden
+                      />
+                      <div className="flex-1 min-w-0">
+                        <b className="block text-[15px] font-semibold text-graphite truncate">{s.name}</b>
+                        <p className="text-[11px] text-warm-gray mt-0.5 truncate">
+                          {FORMAT_LABELS[s.format] ?? s.format} · Code <span className="font-mono tnum">{s.joinCode}</span> · {formatSessionDate(s.createdAt)}
+                        </p>
+                      </div>
+                      {!selectMode && (
+                        <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                          <path d="M9 18l6-6-6-6" />
+                        </svg>
+                      )}
+                    </>
+                  );
+                  return selectMode ? (
+                    <button key={s.id} type="button" onClick={() => toggleSelected(s.id)} className={rowClass}>
+                      {inner}
+                    </button>
+                  ) : (
+                    <Link key={s.id} to={s.status === "ended" ? `/session/${s.id}/final` : `/session/${s.id}/host`} className={rowClass}>
+                      {inner}
+                    </Link>
+                  );
+                })}
+              </div>
+            </>
           )}
           {liveCount > 0 && (
             <p className="text-[11px] text-warm-gray mt-2 text-center">

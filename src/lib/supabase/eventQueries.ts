@@ -126,6 +126,58 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
   });
 }
 
+export interface PublicEvent {
+  id: string;
+  clubId: string;
+  teamName: string;
+  teamLogo: string | null;
+  title: string;
+  scheduledAt: string;
+  location: string | null;
+  status: "scheduled" | "cancelled";
+  counts: { in: number; maybe: number; out: number };
+  goingNames: string[];
+  myResponse: RsvpResponse | null;
+  isMember: boolean;
+}
+
+/** Read-only shareable view of a scheduled session (0026) — works for anyone,
+ * incl. logged-out visitors. Members get their own response + is_member so the
+ * page can offer the RSVP control. */
+export async function getPublicEvent(eventId: string): Promise<PublicEvent | null> {
+  const { data, error } = await supabase.rpc("get_public_event", { p_event_id: eventId });
+  if (error) throw error;
+  if (!data) return null;
+  const d = data as {
+    id: string;
+    club_id: string;
+    team_name: string;
+    team_logo: string | null;
+    title: string;
+    scheduled_at: string;
+    location: string | null;
+    status: "scheduled" | "cancelled";
+    counts: { in: number; maybe: number; out: number };
+    going_names: string[] | null;
+    my_response: RsvpResponse | null;
+    is_member: boolean;
+  };
+  return {
+    id: d.id,
+    clubId: d.club_id,
+    teamName: d.team_name,
+    teamLogo: d.team_logo,
+    title: d.title,
+    scheduledAt: d.scheduled_at,
+    location: d.location,
+    status: d.status,
+    counts: d.counts,
+    goingNames: d.going_names ?? [],
+    myResponse: d.my_response,
+    isMember: d.is_member,
+  };
+}
+
 /** Set (or change) the caller's RSVP for an event. */
 export async function setRsvp(eventId: string, response: RsvpResponse): Promise<void> {
   const { data: userData, error: userError } = await supabase.auth.getUser();
