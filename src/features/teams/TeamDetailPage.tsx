@@ -302,13 +302,21 @@ export default function TeamDetailPage() {
       {/* Upcoming */}
       {teamId && <EventsSection clubId={teamId} isAdmin={isAdmin} />}
 
-      {/* League */}
+      {/* League + Champions */}
       <Section title="League">
         <Link to={`/teams/${teamId}/league`} className="flex items-center gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">
           <span className="w-[38px] h-[38px] rounded-xl bg-gold-soft text-gold-ink flex items-center justify-center text-[18px] shrink-0" aria-hidden>🏆</span>
           <span className="flex-1 min-w-0">
             <b className="block text-[14px] font-semibold text-graphite">League table</b>
             <span className="block text-[11.5px] text-warm-gray">Points per session · this period</span>
+          </span>
+          <span className="text-stone text-[16px]">›</span>
+        </Link>
+        <Link to={`/teams/${teamId}/champions`} className="flex items-center gap-3 px-4 py-3.5 border-t border-line active:bg-surface-2 transition-colors">
+          <span className="w-[38px] h-[38px] rounded-xl bg-gold-soft text-gold-ink flex items-center justify-center text-[18px] shrink-0" aria-hidden>👑</span>
+          <span className="flex-1 min-w-0">
+            <b className="block text-[14px] font-semibold text-graphite">Champions Hall</b>
+            <span className="block text-[11.5px] text-warm-gray">Session winners &amp; all-time titles</span>
           </span>
           <span className="text-stone text-[16px]">›</span>
         </Link>

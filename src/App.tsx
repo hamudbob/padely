@@ -11,6 +11,7 @@ import FinalSummaryPage from "./features/final-summary/FinalSummaryPage";
 import TeamsPage from "./features/teams/TeamsPage";
 import TeamDetailPage from "./features/teams/TeamDetailPage";
 import LeaguePage from "./features/teams/LeaguePage";
+import ChampionsPage from "./features/teams/ChampionsPage";
 import MembersPage from "./features/teams/MembersPage";
 import EventPage from "./features/teams/EventPage";
 import PublicProfilePage from "./features/public-profile/PublicProfilePage";
@@ -74,6 +75,14 @@ export default function App() {
         element={
           <RequireHost>
             <LeaguePage />
+          </RequireHost>
+        }
+      />
+      <Route
+        path="/teams/:teamId/champions"
+        element={
+          <RequireHost>
+            <ChampionsPage />
           </RequireHost>
         }
       />

@@ -600,6 +600,10 @@ export interface Database {
         Args: { p_club_id: string };
         Returns: unknown; // jsonb { members, sessions, games }
       };
+      get_club_champions: {
+        Args: { p_club_id: string };
+        Returns: unknown; // jsonb { titles[], recent[] }
+      };
       get_claimable_players: {
         Args: { p_public_token: string };
         Returns: unknown; // jsonb [{ id, name }]
