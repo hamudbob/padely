@@ -61,12 +61,12 @@ export default function FinalSummaryPage() {
     }
   }
 
-  const shell = "mx-auto max-w-sm min-h-screen bg-graphite text-ivory px-5 py-10 text-center";
+  const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-10 text-center safe-top safe-bottom anim-fade";
 
   if (loading) {
     return (
       <div className={shell}>
-        <p className="text-[13px] text-ivory/60 mt-16">Tallying the final standings…</p>
+        <p className="text-[13px] text-warm-gray mt-16">Tallying the final standings…</p>
       </div>
     );
   }
@@ -75,7 +75,7 @@ export default function FinalSummaryPage() {
     return (
       <div className={shell}>
         <p className="text-[13px] text-loss mt-16">{error}</p>
-        <Link to="/" className="inline-block mt-6 text-[13px] font-semibold text-ivory/80 underline">
+        <Link to="/" className="inline-block mt-6 text-[13px] font-semibold text-ink-2 underline">
           Back to sessions
         </Link>
       </div>
@@ -87,10 +87,10 @@ export default function FinalSummaryPage() {
   if (rows.length === 0) {
     return (
       <div className={shell}>
-        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-gold">Session complete</p>
-        <h1 className="font-serif text-[34px] font-medium tracking-tight leading-[1.05] mt-2">Well played.</h1>
-        <p className="text-[12.5px] text-ivory/60 mt-3">This session has no results yet.</p>
-        <Link to="/" className="inline-block mt-6 text-[13px] font-semibold text-ivory/80 underline">
+        <p className="text-[11px] font-bold uppercase tracking-[0.22em] text-gold-ink">Session complete</p>
+        <h1 className="font-serif text-[34px] font-semibold tracking-tight leading-[1.05] text-graphite mt-2">Well played.</h1>
+        <p className="text-[12.5px] text-warm-gray mt-3">This session has no results yet.</p>
+        <Link to="/" className="inline-block mt-6 text-[13px] font-semibold text-ink-2 underline">
           Back to sessions
         </Link>
       </div>
@@ -117,11 +117,11 @@ export default function FinalSummaryPage() {
 
   return (
     <div className={shell}>
-      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold">Session complete</p>
-      <h1 className="font-serif text-[34px] font-medium tracking-tight leading-[1.05] mt-2">
-        Well played, <span className="italic text-gold">{firstNameOf(winner.playerName)}</span>.
+      <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold-ink">Session complete</p>
+      <h1 className="font-serif text-[34px] font-semibold tracking-tight leading-[1.05] text-graphite mt-2">
+        Well played, <span className="italic text-gold-ink">{firstNameOf(winner.playerName)}</span>.
       </h1>
-      <p className="text-[12.5px] text-ivory/60 mb-6">
+      <p className="text-[12.5px] text-warm-gray mb-6">
         {sessionName} · <span className="font-mono tnum">{roundCount}</span> rounds
       </p>
 
@@ -133,16 +133,20 @@ export default function FinalSummaryPage() {
               className={`rounded-full mx-auto flex items-center justify-center font-semibold ${
                 place === 1
                   ? "w-16 h-16 bg-gold text-graphite ring-4 ring-gold/20 text-[18px]"
-                  : "w-[52px] h-[52px] bg-white/[0.06] border border-white/10 text-ivory text-[15px]"
+                  : "w-[52px] h-[52px] bg-surface-2 border border-line text-ink-2 text-[15px]"
               }`}
             >
               {initialsOf(row.playerName)}
             </div>
-            <p className="text-[12px] font-semibold mt-2">{firstNameOf(row.playerName)}</p>
-            <p className="font-mono tnum text-[14px] font-bold text-gold">{row.totalPoints}</p>
+            <p className="text-[12px] font-semibold text-graphite mt-2">{firstNameOf(row.playerName)}</p>
+            <p className="font-mono tnum text-[14px] font-bold text-gold-ink">{row.totalPoints}</p>
             <div
-              className={`mt-2.5 bg-white/[0.04] border border-white/10 border-b-0 rounded-t-xl flex justify-center pt-2 font-mono font-bold ${
-                place === 1 ? "h-[76px] text-gold" : place === 2 ? "h-[54px] text-white/30" : "h-[40px] text-white/30"
+              className={`mt-2.5 border border-b-0 rounded-t-xl flex justify-center pt-2 font-mono font-bold ${
+                place === 1
+                  ? "h-[76px] bg-gold-soft border-gold/30 text-gold-ink"
+                  : place === 2
+                    ? "h-[54px] bg-surface-2 border-line text-stone"
+                    : "h-[40px] bg-surface-2 border-line text-stone"
               }`}
             >
               {place}
@@ -158,44 +162,43 @@ export default function FinalSummaryPage() {
           { value: matchCount, label: "Matches" },
           { value: playerCount, label: "Players" },
         ].map((stat) => (
-          <div key={stat.label} className="flex-1 bg-white/[0.04] border border-white/10 rounded-2xl px-2.5 py-3 text-center">
-            <b className="font-mono tnum text-[20px] font-semibold text-ivory block">{stat.value}</b>
-            <span className="text-[9.5px] uppercase tracking-wide text-ivory/50">{stat.label}</span>
+          <div key={stat.label} className="flex-1 bg-surface border border-line rounded-2xl px-2.5 py-3 text-center shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+            <b className="font-mono tnum text-[20px] font-semibold text-graphite block">{stat.value}</b>
+            <span className="text-[9.5px] uppercase tracking-wide text-warm-gray">{stat.label}</span>
           </div>
         ))}
       </div>
 
       {rest.length > 0 && (
-        <>
-          <div className="border-t border-white/10 my-3" />
+        <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)] mt-2">
           {rest.map((row) => (
-            <div key={row.subjectId} className="flex items-center justify-between py-2.5 text-[12.5px] text-ivory/85">
-              <span>
+            <div key={row.subjectId} className="flex items-center justify-between px-4 py-2.5 text-[12.5px] text-ink border-t border-line first:border-t-0">
+              <span className="text-left">
                 <span className="font-mono tnum text-warm-gray w-5 inline-block">{row.rank}</span>
                 {row.playerName}
               </span>
-              <span className="font-mono tnum text-gold font-semibold">{row.totalPoints}</span>
+              <span className="font-mono tnum text-gold-ink font-semibold">{row.totalPoints}</span>
             </div>
           ))}
-        </>
+        </div>
       )}
 
-      <div className="h-4" />
+      <div className="h-5" />
       <button
         onClick={handleShare}
-        className="w-full rounded-full px-4 py-3.5 font-semibold text-graphite bg-gold active:scale-[0.99] transition-transform"
+        className="w-full rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform"
       >
         Share result
       </button>
       <Link
         to={`/session/${sessionId ?? ""}/host`}
-        className="block w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-white/25 text-ivory/90 bg-transparent active:scale-[0.99] transition-transform"
+        className="block w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform"
       >
         View all rounds &amp; scores
       </Link>
       <button
         onClick={() => navigate("/")}
-        className="w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold text-ivory/70 bg-transparent active:opacity-70"
+        className="w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold text-warm-gray bg-transparent active:opacity-70"
       >
         Back to sessions
       </button>

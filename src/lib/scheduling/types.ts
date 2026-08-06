@@ -52,23 +52,42 @@ export interface MatchHistory {
   partnerPairsSeen: Set<string>;
   /** Every opponent pair (across the net from each other) seen previously. */
   opponentPairsSeen: Set<string>;
+  /** How MANY times each partner pair has occurred — the key to balanced
+   * Americano. A boolean "seen" set can only avoid the first repeat; counts let
+   * the scheduler prefer the least-partnered pair, so nobody ends up partnering
+   * one person 3× while never partnering another. */
+  partnerCounts: Map<string, number>;
+  /** How many times each opponent pair has faced off — same idea, lower weight. */
+  opponentCounts: Map<string, number>;
 }
 
 export function emptyHistory(): MatchHistory {
   return {
     partnerPairsSeen: new Set(),
     opponentPairsSeen: new Set(),
+    partnerCounts: new Map(),
+    opponentCounts: new Map(),
   };
+}
+
+function bump(m: Map<string, number>, key: string): void {
+  m.set(key, (m.get(key) ?? 0) + 1);
 }
 
 /** Fold a generated round into running history — call after a round is accepted. */
 export function recordRoundInHistory(history: MatchHistory, round: RoundResult): void {
   for (const m of round.matches) {
-    history.partnerPairsSeen.add(pairKey(m.teamA[0], m.teamA[1]));
-    history.partnerPairsSeen.add(pairKey(m.teamB[0], m.teamB[1]));
+    const aKey = pairKey(m.teamA[0], m.teamA[1]);
+    const bKey = pairKey(m.teamB[0], m.teamB[1]);
+    history.partnerPairsSeen.add(aKey);
+    history.partnerPairsSeen.add(bKey);
+    bump(history.partnerCounts, aKey);
+    bump(history.partnerCounts, bKey);
     for (const a of m.teamA) {
       for (const b of m.teamB) {
-        history.opponentPairsSeen.add(pairKey(a, b));
+        const oKey = pairKey(a, b);
+        history.opponentPairsSeen.add(oKey);
+        bump(history.opponentCounts, oKey);
       }
     }
   }

@@ -213,6 +213,21 @@ export async function getTeamSessions(teamId: string): Promise<TeamSession[]> {
   }));
 }
 
+export interface ClubStats {
+  members: number;
+  sessions: number;
+  games: number;
+}
+
+/** Member-gated club summary for the stats strip (0027): member count, ended
+ * sessions attributed to the club, and total finalized games across them. */
+export async function getClubStats(teamId: string): Promise<ClubStats> {
+  const { data, error } = await supabase.rpc("get_club_stats", { p_club_id: teamId });
+  if (error) throw error;
+  const d = (data ?? {}) as { members?: number; sessions?: number; games?: number };
+  return { members: d.members ?? 0, sessions: d.sessions ?? 0, games: d.games ?? 0 };
+}
+
 export async function leaveTeam(teamId: string): Promise<void> {
   const { error } = await supabase.rpc("leave_club", { p_club_id: teamId });
   if (error) throw new Error(error.message);

@@ -13,6 +13,15 @@ export interface PublicTeam {
   role: "owner" | "admin" | "member";
 }
 
+/** One outcome in the recent-form strip, newest first. */
+export type FormResult = "W" | "L" | "D";
+
+/** A single point on the rating sparkline, oldest → newest. */
+export interface RatingPoint {
+  rating: number;
+  delta: number;
+}
+
 export interface PublicProfile {
   id: string;
   displayName: string;
@@ -22,6 +31,18 @@ export interface PublicProfile {
   provisional: boolean;
   memberSince: string;
   teams: PublicTeam[];
+  /** All-time finalized record across every session this player has played. */
+  wins: number;
+  losses: number;
+  draws: number;
+  /** Total decided matches — wins + losses + draws. */
+  matches: number;
+  /** Wins ÷ decided matches, 0..1 (0 when no matches). */
+  winRate: number;
+  /** Last up-to-5 outcomes, newest first. */
+  form: FormResult[];
+  /** Up-to-12 rating points, oldest → newest, for the trend sparkline. */
+  ratingTrend: RatingPoint[];
 }
 
 export async function getPublicProfile(userId: string): Promise<PublicProfile | null> {
@@ -37,7 +58,16 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     provisional: boolean | null;
     member_since: string;
     teams: { id: string; name: string; logo_url: string | null; role: "owner" | "admin" | "member" }[] | null;
+    wins: number | null;
+    losses: number | null;
+    draws: number | null;
+    form: FormResult[] | null;
+    rating_trend: { rating: number | null; delta: number | null }[] | null;
   };
+  const wins = d.wins ?? 0;
+  const losses = d.losses ?? 0;
+  const draws = d.draws ?? 0;
+  const matches = wins + losses + draws;
   return {
     id: d.id,
     displayName: d.display_name ?? "Player",
@@ -47,5 +77,12 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     provisional: !!d.provisional,
     memberSince: d.member_since,
     teams: (d.teams ?? []).map((t) => ({ id: t.id, name: t.name, logoUrl: t.logo_url, role: t.role })),
+    wins,
+    losses,
+    draws,
+    matches,
+    winRate: matches > 0 ? wins / matches : 0,
+    form: (d.form ?? []).filter((f): f is FormResult => f === "W" || f === "L" || f === "D"),
+    ratingTrend: (d.rating_trend ?? []).map((p) => ({ rating: Math.round(p.rating ?? 1500), delta: Math.round(p.delta ?? 0) })),
   };
 }

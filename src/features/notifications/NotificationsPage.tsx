@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { Link, useNavigate } from "react-router-dom";
+import { useNavigate } from "react-router-dom";
 import {
   getNotifications,
   markAllNotificationsRead,
@@ -8,6 +8,7 @@ import {
   AppNotification,
 } from "../../lib/supabase/notificationQueries";
 import { respondInvite } from "../../lib/supabase/clubJoinQueries";
+import { useBackNav } from "../../lib/useBackNav";
 
 function timeAgo(iso: string): string {
   const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -22,6 +23,7 @@ function timeAgo(iso: string): string {
 
 export default function NotificationsPage() {
   const navigate = useNavigate();
+  const back = useBackNav("/profile");
   const [items, setItems] = useState<AppNotification[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -69,7 +71,7 @@ export default function NotificationsPage() {
   return (
     <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-6 safe-top safe-bottom anim-fade">
       <div className="flex items-center justify-between mb-5">
-        <Link to="/profile" aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</Link>
+        <button onClick={back} aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</button>
         <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
           Padelier<span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
         </div>

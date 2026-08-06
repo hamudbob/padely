@@ -1,9 +1,10 @@
 import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
-import { getTeam, getTeamMembers, leaveTeam, uploadClubLogo, Team, TeamMember, TeamRole } from "../../lib/supabase/teamQueries";
+import { getTeam, getTeamMembers, leaveTeam, uploadClubLogo, getClubStats, Team, TeamMember, TeamRole, ClubStats } from "../../lib/supabase/teamQueries";
 import { getClubJoinRequests, respondJoinRequest, inviteByEmail, requestToJoin, JoinRequestItem } from "../../lib/supabase/clubJoinQueries";
 import { getClubEvents, createEvent, setRsvp, cancelEvent, ClubEvent, RsvpResponse } from "../../lib/supabase/eventQueries";
+import { useBackNav } from "../../lib/useBackNav";
 
 const ROLE_LABEL: Record<TeamRole, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -17,12 +18,14 @@ function roleLine(role: TeamRole | undefined): string {
 export default function TeamDetailPage() {
   const { teamId } = useParams();
   const navigate = useNavigate();
+  const back = useBackNav("/teams");
   const { user } = useHostSession();
 
   const [team, setTeam] = useState<Team | null>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
   const [membersLoaded, setMembersLoaded] = useState(false);
   const [requests, setRequests] = useState<JoinRequestItem[]>([]);
+  const [stats, setStats] = useState<ClubStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +77,13 @@ export default function TeamDetailPage() {
     if (isAdmin) loadRequests();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [isAdmin, teamId]);
+
+  // Club stats strip (0027) — member-gated RPC, so it quietly no-ops for
+  // non-members (whose view never renders the strip anyway).
+  useEffect(() => {
+    if (!teamId) return;
+    getClubStats(teamId).then(setStats).catch(() => setStats(null));
+  }, [teamId]);
 
   async function copyCode() {
     if (!team) return;
@@ -181,7 +191,7 @@ export default function TeamDetailPage() {
   const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-6 safe-top safe-bottom anim-fade";
   const backBar = (
     <div className="flex items-center justify-between mb-2">
-      <Link to="/teams" aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</Link>
+      <button onClick={back} aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</button>
       <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
         Padelier<span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
       </div>
@@ -216,7 +226,7 @@ export default function TeamDetailPage() {
             </>
           ) : (
             <p className="text-[12.5px] text-warm-gray text-center">
-              <Link to="/login" className="font-semibold text-gold-ink">Sign in</Link> to request to join this team.
+              <Link to={`/login?next=${encodeURIComponent(`/teams/${teamId}`)}`} className="font-semibold text-gold-ink">Sign in</Link> to request to join this team.
             </p>
           )}
         </div>
@@ -265,6 +275,15 @@ export default function TeamDetailPage() {
       </div>
 
       {error && <p className="text-[12px] text-loss mt-4 text-center">{error}</p>}
+
+      {/* Stats strip */}
+      <div className="mt-6 flex rounded-2xl bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+        <StatCell label="Members" value={members.length} />
+        <div className="w-px bg-line" />
+        <StatCell label="Sessions" value={stats ? stats.sessions : null} />
+        <div className="w-px bg-line" />
+        <StatCell label="Games" value={stats ? stats.games : null} />
+      </div>
 
       {/* Join requests (admins) — quiet banner */}
       {isAdmin && requests.length > 0 && (
@@ -357,6 +376,17 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
     <div className="mt-7">
       <h3 className="text-[13px] font-semibold text-ink-2 mb-2 px-0.5">{title}</h3>
       <div className="rounded-2xl bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">{children}</div>
+    </div>
+  );
+}
+
+function StatCell({ label, value }: { label: string; value: number | null }) {
+  return (
+    <div className="flex-1 py-3.5 text-center">
+      <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray">{label}</p>
+      <p className="font-mono tnum text-[22px] font-semibold text-graphite leading-none mt-1.5">
+        {value === null ? <span className="text-stone">—</span> : value}
+      </p>
     </div>
   );
 }
@@ -513,7 +543,8 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
       }
     }
     try {
-      await navigator.clipboard.writeText(`${text}\n${url}`);
+      // Copy the bare URL only — pasting text+URL reads as two links on iOS.
+      await navigator.clipboard.writeText(url);
     } catch {
       /* ignore */
     }

@@ -3,10 +3,11 @@ import { useNavigate, useSearchParams } from "react-router-dom";
 import { getJoinSession } from "../../lib/supabase/playerJoinQueries";
 
 /**
- * Spectate a session by code (`/watch`, optionally `/watch?code=123456`). Unlike
- * the player join, this never creates anything — it just resolves the code to
- * the session's public token and sends the watcher to the read-only live view
- * (standings + rounds). No account, no join request.
+ * The single "enter a code" gateway (`/watch` and `/join`, optionally
+ * `?code=123456` from a QR). Resolving the code sends the visitor to the live
+ * session view (standings + rounds), carrying the code as ?j= so that once
+ * there they can watch, claim their spot, or join as a new player — all from
+ * one place. Entering a code creates nothing on its own.
  */
 export default function WatchPage() {
   const navigate = useNavigate();
@@ -24,7 +25,7 @@ export default function WatchPage() {
         setError("No open session matches that code. Double-check with the host.");
         return;
       }
-      navigate(`/live/${found.publicToken}`);
+      navigate(`/live/${found.publicToken}?j=${value}`);
     } catch {
       setError("Couldn't check that code just now — please try again.");
     } finally {
@@ -61,9 +62,9 @@ export default function WatchPage() {
         </div>
       </div>
 
-      <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1]">Watch live.</h1>
+      <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1]">Enter a code.</h1>
       <p className="text-[13.5px] text-ink-2 leading-relaxed mb-6">
-        Enter a session code to follow the standings and rounds — no account needed, and you won't be added as a player.
+        Pop in the session code your host shared — you'll see the live standings and rounds, and from there you can watch, claim your spot, or join as a new player.
       </p>
 
       <form onSubmit={handleSubmit} className="space-y-3">
@@ -82,7 +83,7 @@ export default function WatchPage() {
           disabled={code.length !== 6 || checking}
           className="w-full flex items-center justify-center rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-40"
         >
-          {checking ? "Finding…" : "Watch"}
+          {checking ? "Finding…" : "Continue"}
         </button>
       </form>
     </div>

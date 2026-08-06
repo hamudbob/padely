@@ -126,6 +126,14 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
   });
 }
 
+/** An attendee shown on the public event page — enough to render an avatar row
+ * and link to their public profile (/u/<id>). */
+export interface EventAttendee {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+}
+
 export interface PublicEvent {
   id: string;
   clubId: string;
@@ -137,6 +145,10 @@ export interface PublicEvent {
   status: "scheduled" | "cancelled";
   counts: { in: number; maybe: number; out: number };
   goingNames: string[];
+  /** RSVP "in" players, as tappable profiles. */
+  going: EventAttendee[];
+  /** RSVP "maybe" players, as tappable profiles. */
+  maybe: EventAttendee[];
   myResponse: RsvpResponse | null;
   isMember: boolean;
 }
@@ -159,9 +171,13 @@ export async function getPublicEvent(eventId: string): Promise<PublicEvent | nul
     status: "scheduled" | "cancelled";
     counts: { in: number; maybe: number; out: number };
     going_names: string[] | null;
+    going: { id: string; name: string | null; avatar: string | null }[] | null;
+    maybe: { id: string; name: string | null; avatar: string | null }[] | null;
     my_response: RsvpResponse | null;
     is_member: boolean;
   };
+  const mapPeople = (rows: { id: string; name: string | null; avatar: string | null }[] | null): EventAttendee[] =>
+    (rows ?? []).map((r) => ({ userId: r.id, displayName: r.name ?? "Player", avatarUrl: r.avatar }));
   return {
     id: d.id,
     clubId: d.club_id,
@@ -173,6 +189,8 @@ export async function getPublicEvent(eventId: string): Promise<PublicEvent | nul
     status: d.status,
     counts: d.counts,
     goingNames: d.going_names ?? [],
+    going: mapPeople(d.going),
+    maybe: mapPeople(d.maybe),
     myResponse: d.my_response,
     isMember: d.is_member,
   };

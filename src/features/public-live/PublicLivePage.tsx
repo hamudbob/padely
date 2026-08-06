@@ -1,7 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from "react";
-import { useParams, useNavigate } from "react-router-dom";
+import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { getPublicSession, PublicSessionData } from "../../lib/supabase/publicSessionQueries";
 import { subscribeLiveUpdates } from "../../lib/supabase/liveChannel";
+import SessionJoinPanel from "./SessionJoinPanel";
 
 /**
  * Public / Spectator live view (`/live/:publicToken`). Read-only, wired to the
@@ -36,6 +37,10 @@ function initialsOf(name: string): string {
 export default function PublicLivePage() {
   const { publicToken } = useParams();
   const navigate = useNavigate();
+  // The 6-digit code the viewer entered to get here (carried as ?j=). Needed so
+  // the join-as-new path can call request_join; absent on a bare watch link.
+  const [params] = useSearchParams();
+  const joinCode = params.get("j");
   const [data, setData] = useState<PublicSessionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -122,23 +127,29 @@ export default function PublicLivePage() {
     };
   }, [isLive, sessionId, load]);
 
-  const shell = "mx-auto max-w-sm min-h-screen bg-graphite text-ivory px-5 py-8";
+  const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-6 safe-top safe-bottom anim-fade";
 
-  const backBtn = (
-    <button
-      onClick={() => navigate(-1)}
-      aria-label="Go back"
-      className="inline-flex items-center gap-1.5 text-[12.5px] text-ivory/60 hover:text-ivory transition-colors mb-4"
-    >
-      <span className="w-7 h-7 rounded-full border border-white/15 bg-white/[0.04] flex items-center justify-center text-[15px] leading-none">‹</span>
-      Back
-    </button>
+  const topBar = (
+    <div className="flex items-center justify-between mb-2">
+      <button
+        onClick={() => navigate(-1)}
+        aria-label="Back"
+        className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform"
+      >
+        ‹
+      </button>
+      <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
+        Padelier<span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
+      </div>
+      <div className="w-9" />
+    </div>
   );
 
   if (loading) {
     return (
       <div className={shell}>
-        <p className="text-[13px] text-ivory/60 mt-16 text-center">Loading the live view…</p>
+        {topBar}
+        <p className="text-[13px] text-warm-gray mt-16 text-center">Loading the live view…</p>
       </div>
     );
   }
@@ -146,7 +157,7 @@ export default function PublicLivePage() {
   if (error) {
     return (
       <div className={shell}>
-        {backBtn}
+        {topBar}
         <p className="text-[13px] text-loss mt-16 text-center">Couldn't load this session.</p>
       </div>
     );
@@ -155,8 +166,8 @@ export default function PublicLivePage() {
   if (notFound || !data) {
     return (
       <div className={shell}>
-        {backBtn}
-        <p className="text-[13px] text-ivory/60 mt-16 text-center">This live link isn't active.</p>
+        {topBar}
+        <p className="text-[13px] text-warm-gray mt-16 text-center">This live link isn't active.</p>
       </div>
     );
   }
@@ -173,6 +184,9 @@ export default function PublicLivePage() {
     points: s.totalPoints,
     wins: s.wins,
     losses: s.losses,
+    draws: s.draws,
+    played: s.matchesPlayed,
+    comp: s.restCompensation,
   }));
 
   // Court scores grouped by round.
@@ -193,7 +207,7 @@ export default function PublicLivePage() {
   const rest = board.slice(3);
   const podiumSlots = [podium[1], podium[0], podium[2]]; // 2nd · 1st · 3rd
   const podiumHeights = ["h-16", "h-24", "h-12"];
-  const podiumBar = ["bg-white/[0.06]", "bg-gold/25", "bg-white/[0.06]"];
+  const podiumBar = ["bg-stone/50", "bg-gold/30", "bg-stone/50"];
 
   const CourtCard = ({
     m,
@@ -207,24 +221,24 @@ export default function PublicLivePage() {
     const bWon = scored && (m.scoreB as number) > (m.scoreA as number);
     const inPlay = live && m.status !== "final";
     return (
-      <div className={`rounded-2xl border px-3.5 py-3 ${inPlay ? "border-court-lime/30 bg-court-lime/[0.06]" : "border-white/10 bg-white/[0.04]"}`}>
+      <div className={`rounded-2xl border px-3.5 py-3 shadow-[0_1px_2px_rgba(13,13,13,0.04)] ${inPlay ? "border-court-lime/50 bg-court-lime/[0.08]" : "border-line bg-surface"}`}>
         <div className="flex items-center justify-between mb-1.5">
-          <p className="text-[9.5px] uppercase tracking-[0.14em] text-ivory/45">{m.courtName}</p>
+          <p className="text-[9.5px] uppercase tracking-[0.14em] text-warm-gray">{m.courtName}</p>
           {inPlay && (
-            <span className="inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-court-lime">
-              <span className="w-1.5 h-1.5 rounded-full bg-court-lime animate-pulse" aria-hidden />
+            <span className="inline-flex items-center gap-1 text-[9px] font-semibold uppercase tracking-[0.12em] text-[#5f7a12]">
+              <span className="w-1.5 h-1.5 rounded-full bg-[#8FB01E] animate-pulse" aria-hidden />
               In play
             </span>
           )}
         </div>
         <div className="flex items-center gap-2">
-          <span className={`flex-1 min-w-0 text-[12.5px] ${aWon ? "text-ivory font-semibold" : "text-ivory/85"}`}>{m.teamA.join(" & ") || "—"}</span>
+          <span className={`flex-1 min-w-0 text-[12.5px] ${aWon ? "text-graphite font-semibold" : "text-ink-2"}`}>{m.teamA.join(" & ") || "—"}</span>
           <span className="font-mono tnum text-[17px] font-semibold shrink-0 px-1">
-            <span className={aWon ? "text-gold" : "text-ivory"}>{m.scoreA ?? "–"}</span>
-            <span className="text-ivory/35"> - </span>
-            <span className={bWon ? "text-gold" : "text-ivory"}>{m.scoreB ?? "–"}</span>
+            <span className={aWon ? "text-gold-ink" : "text-graphite"}>{m.scoreA ?? "–"}</span>
+            <span className="text-stone"> - </span>
+            <span className={bWon ? "text-gold-ink" : "text-graphite"}>{m.scoreB ?? "–"}</span>
           </span>
-          <span className={`flex-1 min-w-0 text-right text-[12.5px] ${bWon ? "text-ivory font-semibold" : "text-ivory/85"}`}>{m.teamB.join(" & ") || "—"}</span>
+          <span className={`flex-1 min-w-0 text-right text-[12.5px] ${bWon ? "text-graphite font-semibold" : "text-ink-2"}`}>{m.teamB.join(" & ") || "—"}</span>
         </div>
       </div>
     );
@@ -232,44 +246,42 @@ export default function PublicLivePage() {
 
   return (
     <div className={shell}>
-      {backBtn}
+      {topBar}
 
-      {/* Wordmark + live/ended chip */}
-      <div className="flex items-center justify-between mb-1.5">
-        <div className="font-wordmark text-[19px] font-semibold text-ivory flex items-baseline leading-none">
-          Padelier
-          <span className="ml-[3px] w-[7px] h-[7px] rounded-full bg-gold inline-block" aria-hidden />
-        </div>
+      {/* Eyebrow + live/ended chip */}
+      <div className="flex items-center justify-between mt-3 mb-0.5">
+        <p className="text-gold-ink text-[10px] font-bold uppercase tracking-[0.2em] flex items-center gap-2">
+          {isLive ? "Now watching" : "Final result"}
+          {justUpdated && <span className="text-[#5f7a12] normal-case tracking-normal font-semibold text-[10px]">· updated</span>}
+        </p>
         {isLive ? (
-          <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[11px] font-semibold bg-court-lime/15 text-court-lime">
+          <span className="inline-flex items-center gap-1.5 rounded-full px-2.5 py-1 text-[10.5px] font-semibold bg-court-lime/20 text-ink">
             <span className="relative w-1.5 h-1.5 inline-flex items-center justify-center" aria-hidden>
               <span className="absolute w-1.5 h-1.5 rounded-full bg-court-lime animate-ping" />
-              <span className="w-1.5 h-1.5 rounded-full bg-court-lime" />
+              <span className="w-1.5 h-1.5 rounded-full bg-[#8FB01E]" />
             </span>
             Live
           </span>
         ) : (
-          <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[11px] font-semibold bg-white/10 text-ivory/70">
+          <span className="inline-flex items-center rounded-full px-2.5 py-1 text-[10.5px] font-semibold bg-surface-2 border border-line text-warm-gray">
             Ended
           </span>
         )}
       </div>
-
-      <p className="text-gold text-[10px] font-bold uppercase tracking-[0.22em] mt-4 flex items-center gap-2">
-        {isLive ? "Now watching" : "Final result"}
-        {justUpdated && <span className="text-court-lime/80 normal-case tracking-normal font-medium text-[10px]">· updated</span>}
-      </p>
-      <h1 className="font-serif text-[26px] font-medium tracking-tight text-ivory mt-0.5">{session.name || "Live session"}</h1>
-      <p className="text-[12.5px] text-ivory/60 mb-5">
+      <h1 className="font-serif text-[26px] font-semibold tracking-tight text-graphite">{session.name || "Live session"}</h1>
+      <p className="text-[12.5px] text-warm-gray mb-5">
         {isLive
           ? <>Round <span className="font-mono tnum">{currentRoundSeq}</span> in play · anyone with the link can watch</>
           : "Session ended · final standings below"}
       </p>
 
+      {/* ── Get in the game (live only) ───────────────────── */}
+      {isLive && publicToken && <SessionJoinPanel publicToken={publicToken} joinCode={joinCode} />}
+
       {/* ── LIVE: current round hero ─────────────────────── */}
       {isLive && currentMatches.length > 0 && (
         <div className="mb-5">
-          <p className="text-court-lime text-[10px] font-bold uppercase tracking-[0.22em] mb-2.5">
+          <p className="text-ink-2 text-[10px] font-bold uppercase tracking-[0.16em] mb-2.5">
             Round <span className="font-mono tnum">{latestSeq}</span> · on court now
           </p>
           <div className="space-y-2">
@@ -282,17 +294,17 @@ export default function PublicLivePage() {
 
       {/* ── ENDED: podium ─────────────────────────────────── */}
       {!isLive && podium.length > 0 && (
-        <div className="rounded-3xl border border-white/10 bg-white/[0.03] px-4 pt-5 pb-4 mb-4">
+        <div className="rounded-3xl border border-line bg-surface px-4 pt-5 pb-4 mb-4 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
           <div className="flex items-end justify-center gap-2.5">
             {podiumSlots.map((slot, i) =>
               slot ? (
                 <div key={slot.rank} className="flex-1 flex flex-col items-center min-w-0">
-                  <span className="text-[12px] mb-1">{slot.rank === 1 ? "🥇" : slot.rank === 2 ? "🥈" : "🥉"}</span>
-                  <div className={`w-11 h-11 rounded-full border flex items-center justify-center text-[13px] font-semibold ${slot.rank === 1 ? "bg-gold/20 text-gold border-gold/40" : "bg-white/[0.06] text-ivory border-white/10"}`}>
+                  <span className="text-[13px] mb-1">{slot.rank === 1 ? "🥇" : slot.rank === 2 ? "🥈" : "🥉"}</span>
+                  <div className={`w-11 h-11 rounded-full border flex items-center justify-center text-[13px] font-semibold ${slot.rank === 1 ? "bg-gold-soft text-gold-ink border-gold/40" : "bg-surface-2 text-ink-2 border-line"}`}>
                     {initialsOf(slot.name)}
                   </div>
-                  <span className="text-[12px] text-ivory/90 mt-1.5 truncate max-w-full text-center">{firstNameOf(slot.name)}</span>
-                  <span className="font-mono tnum text-[13px] text-gold font-semibold">{slot.points}</span>
+                  <span className="text-[12px] text-graphite mt-1.5 truncate max-w-full text-center font-medium">{firstNameOf(slot.name)}</span>
+                  <span className="font-mono tnum text-[13px] text-gold-ink font-semibold">{slot.points}</span>
                   <div className={`w-full mt-1.5 rounded-t-lg ${podiumHeights[i]} ${podiumBar[i]}`} aria-hidden />
                 </div>
               ) : (
@@ -304,27 +316,43 @@ export default function PublicLivePage() {
       )}
 
       {/* ── Leaderboard ───────────────────────────────────── */}
-      <p className="text-gold text-[10px] font-bold uppercase tracking-[0.22em] mb-2">
+      <p className="text-gold-ink text-[10px] font-bold uppercase tracking-[0.16em] mb-2 px-0.5">
         {isLive ? "Leaderboard" : "Full standings"}
       </p>
       {board.length === 0 ? (
-        <p className="text-[12.5px] text-ivory/60 py-2.5">No scores yet — check back once play begins.</p>
+        <p className="text-[12.5px] text-warm-gray py-2.5">No scores yet — check back once play begins.</p>
       ) : (
-        <div className="rounded-2xl border border-white/10 bg-white/[0.03] px-4 divide-y divide-white/[0.06] mb-5">
-          {(isLive ? board : rest).map((row) => (
-            <div key={`${row.rank}-${row.name}`} className="flex items-center justify-between py-2.5 text-[12.5px] text-ivory">
-              <span className={row.rank === 1 && isLive ? "font-semibold" : ""}>
-                <span className={`font-mono tnum w-6 inline-block ${row.rank === 1 ? "text-gold" : "text-warm-gray"}`}>{row.rank}</span>
-                {row.name}
-              </span>
-              <span className="font-mono tnum flex items-baseline gap-2">
-                <span className="text-ivory/40 text-[10.5px]">{row.wins}W</span>
-                <span className="text-gold font-semibold">{row.points}</span>
-              </span>
-            </div>
-          ))}
+        <div className="rounded-2xl border border-line bg-surface overflow-hidden mb-5 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+          {/* column hint */}
+          <div className="flex items-center gap-3 px-4 pt-2.5 pb-1.5 text-[9px] font-bold uppercase tracking-[0.14em] text-warm-gray">
+            <span className="w-5 text-center">#</span>
+            <span className="flex-1">Player</span>
+            <span className="w-14 text-right">W–L</span>
+            <span className="w-12 text-right">Pts</span>
+          </div>
+          <div className="divide-y divide-line">
+            {(isLive ? board : rest).map((row) => {
+              const top = row.rank === 1;
+              return (
+                <div key={`${row.rank}-${row.name}`} className={`flex items-center gap-3 px-4 py-2.5 ${top ? "bg-gold-soft/50" : ""}`}>
+                  <span className={`w-5 text-center font-mono tnum text-[13px] font-bold ${top ? "text-gold-ink" : "text-warm-gray"}`}>{row.rank}</span>
+                  <span className={`flex-1 min-w-0 truncate text-[13.5px] ${top ? "text-graphite font-semibold" : "text-ink"}`}>{row.name}</span>
+                  <span className="w-14 text-right font-mono tnum text-[11.5px] text-warm-gray">
+                    {row.wins}<span className="text-stone">–</span>{row.losses}{row.draws > 0 ? <span className="text-stone">–{row.draws}</span> : null}
+                  </span>
+                  <span className="w-12 text-right font-mono tnum text-[15px] font-semibold text-gold-ink whitespace-nowrap">
+                    {row.points}
+                    {row.comp > 0 && <span className="align-top text-[8px] font-bold text-gold-ink/70 ml-0.5">+{row.comp}</span>}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
           {!isLive && rest.length === 0 && (
-            <div className="py-2.5 text-[12px] text-ivory/45">Top three are on the podium above.</div>
+            <div className="px-4 py-2.5 text-[12px] text-warm-gray">Top three are on the podium above.</div>
+          )}
+          {board.some((r) => r.comp > 0) && (
+            <p className="px-4 py-2 text-[10px] text-warm-gray border-t border-line">+N = points credited for rounds rested (kept fair).</p>
           )}
         </div>
       )}
@@ -337,18 +365,18 @@ export default function PublicLivePage() {
               onClick={() => activeEarlierIdx > 0 && setViewedSeq(earlierSeqs[activeEarlierIdx - 1])}
               disabled={activeEarlierIdx <= 0}
               aria-label="Previous round"
-              className="w-8 h-8 rounded-full border border-white/15 bg-white/[0.04] text-ivory/80 flex items-center justify-center text-[16px] disabled:opacity-30"
+              className="w-8 h-8 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[16px] disabled:opacity-30 active:scale-95 transition-transform"
             >
               ‹
             </button>
-            <p className="text-ivory/70 text-[10px] font-bold uppercase tracking-[0.22em]">
+            <p className="text-warm-gray text-[10px] font-bold uppercase tracking-[0.16em]">
               {isLive ? "Earlier" : "Round"} <span className="font-mono tnum">{activeEarlierSeq}</span> · Scores
             </p>
             <button
               onClick={() => activeEarlierIdx < earlierSeqs.length - 1 && setViewedSeq(earlierSeqs[activeEarlierIdx + 1])}
               disabled={activeEarlierIdx >= earlierSeqs.length - 1}
               aria-label="Next round"
-              className="w-8 h-8 rounded-full border border-white/15 bg-white/[0.04] text-ivory/80 flex items-center justify-center text-[16px] disabled:opacity-30"
+              className="w-8 h-8 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[16px] disabled:opacity-30 active:scale-95 transition-transform"
             >
               ›
             </button>

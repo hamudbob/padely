@@ -7,6 +7,7 @@ import { getSessionStandings, SessionStandings } from "../../lib/supabase/standi
 import { getRoundHistory, RoundHistoryEntry } from "../../lib/supabase/roundHistoryQueries";
 import { renameCourt, setCourtAvailability, addLatePlayer, markPlayerLeft, restorePlayer, setRankingBasis } from "../../lib/supabase/manageActions";
 import { listJoinRequests, confirmJoinRequest, rejectJoinRequest, JoinRequest } from "../../lib/supabase/joinRequestQueries";
+import { getPendingClaims, respondPlayerClaim, PendingClaim } from "../../lib/supabase/claimQueries";
 import { isAutoFillFormat, scoreRangeForFormat, validateAndDeriveScore, ScoringFormat } from "../../lib/scoring/formats";
 import {
   enqueueScore,
@@ -184,6 +185,9 @@ export default function HostLivePage() {
   // Self-service join requests (players who scanned the QR / entered the code).
   const [joinRequests, setJoinRequests] = useState<JoinRequest[]>([]);
   const [joinBusyId, setJoinBusyId] = useState<string | null>(null);
+
+  const [claims, setClaims] = useState<PendingClaim[]>([]);
+  const [claimBusyId, setClaimBusyId] = useState<string | null>(null);
   const [copiedLink, setCopiedLink] = useState(false);
 
   const [standings, setStandings] = useState<SessionStandings | null>(null);
@@ -275,6 +279,16 @@ export default function HostLivePage() {
     if (showManage) loadJoinRequests();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showManage, sessionId]);
+
+  // Poll pending "claim your spot" requests while the session is live so the
+  // host sees them arrive without refreshing.
+  useEffect(() => {
+    if (!sessionId || snapshot?.session.status === "ended") return;
+    loadClaims();
+    const t = window.setInterval(loadClaims, 10000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, snapshot?.session.status]);
   useEffect(() => {
     // Team Sparring also needs standings loaded on the Rounds tab, not just
     // Standings — the Team A vs Team B scoreboard banner is visible there
@@ -472,7 +486,8 @@ export default function HostLivePage() {
 
   function openPicker(matchId: string, side: "A" | "B") {
     if (!canEdit) return; // history is read-only, and so is an ended session's live round
-    if (autoFill && side === "B") return; // Team B is derived, not tappable, for any fixed-sum format
+    // Fixed-sum formats now accept a tap on EITHER side — the other auto-fills
+    // as (total − this score), so the host can enter whichever number they saw.
     setPickerMatchId(matchId);
     setPickerSide(side);
     setPendingA(null);
@@ -489,9 +504,12 @@ export default function HostLivePage() {
     if (!activeMatch || !pickerSide) return;
     navigator.vibrate?.(8); // light haptic tap on each number press
 
-    // Fixed-21: one tap on Team A is enough (Team B auto-derives server-side too).
-    if (autoFill && pickerSide === "A") {
-      await save(activeMatch.id, value, null);
+    // Fixed-sum formats: one tap on EITHER side is enough — the other side is
+    // (total − this score). Tapping Team A sets A; tapping Team B sets B.
+    if (autoFill) {
+      const other = range.max - value;
+      if (pickerSide === "A") await save(activeMatch.id, value, other);
+      else await save(activeMatch.id, other, value);
       return;
     }
 
@@ -650,6 +668,32 @@ export default function HostLivePage() {
       setManageError(err instanceof Error ? err.message : "Could not decline that request.");
     } finally {
       setJoinBusyId(null);
+    }
+  }
+
+  function loadClaims() {
+    if (!sessionId) return;
+    getPendingClaims(sessionId)
+      .then(setClaims)
+      .catch(() => setClaims([]));
+  }
+
+  async function respondClaim(claimId: string, accept: boolean) {
+    if (!sessionId) return;
+    setClaimBusyId(claimId);
+    try {
+      await respondPlayerClaim(claimId, accept);
+      setClaims((cs) => cs.filter((c) => c.id !== claimId));
+      loadClaims();
+      if (accept) {
+        load(); // the claimed spot is now renamed to the real player
+        loadStandings();
+        notifyLiveUpdate(sessionId); // spectators see the renamed player
+      }
+    } catch {
+      loadClaims();
+    } finally {
+      setClaimBusyId(null);
     }
   }
 
@@ -830,6 +874,41 @@ export default function HostLivePage() {
         {snapshot.session.fixedPartnerStyle ? " · Fixed Partner" : ""} · Code <span className="font-mono tnum">{snapshot.session.joinCode}</span>
       </p>
 
+      {/* Claim requests — late joiners taking over a manual spot */}
+      {!sessionEnded && claims.length > 0 && (
+        <div className="mb-4 rounded-2xl bg-gold-soft/60 border border-gold/25 overflow-hidden">
+          <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-gold-ink px-3.5 pt-2.5 pb-1">
+            Claim {claims.length === 1 ? "request" : "requests"}
+          </p>
+          {claims.map((c) => (
+            <div key={c.id} className="flex items-center gap-2.5 px-3.5 py-2.5 border-t border-gold/15">
+              <span className="w-[30px] h-[30px] rounded-full bg-graphite text-ivory flex items-center justify-center text-[12px] font-semibold overflow-hidden shrink-0">
+                {c.claimantAvatar ? <img src={c.claimantAvatar} alt="" className="w-full h-full object-cover" /> : c.claimantName.charAt(0).toUpperCase()}
+              </span>
+              <span className="flex-1 min-w-0 text-[13px] text-graphite leading-tight">
+                <b className="font-semibold">{c.claimantName}</b>
+                <span className="text-warm-gray"> is </span>
+                <b className="font-semibold">{c.playerName}</b>
+              </span>
+              <button
+                onClick={() => respondClaim(c.id, true)}
+                disabled={claimBusyId === c.id}
+                className="shrink-0 rounded-full bg-graphite text-ivory text-[11.5px] font-semibold px-3 py-1.5 disabled:opacity-40"
+              >
+                Accept
+              </button>
+              <button
+                onClick={() => respondClaim(c.id, false)}
+                disabled={claimBusyId === c.id}
+                className="shrink-0 text-[11.5px] font-semibold text-warm-gray px-1"
+              >
+                Decline
+              </button>
+            </div>
+          ))}
+        </div>
+      )}
+
       {isTeamSparring && teamTotals && (
         <div className="mb-4 rounded-2xl border border-line bg-surface px-4 py-3 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray text-center mb-1">
@@ -977,7 +1056,7 @@ export default function HostLivePage() {
                     </button>
                     <button
                       onClick={() => openPicker(m.id, "B")}
-                      disabled={!canEdit || autoFill}
+                      disabled={!canEdit}
                       className={`relative w-[62px] h-[54px] rounded-[14px] bg-graphite flex items-center justify-center font-mono tnum text-[25px] font-bold shadow-[0_9px_20px_-13px_rgba(13,13,13,0.5)] disabled:cursor-default ${
                         m.scoreB === null ? "text-stone" : "text-ivory"
                       }`}
@@ -1093,10 +1172,12 @@ export default function HostLivePage() {
 
               {sortedStandingsRows.map((row, i) => {
                 const isLeader = i === 0;
-                // Compensation is the neutral-rest bonus already folded into
-                // PTS — surfaced next to GP so a shorter game count reads as
-                // "played fewer, credited +N" rather than looking penalised.
-                const comp = row.compensatedPoints - row.totalPoints;
+                // Rest compensation — the neutral bonus credited for games a
+                // player sat out — already folded into PTS. Surfaced as a small
+                // "+N" next to the points so a rester reads as "credited +N",
+                // not penalised. (restCompensation is the separated amount;
+                // compensatedPoints already includes it, so the two are equal.)
+                const comp = row.restCompensation;
                 const wValue = effectiveSortBy === "winPct" ? `${Math.round(row.winPct * 100)}%` : row.wins;
                 const ptsValue = effectiveSortBy === "pointAvg" ? row.pointAvg.toFixed(1) : row.compensatedPoints;
                 return (
@@ -1122,12 +1203,16 @@ export default function HostLivePage() {
                     </span>
                     <span className="text-center font-mono tnum text-[12.5px] text-ink-2 whitespace-nowrap">
                       {row.matchesPlayed}
-                      {comp > 0 && <span className="align-top text-[8.5px] font-bold text-gold-ink ml-0.5">+{comp}</span>}
                     </span>
                     <span className={`text-center font-mono tnum text-[13px] ${wActive ? "font-bold text-graphite" : "text-ink-2"}`}>{wValue}</span>
                     <span className="text-center font-mono tnum text-[13px] text-ink-2">{row.losses}</span>
                     {showTies && <span className="text-center font-mono tnum text-[13px] text-ink-2">{row.draws}</span>}
-                    <span className={`text-center font-mono tnum text-[13px] ${ptsActive ? "font-bold text-graphite" : "text-ink-2"}`}>{ptsValue}</span>
+                    <span className={`text-center font-mono tnum text-[13px] whitespace-nowrap ${ptsActive ? "font-bold text-graphite" : "text-ink-2"}`}>
+                      {ptsValue}
+                      {comp > 0 && effectiveSortBy !== "pointAvg" && (
+                        <span className="align-top text-[8.5px] font-bold text-gold-ink ml-0.5">+{comp}</span>
+                      )}
+                    </span>
                   </div>
                 );
               })}

@@ -8,6 +8,13 @@ body,
   height: 100%;
 }
 
+html {
+  /* Stop iOS from auto-inflating text (and from zooming the page when an input
+     smaller than 16px gets focus) — this is a fixed-layout app, not a document. */
+  -webkit-text-size-adjust: 100%;
+  text-size-adjust: 100%;
+}
+
 body {
   /* Padelier ground: warm ivory surface, near-black warm ink, Inter interface font. */
   background: #f7f5f2; /* ivory */

@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
-import { getPublicProfile, PublicProfile } from "../../lib/supabase/publicProfileQueries";
+import { getPublicProfile, PublicProfile, FormResult } from "../../lib/supabase/publicProfileQueries";
 import { getMyTeams, setMemberRole, kickMember, MyTeam } from "../../lib/supabase/teamQueries";
 import { useHostSession } from "../../lib/supabase/useHostSession";
+import { useBackNav } from "../../lib/useBackNav";
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -25,6 +26,7 @@ function memberSince(iso: string): string {
 
 export default function PublicProfilePage() {
   const { userId } = useParams();
+  const back = useBackNav("/");
   const { user } = useHostSession();
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [loading, setLoading] = useState(true);
@@ -103,7 +105,7 @@ export default function PublicProfilePage() {
   const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-6 safe-top safe-bottom anim-fade";
   const bar = (
     <div className="flex items-center justify-between mb-2">
-      <Link to="/" aria-label="Home" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</Link>
+      <button onClick={back} aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</button>
       <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
         Padelier<span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
       </div>
@@ -115,6 +117,9 @@ export default function PublicProfilePage() {
   if (notFound || !profile) return <div className={shell}>{bar}<p className="text-[13px] text-warm-gray mt-16 text-center">This player isn't available.</p></div>;
 
   const tier = tierFor(profile.rating, profile.provisional);
+  const total = profile.matches || 1;
+  const pct = (n: number) => (n / total) * 100;
+  const lastDelta = profile.ratingTrend.length > 0 ? profile.ratingTrend[profile.ratingTrend.length - 1].delta : 0;
 
   return (
     <div className={shell}>
@@ -147,6 +152,70 @@ export default function PublicProfilePage() {
         </div>
       </div>
       {profile.provisional && <p className="text-[11px] text-warm-gray text-center mt-2">Rating still settling — it sharpens as they play more.</p>}
+
+      {/* Record */}
+      <h3 className="text-[13px] font-semibold text-ink-2 mt-7 mb-2 px-0.5">Record</h3>
+      <div className="rounded-2xl bg-surface px-4 py-4 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+        {profile.matches === 0 ? (
+          <p className="text-[12.5px] text-warm-gray text-center py-1.5">No games recorded yet.</p>
+        ) : (
+          <>
+            <div className="flex items-end justify-between">
+              <div>
+                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray">Win rate</p>
+                <p className="font-mono tnum text-[30px] font-semibold text-graphite leading-none mt-1.5">
+                  {Math.round(profile.winRate * 100)}<span className="text-[15px] text-warm-gray font-semibold">%</span>
+                </p>
+              </div>
+              <div className="text-right">
+                <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray">W · L · D</p>
+                <p className="font-mono tnum text-[17px] font-semibold mt-1.5 leading-none">
+                  <span className="text-win">{profile.wins}</span>
+                  <span className="text-stone"> · </span>
+                  <span className="text-loss">{profile.losses}</span>
+                  <span className="text-stone"> · </span>
+                  <span className="text-warm-gray">{profile.draws}</span>
+                </p>
+              </div>
+            </div>
+            <div className="flex h-1.5 rounded-full overflow-hidden mt-4 bg-stone/40">
+              {profile.wins > 0 && <div className="bg-win" style={{ width: `${pct(profile.wins)}%` }} />}
+              {profile.losses > 0 && <div className="bg-loss" style={{ width: `${pct(profile.losses)}%` }} />}
+              {profile.draws > 0 && <div className="bg-warm-gray/50" style={{ width: `${pct(profile.draws)}%` }} />}
+            </div>
+            <p className="text-[10.5px] text-warm-gray mt-1.5">{profile.matches} {profile.matches === 1 ? "game" : "games"} played</p>
+            {profile.form.length > 0 && (
+              <div className="flex items-center justify-between mt-3.5 pt-3.5 border-t border-line">
+                <span className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray">Recent form</span>
+                <div className="flex gap-1.5">
+                  {profile.form.map((f, i) => (
+                    <FormPill key={i} r={f} />
+                  ))}
+                </div>
+              </div>
+            )}
+          </>
+        )}
+      </div>
+
+      {/* Rating trend */}
+      {profile.ratingTrend.length >= 2 && (
+        <>
+          <h3 className="text-[13px] font-semibold text-ink-2 mt-7 mb-2 px-0.5">Rating trend</h3>
+          <div className="rounded-2xl bg-surface px-4 py-4 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="font-mono tnum text-[20px] font-semibold text-graphite leading-none">{profile.rating}</p>
+              {lastDelta !== 0 && (
+                <span className={`text-[12px] font-semibold ${lastDelta > 0 ? "text-win" : "text-loss"}`}>
+                  {lastDelta > 0 ? "▲" : "▼"} {Math.abs(lastDelta)}
+                </span>
+              )}
+            </div>
+            <Sparkline points={profile.ratingTrend.map((p) => p.rating)} />
+            <p className="text-[10.5px] text-warm-gray mt-2">Last {profile.ratingTrend.length} rated {profile.ratingTrend.length === 1 ? "session" : "sessions"}</p>
+          </div>
+        </>
+      )}
 
       {/* Teams */}
       <h3 className="text-[13px] font-semibold text-ink-2 mt-7 mb-2 px-0.5">Teams</h3>
@@ -211,5 +280,41 @@ export default function PublicProfilePage() {
         {copied ? "Link copied ✓" : "Share this profile"}
       </button>
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+function FormPill({ r }: { r: FormResult }) {
+  const style =
+    r === "W" ? "bg-win-soft text-win" : r === "L" ? "bg-loss-soft text-loss" : "bg-stone/40 text-ink-2";
+  return (
+    <span className={`w-[22px] h-[22px] rounded-md flex items-center justify-center text-[11px] font-bold ${style}`}>{r}</span>
+  );
+}
+
+/** Tiny, dependency-free rating line. Scales to fill width; stroke stays crisp
+ * via non-scaling-stroke so we never distort the line weight. */
+function Sparkline({ points }: { points: number[] }) {
+  const w = 300;
+  const h = 44;
+  const pad = 5;
+  const min = Math.min(...points);
+  const max = Math.max(...points);
+  const span = max - min || 1;
+  const stepX = points.length > 1 ? (w - pad * 2) / (points.length - 1) : 0;
+  const coords = points.map((v, i) => {
+    const x = pad + i * stepX;
+    const y = pad + (1 - (v - min) / span) * (h - pad * 2);
+    return [x, y] as const;
+  });
+  const line = coords.map(([x, y]) => `${x.toFixed(1)},${y.toFixed(1)}`).join(" ");
+  const up = points[points.length - 1] >= points[0];
+  const stroke = up ? "#2E8B57" : "#D36A4A";
+  const [lx, ly] = coords[coords.length - 1];
+  return (
+    <svg viewBox={`0 0 ${w} ${h}`} className="w-full" style={{ height: h }} preserveAspectRatio="none" aria-hidden>
+      <polyline points={line} fill="none" stroke={stroke} strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" vectorEffect="non-scaling-stroke" />
+      <circle cx={lx} cy={ly} r="3" fill={stroke} vectorEffect="non-scaling-stroke" />
+    </svg>
   );
 }

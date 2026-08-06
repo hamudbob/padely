@@ -5,11 +5,19 @@ export interface HostCredentials {
   password: string;
 }
 
-export async function signUpHost({ name, email, password }: HostCredentials & { name: string }) {
+export async function signUpHost({
+  name,
+  email,
+  password,
+  redirectTo,
+}: HostCredentials & { name: string; redirectTo?: string }) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
-    options: { data: { name } },
+    // emailRedirectTo is where the confirmation link lands the user AFTER they
+    // click it. We point it back at /login?next=… so a brand-new signup returns
+    // to the page they were trying to reach (e.g. a shared event) instead of home.
+    options: { data: { name }, emailRedirectTo: redirectTo },
   });
   if (error) throw error;
 
@@ -26,9 +34,20 @@ export async function signUpHost({ name, email, password }: HostCredentials & { 
 }
 
 /** Re-send the sign-up confirmation email (for the "didn't get it / check spam" case). */
-export async function resendConfirmation(email: string) {
-  const { error } = await supabase.auth.resend({ type: "signup", email });
+export async function resendConfirmation(email: string, redirectTo?: string) {
+  const { error } = await supabase.auth.resend({ type: "signup", email, options: { emailRedirectTo: redirectTo } });
   if (error) throw error;
+}
+
+/** Ensure the host's Phase-1 team exists for whoever is currently signed in.
+ * Needed on the email-confirmation return path, where the session appears via
+ * the URL (detectSessionInUrl) without an explicit signInHost() call — so the
+ * team auto-creation that normally rides on sign-in would otherwise be skipped. */
+export async function ensureHostTeamForCurrentUser() {
+  const { data, error } = await supabase.auth.getUser();
+  if (error || !data.user) return;
+  const name = (data.user.user_metadata?.name as string | undefined) ?? "My";
+  await ensureHostTeam(data.user.id, name);
 }
 
 export async function signInHost({ email, password }: HostCredentials) {

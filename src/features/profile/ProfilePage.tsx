@@ -6,6 +6,7 @@ import { listHostSessions, HostSessionSummary } from "../../lib/supabase/hostSes
 import { deleteSession } from "../../lib/supabase/sessionActions";
 import { getMyPlayerSessions, PlayerSession } from "../../lib/supabase/playerJoinQueries";
 import { getMyProfile, updateMyProfile, uploadAvatar, Profile } from "../../lib/supabase/profileQueries";
+import { useBackNav } from "../../lib/useBackNav";
 import { getPlayerInsights, getRatingHistory, PlayerInsights, RatingPoint } from "../../lib/supabase/insightsQueries";
 import { getUnreadCount } from "../../lib/supabase/notificationQueries";
 
@@ -95,6 +96,7 @@ function InsightRow({ kind, label, who, detail }: { kind: "partner" | "rival"; l
 export default function ProfilePage() {
   const { user } = useHostSession();
   const navigate = useNavigate();
+  const back = useBackNav("/");
 
   const [sessions, setSessions] = useState<HostSessionSummary[] | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -314,13 +316,13 @@ export default function ProfilePage() {
     <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 safe-top safe-bottom anim-fade">
       {/* Top bar */}
       <div className="flex items-center justify-between mb-6">
-        <Link
-          to="/"
+        <button
+          onClick={back}
           aria-label="Back"
           className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform"
         >
           ‹
-        </Link>
+        </button>
         <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
           Padelier
           <span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
@@ -536,24 +538,13 @@ export default function ProfilePage() {
           <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
         </Link>
 
-        <Link to="/join" className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-          <span className="w-[34px] h-[34px] rounded-[11px] bg-gold-soft text-gold-ink flex items-center justify-center shrink-0">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="3.2" /><path d="M5.5 20a6.5 6.5 0 0 1 13 0" /></svg>
-          </span>
-          <span className="min-w-0 flex-1">
-            <b className="block text-[13.5px] font-semibold text-graphite">Join as a player</b>
-            <span className="block text-[11px] text-warm-gray">Enter a code to play &amp; score</span>
-          </span>
-          <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
-        </Link>
-
         <Link to="/watch" className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-          <span className="w-[34px] h-[34px] rounded-[11px] bg-surface-2 border border-line text-ink-2 flex items-center justify-center shrink-0">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M2 12s3.5-7 10-7 10 7 10 7-3.5 7-10 7-10-7-10-7Z" /><circle cx="12" cy="12" r="2.6" /></svg>
+          <span className="w-[34px] h-[34px] rounded-[11px] bg-gold-soft text-gold-ink flex items-center justify-center shrink-0">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><path d="M14 14.5h3.5M14 18h.01M17.5 18v3M20.5 14.5v6.5" /></svg>
           </span>
           <span className="min-w-0 flex-1">
-            <b className="block text-[13.5px] font-semibold text-graphite">Watch live</b>
-            <span className="block text-[11px] text-warm-gray">Follow a session as spectator</span>
+            <b className="block text-[13.5px] font-semibold text-graphite">Enter a code</b>
+            <span className="block text-[11px] text-warm-gray">Watch, claim your spot, or join a game</span>
           </span>
           <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
         </Link>
@@ -743,8 +734,8 @@ export default function ProfilePage() {
             <p className="text-[12px] text-warm-gray mt-1.5 leading-relaxed">
               Join a session as a player with a code and it'll show up here — you can tap in to follow the scores live.
             </p>
-            <Link to="/join" className="inline-flex mt-4 items-center justify-center rounded-full px-4 py-2.5 font-semibold text-[13px] border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform">
-              Join by code
+            <Link to="/watch" className="inline-flex mt-4 items-center justify-center rounded-full px-4 py-2.5 font-semibold text-[13px] border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform">
+              Enter a code
             </Link>
           </div>
         ))}

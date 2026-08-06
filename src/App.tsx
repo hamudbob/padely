@@ -3,7 +3,6 @@ import HomePage from "./features/home/HomePage";
 import LoginPage from "./features/auth/LoginPage";
 import ProfilePage from "./features/profile/ProfilePage";
 import RequireHost from "./features/auth/RequireHost";
-import JoinPage from "./features/join/JoinPage";
 import WatchPage from "./features/watch/WatchPage";
 import CreateSessionPage from "./features/create-session/CreateSessionPage";
 import HostLivePage from "./features/host-live/HostLivePage";
@@ -30,7 +29,9 @@ export default function App() {
           </RequireHost>
         }
       />
-      <Route path="/join" element={<JoinPage />} />
+      {/* Watch and Join are one flow now: enter a code → live session view,
+          where you can watch, claim your spot, or join as a new player. */}
+      <Route path="/join" element={<WatchPage />} />
       <Route path="/watch" element={<WatchPage />} />
       <Route
         path="/create"

@@ -2,11 +2,13 @@ import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getMyTeams, createTeam, MyTeam } from "../../lib/supabase/teamQueries";
 import { searchClubs, requestToJoin, joinByCode, ClubSearchResult } from "../../lib/supabase/clubJoinQueries";
+import { useBackNav } from "../../lib/useBackNav";
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
 export default function TeamsPage() {
   const navigate = useNavigate();
+  const back = useBackNav("/profile");
   const [teams, setTeams] = useState<MyTeam[] | null>(null);
 
   const [newName, setNewName] = useState("");
@@ -96,7 +98,7 @@ export default function TeamsPage() {
   return (
     <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-6 safe-top safe-bottom anim-fade">
       <div className="flex items-center justify-between mb-5">
-        <Link to="/profile" aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</Link>
+        <button onClick={back} aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</button>
         <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
           Padelier<span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
         </div>

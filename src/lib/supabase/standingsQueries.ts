@@ -59,7 +59,6 @@ export function assembleStandings(input: StandingsInput): SessionStandings {
   const isFixedPartner = session.fixed_partner_style !== null || session.format === "fixed_partner";
 
   const activePlayerIds = players.map((p) => p.id);
-  const activeCompensationIds = new Set(players.filter((p) => p.status === "active").map((p) => p.id));
   const nameById = new Map(players.map((p) => [p.id, p.display_name]));
   const teamSideById = new Map(players.map((p) => [p.id, p.team_side]));
 
@@ -112,13 +111,19 @@ export function assembleStandings(input: StandingsInput): SessionStandings {
   const subjectIds = isFixedPartner ? pairIds : activePlayerIds;
 
   const neutralRestPoints = Math.floor(scoreRangeForFormat(session.scoring_format as ScoringFormat).max / 2);
+  // Rest compensation is credited to EVERY subject who is short of the field's
+  // highest match count — including players who LEFT early. A leaver keeps the
+  // points they actually earned AND is topped up by floor(gameTarget/2) for
+  // every game they missed after leaving, so stepping out is never a scoreboard
+  // penalty. This is points-only: no phantom wins or losses are added (W/L come
+  // solely from applyResult on real matches). Applies to every format that has
+  // a "left" option; passing no compensateOnlyIds set means "compensate all".
   const computed = computeStandings(
     subjectIds,
     completedMatches,
     adjustments,
     session.ranking_basis,
     neutralRestPoints,
-    isFixedPartner ? undefined : activeCompensationIds,
   );
 
   const rows: StandingsRow[] = computed.map((r) => ({
@@ -153,10 +158,10 @@ export async function getSessionStandings(sessionId: string): Promise<SessionSta
   ] = await Promise.all([
     supabase.from("sessions").select("ranking_basis, format, fixed_partner_style, scoring_format").eq("id", sessionId).single(),
     // ALL players, including those who left — a player who leaves keeps the
-    // points they earned on the board (they used to vanish entirely). `status`
-    // is read so left players can be marked, and so only currently-active
-    // players receive rest compensation (a leaver isn't credited for rounds
-    // after they left).
+    // points they earned on the board (they used to vanish entirely) AND is
+    // rest-compensated for the games they missed after leaving, just like a
+    // player who sat out to rest. `status` is still read so left players can be
+    // labelled in the UI.
     supabase.from("players").select("id, display_name, team_side, status").eq("session_id", sessionId),
     supabase.from("rounds").select("id").eq("session_id", sessionId),
     supabase.from("adjustments").select("player_id, pair_id, amount").eq("session_id", sessionId),

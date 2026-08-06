@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getJoinSession, requestJoin, lookupGuest, JoinSessionInfo } from "../../lib/supabase/playerJoinQueries";
+import { getClaimablePlayers, requestPlayerClaim, ClaimTarget } from "../../lib/supabase/claimQueries";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 
 const FORMAT_LABELS: Record<string, string> = {
@@ -12,7 +13,7 @@ const FORMAT_LABELS: Record<string, string> = {
   team_sparring: "Team Sparring",
 };
 
-type Stage = "code" | "form" | "done";
+type Stage = "code" | "claim" | "form" | "done";
 
 /**
  * Join a session as a PLAYER (`/join`, optionally `/join?code=123456` from a
@@ -39,6 +40,11 @@ export default function JoinPage() {
   const [submitting, setSubmitting] = useState(false);
   const [sessionName, setSessionName] = useState("");
   const [didPrefill, setDidPrefill] = useState(false);
+
+  // Claim-your-spot (signed-in players slotting into a manual placeholder).
+  const [claimTargets, setClaimTargets] = useState<ClaimTarget[]>([]);
+  const [claimBusyId, setClaimBusyId] = useState<string | null>(null);
+  const [doneClaim, setDoneClaim] = useState(false);
 
   // A signed-in player shouldn't retype what their account knows: pull name +
   // email straight from the account, and side/gender from their last join
@@ -94,14 +100,36 @@ export default function JoinPage() {
     }
     setSession(found);
 
-    // Not signed in → collect details on the form.
+    // Signed in + the session still has open manual spots → let them CLAIM the
+    // name that's theirs (inheriting that spot's games), instead of being added
+    // as a brand-new player. This is the "host started with placeholder names,
+    // players slot in as they arrive" path.
+    if (user && found.publicToken) {
+      const targets = await getClaimablePlayers(found.publicToken).catch(() => []);
+      if (targets.length > 0) {
+        setClaimTargets(targets);
+        setStage("claim");
+        setChecking(false);
+        return;
+      }
+    }
+
+    // Not signed in → collect details on the form (guest join).
     if (!user) {
       setStage("form");
       setChecking(false);
       return;
     }
 
-    // Signed in → the account already has everything, so join with no form.
+    // Signed in, nothing to claim → join with no form (account has everything).
+    await joinAsNewSignedIn(value);
+    setChecking(false);
+  }
+
+  // Signed-in "add me as a new player" — used when there are no claimable spots,
+  // or when the joiner says they're not on the list.
+  async function joinAsNewSignedIn(value: string) {
+    if (!user) return;
     try {
       const md = user.user_metadata ?? {};
       const nm = (md.name as string | undefined)?.trim() || (user.email ?? "").split("@")[0] || "Player";
@@ -117,11 +145,26 @@ export default function JoinPage() {
       }
       const result = await requestJoin({ code: value, name: nm, gender: g, preferredSide: s, email: user.email ?? null });
       setSessionName(result.sessionName);
+      setDoneClaim(false);
       setStage("done");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Couldn't join just now — please try again.");
+    }
+  }
+
+  async function doClaim(target: ClaimTarget) {
+    setClaimBusyId(target.id);
+    setError(null);
+    try {
+      await requestPlayerClaim(target.id);
+      setSessionName(session?.name ?? "");
+      setDoneClaim(true);
+      setStage("done");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't claim that spot — someone may have just taken it.");
+      if (session?.publicToken) getClaimablePlayers(session.publicToken).then(setClaimTargets).catch(() => {});
     } finally {
-      setChecking(false);
+      setClaimBusyId(null);
     }
   }
 
@@ -176,7 +219,7 @@ export default function JoinPage() {
       {/* Back + wordmark header */}
       <div className="flex items-center gap-3 mb-6">
         <button
-          onClick={() => (stage === "form" ? setStage("code") : navigate(-1))}
+          onClick={() => (stage === "form" || stage === "claim" ? setStage("code") : navigate(-1))}
           aria-label="Back"
           className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] shrink-0 active:scale-95 transition-transform"
         >
@@ -214,6 +257,46 @@ export default function JoinPage() {
             </button>
             <p className="text-[11px] text-warm-gray text-center">No account needed — just your name to play.</p>
           </form>
+        </>
+      )}
+
+      {stage === "claim" && session && (
+        <>
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1">Claim your spot</p>
+          <h1 className="font-serif text-[26px] font-medium tracking-tight text-graphite leading-[1.1]">{session.name}</h1>
+          <p className="text-[12.5px] text-warm-gray mb-5">Tap the name that's you — the host confirms, and that spot's games become yours.</p>
+
+          <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+            {claimTargets.map((t) => (
+              <button
+                key={t.id}
+                onClick={() => doClaim(t)}
+                disabled={!!claimBusyId}
+                className="w-full flex items-center gap-3 px-4 py-3.5 border-t border-line first:border-t-0 text-left active:bg-surface-2 transition-colors disabled:opacity-50"
+              >
+                <span className="w-[34px] h-[34px] rounded-full bg-gold-soft text-gold-ink flex items-center justify-center text-[14px] font-serif font-semibold shrink-0">
+                  {t.name.charAt(0).toUpperCase()}
+                </span>
+                <span className="flex-1 min-w-0 text-[15px] font-semibold text-graphite truncate">{t.name}</span>
+                <span className="text-[11.5px] font-semibold text-gold-ink shrink-0">{claimBusyId === t.id ? "…" : "That's me"}</span>
+              </button>
+            ))}
+          </div>
+
+          {error && <p className="text-[13px] text-loss mt-3">{error}</p>}
+
+          <button
+            onClick={async () => {
+              setSubmitting(true);
+              setError(null);
+              await joinAsNewSignedIn(code);
+              setSubmitting(false);
+            }}
+            disabled={submitting}
+            className="w-full text-[12.5px] font-semibold text-warm-gray py-3 mt-4 active:opacity-70 disabled:opacity-50"
+          >
+            {submitting ? "Adding you…" : "I'm not listed — join as a new player"}
+          </button>
         </>
       )}
 
@@ -312,10 +395,21 @@ export default function JoinPage() {
               <path d="M20 6L9 17l-5-5" />
             </svg>
           </div>
-          <h1 className="font-serif text-[25px] font-medium tracking-tight text-graphite leading-[1.15]">You're on the list.</h1>
+          <h1 className="font-serif text-[25px] font-medium tracking-tight text-graphite leading-[1.15]">
+            {doneClaim ? "Claim sent." : "You're on the list."}
+          </h1>
           <p className="text-[13.5px] text-ink-2 leading-relaxed mt-2">
-            Your request to join <span className="font-semibold text-graphite">{sessionName}</span> is in — the host just needs to wave you
-            in. Hang tight; you'll be on court soon.
+            {doneClaim ? (
+              <>
+                Your claim on <span className="font-semibold text-graphite">{sessionName}</span> is in — once the host accepts, that spot and all
+                its games so far are yours. Hang tight.
+              </>
+            ) : (
+              <>
+                Your request to join <span className="font-semibold text-graphite">{sessionName}</span> is in — the host just needs to wave you
+                in. Hang tight; you'll be on court soon.
+              </>
+            )}
           </p>
           <button
             onClick={() => navigate("/")}

@@ -34,6 +34,32 @@ function scorePairing(
   return { partnerRepeats, opponentRepeats };
 }
 
+/**
+ * Count-weighted cost of a candidate round (lower = better). Unlike the boolean
+ * repeat score, this uses how many times each pair has ALREADY partnered /
+ * opposed, so the search actively prefers the least-partnered pairing rather
+ * than treating every already-seen pair the same. A pair's partner cost grows
+ * with the square of its prior count, so re-partnering someone you've partnered
+ * twice hurts far more than pairing someone fresh — that's what stops "3× with
+ * Fuad, 0× with Sirhan". Partners are weighted well above opponents.
+ */
+function pairingCost(matches: Match[], history: MatchHistory): number {
+  let cost = 0;
+  for (const m of matches) {
+    for (const [x, y] of [m.teamA, m.teamB] as [PlayerId, PlayerId][]) {
+      const c = history.partnerCounts.get(pairKey(x, y)) ?? 0;
+      cost += (c + 1) * (c + 1) * 6; // convex + heavily weighted
+    }
+    for (const a of m.teamA) {
+      for (const b of m.teamB) {
+        const c = history.opponentCounts.get(pairKey(a, b)) ?? 0;
+        cost += (c + 1) * (c + 1);
+      }
+    }
+  }
+  return cost;
+}
+
 function shuffle<T>(arr: T[], rng: Rng): T[] {
   const a = [...arr];
   for (let i = a.length - 1; i > 0; i--) {
@@ -53,6 +79,98 @@ function buildMatchesFromOrder(order: PlayerId[]): Match[] {
     });
   }
   return matches;
+}
+
+/**
+ * Global balance pass over a whole generated schedule (simulated annealing).
+ *
+ * Per-round greedy can't fix cases like "hamud & gilang never share a round" —
+ * because WHO RESTS each round determines who CAN even partner. This search uses
+ * two moves that together rebalance both:
+ *   1. swap two on-court players within a round (changes partners/opponents),
+ *   2. swap an on-court player with a bench player (changes who plays that round).
+ * It minimises Σ partnerCount² (primary — spreads partnerships to all-distinct),
+ * Σ opponentCount² (secondary), and Σ playCount² (keeps rests fair). Deterministic
+ * for a given rng, so the same session always produces the same schedule.
+ */
+function optimizeAmericano(rounds: RoundResult[], players: PlayerId[], rng: Rng, iterations: number): void {
+  const objective = (): number => {
+    const pc = new Map<string, number>();
+    const oc = new Map<string, number>();
+    const play = new Map<string, number>(players.map((p) => [p, 0]));
+    for (const r of rounds) {
+      for (const m of r.matches) {
+        const ak = pairKey(m.teamA[0], m.teamA[1]);
+        const bk = pairKey(m.teamB[0], m.teamB[1]);
+        pc.set(ak, (pc.get(ak) ?? 0) + 1);
+        pc.set(bk, (pc.get(bk) ?? 0) + 1);
+        for (const a of m.teamA) {
+          play.set(a, (play.get(a) ?? 0) + 1);
+          for (const b of m.teamB) {
+            const ok = pairKey(a, b);
+            oc.set(ok, (oc.get(ok) ?? 0) + 1);
+          }
+        }
+        for (const b of m.teamB) play.set(b, (play.get(b) ?? 0) + 1);
+      }
+    }
+    let f = 0;
+    for (const v of pc.values()) f += v * v * 1000;
+    for (const v of oc.values()) f += v * v;
+    for (const v of play.values()) f += v * v * 60;
+    return f;
+  };
+
+  let cur = objective();
+  const T0 = Math.max(1, cur * 0.03);
+  for (let it = 0; it < iterations; it++) {
+    const r = rounds[Math.floor(rng() * rounds.length)];
+    if (!r || r.matches.length === 0) continue;
+    const T = T0 * (1 - it / iterations);
+    let revert: (() => void) | null = null;
+
+    if (r.restingIds.length > 0 && rng() < 0.5) {
+      // Bench swap: an on-court player trades places with a resting one.
+      const m = r.matches[Math.floor(rng() * r.matches.length)];
+      const side = rng() < 0.5 ? m.teamA : m.teamB;
+      const pos = Math.floor(rng() * 2);
+      const bi = Math.floor(rng() * r.restingIds.length);
+      const onCourt = side[pos];
+      const benched = r.restingIds[bi];
+      side[pos] = benched;
+      r.restingIds[bi] = onCourt;
+      revert = () => {
+        side[pos] = onCourt;
+        r.restingIds[bi] = benched;
+      };
+    } else {
+      // Team swap: two on-court positions in the round trade players.
+      const positions: { arr: PlayerId[]; idx: number }[] = [];
+      for (const m of r.matches) {
+        positions.push({ arr: m.teamA, idx: 0 }, { arr: m.teamA, idx: 1 }, { arr: m.teamB, idx: 0 }, { arr: m.teamB, idx: 1 });
+      }
+      if (positions.length < 2) continue;
+      const pi = positions[Math.floor(rng() * positions.length)];
+      const pj = positions[Math.floor(rng() * positions.length)];
+      const a = pi.arr[pi.idx];
+      const b = pj.arr[pj.idx];
+      if (a === b) continue;
+      pi.arr[pi.idx] = b;
+      pj.arr[pj.idx] = a;
+      revert = () => {
+        pi.arr[pi.idx] = a;
+        pj.arr[pj.idx] = b;
+      };
+    }
+
+    const next = objective();
+    const delta = next - cur;
+    if (delta <= 0 || (T > 0 && rng() < Math.exp(-delta / T))) {
+      cur = next;
+    } else if (revert) {
+      revert();
+    }
+  }
 }
 
 export interface GenerateAmericanoRoundInput {
@@ -88,18 +206,18 @@ export function generateAmericanoRound(input: GenerateAmericanoRoundInput): Roun
   const playPool = playingIds.slice(0, slots);
 
   // Randomized local search: try many random orderings, keep the one with the
-  // fewest repeated partners (weighted higher) / opponents against history.
+  // lowest COUNT-weighted cost — i.e. the pairing that spreads partners the most
+  // evenly against everything seen so far (see pairingCost), not merely the one
+  // that avoids the first repeat.
   let best: Match[] | null = null;
   let bestScore = Number.POSITIVE_INFINITY;
   for (let t = 0; t < tries; t++) {
     const order = shuffle(playPool, rng);
     const candidate = buildMatchesFromOrder(order);
-    const { partnerRepeats, opponentRepeats } = scorePairing(candidate, history);
-    const score = partnerRepeats * 2 + opponentRepeats;
+    const score = pairingCost(candidate, history);
     if (score < bestScore) {
       best = candidate;
       bestScore = score;
-      if (score === 0) break;
     }
   }
   const matches = best ?? buildMatchesFromOrder(playPool);
@@ -188,6 +306,19 @@ export function generateAmericanoSchedule(input: GenerateAmericanoScheduleInput)
           : { playerId: id, matchesPlayed: s.matchesPlayed, restedLastRound: true },
       );
     }
+  }
+
+  // Global balance pass: jointly rebalances rests + partners so nobody ends up
+  // partnering one person repeatedly while never partnering another (the
+  // per-round greedy above can't see across rounds). Deterministic seed derived
+  // from the session seed so the schedule is stable/reproducible.
+  if (rounds.length > 0) {
+    const iterations = Math.min(80000, Math.max(8000, rounds.length * activePlayerIds.length * 300));
+    optimizeAmericano(rounds, activePlayerIds, mulberry32(schedulingSeed + 99991), iterations);
+
+    // Re-assign courts across each round after the swaps (keeps a stable,
+    // low-churn court layout; the optimizer only cares about who-plays-whom).
+    for (const r of rounds) r.matches.forEach((m, i) => (m.courtIndex = i));
   }
 
   return rounds;

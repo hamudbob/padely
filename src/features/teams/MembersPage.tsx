@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getTeam, getTeamMembers, Team, TeamMember } from "../../lib/supabase/teamQueries";
 import { useHostSession } from "../../lib/supabase/useHostSession";
+import { useBackNav } from "../../lib/useBackNav";
 
 export default function MembersPage() {
   const { teamId } = useParams();
+  const back = useBackNav(teamId ? `/teams/${teamId}` : "/teams");
   const { user } = useHostSession();
   const [team, setTeam] = useState<Team | null>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
@@ -31,7 +33,7 @@ export default function MembersPage() {
   const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-6 safe-top safe-bottom anim-fade";
   const backBar = (
     <div className="flex items-center justify-between mb-2">
-      <Link to={teamId ? `/teams/${teamId}` : "/teams"} aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</Link>
+      <button onClick={back} aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</button>
       <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
         Padelier<span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
       </div>

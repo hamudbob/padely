@@ -594,7 +594,31 @@ export interface Database {
       };
       get_public_profile: {
         Args: { p_user_id: string };
-        Returns: unknown; // jsonb { display_name, avatar_url, rating, rating_games, provisional, member_since, teams[] }
+        Returns: unknown; // jsonb { display_name, avatar_url, rating, rating_games, provisional, member_since, teams[], wins, losses, draws, form[], rating_trend[] }
+      };
+      get_club_stats: {
+        Args: { p_club_id: string };
+        Returns: unknown; // jsonb { members, sessions, games }
+      };
+      get_claimable_players: {
+        Args: { p_public_token: string };
+        Returns: unknown; // jsonb [{ id, name }]
+      };
+      request_player_claim: {
+        Args: { p_player_id: string };
+        Returns: unknown; // jsonb { claim_id }
+      };
+      get_my_session_claim: {
+        Args: { p_public_token: string };
+        Returns: unknown; // jsonb { status, player_name } | null
+      };
+      get_pending_claims: {
+        Args: { p_session_id: string };
+        Returns: unknown; // jsonb [{ id, player_id, player_name, claimant_id, claimant_name, claimant_avatar }]
+      };
+      respond_player_claim: {
+        Args: { p_claim_id: string; p_accept: boolean };
+        Returns: undefined; // void
       };
       create_club: {
         Args: { p_name: string };
