@@ -14,6 +14,7 @@ const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
   mexicano: "Mexicano",
   mix_americano: "Mix Americano",
+  side_americano: "Fixed Position",
   mix_mexicano: "Mix Mexicano",
   fixed_partner: "Fixed Partner",
   team_sparring: "Team Sparring",

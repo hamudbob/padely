@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { getHostLiveSnapshot, HostLiveSnapshot } from "../../lib/supabase/sessionQueries";
-import { generateNextRound, regenerateCurrentRound, deleteCurrentRound } from "../../lib/supabase/roundActions";
+import { generateNextRound, regenerateCurrentRound, deleteCurrentRound, swapRoundPlayers } from "../../lib/supabase/roundActions";
 import { endSession } from "../../lib/supabase/sessionActions";
 import { getSessionStandings, SessionStandings } from "../../lib/supabase/standingsQueries";
 import { getRoundHistory, RoundHistoryEntry } from "../../lib/supabase/roundHistoryQueries";
@@ -73,6 +73,7 @@ const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
   mexicano: "Mexicano",
   mix_americano: "Mix Americano",
+  side_americano: "Fixed Position",
   mix_mexicano: "Mix Mexicano",
   fixed_partner: "Fixed Partner",
   team_sparring: "Team Sparring",
@@ -212,6 +213,11 @@ export default function HostLivePage() {
   // path (submitMatchScore needs the editor's auth id). syncPending/Online/
   // Flushing drive the little status pill and gate the Next Round button.
   const [hostUserId, setHostUserId] = useState("");
+  // Owner-only lineup editing (0033) — a private backdoor gated to one account.
+  const [isOwner, setIsOwner] = useState(false);
+  const [editLineup, setEditLineup] = useState(false);
+  const [swapSel, setSwapSel] = useState<string | null>(null);
+  const [swapBusy, setSwapBusy] = useState(false);
   const [syncPending, setSyncPending] = useState(0);
   const [syncOnline, setSyncOnline] = useState(syncIsOnline());
   const [syncFlushing, setSyncFlushing] = useState(syncIsFlushing());
@@ -249,7 +255,10 @@ export default function HostLivePage() {
 
   // Cache the host's auth id once so saving a score touches no network.
   useEffect(() => {
-    supabase.auth.getUser().then(({ data }) => setHostUserId(data.user?.id ?? ""));
+    supabase.auth.getUser().then(({ data }) => {
+      setHostUserId(data.user?.id ?? "");
+      setIsOwner((data.user?.email ?? "") === "hamudbob@yahoo.com");
+    });
   }, []);
 
   // Mirror the sync queue into local state for the status pill + Next Round
@@ -406,6 +415,47 @@ export default function HostLivePage() {
   const canEdit = fullyPreGenerated ? !sessionEnded : isViewingCurrent && !sessionEnded;
   const canGoOlder = !!roundHistory && safeIndex < roundHistory.length - 1;
   const canGoNewer = safeIndex > 0;
+
+  // Owner-only lineup swap: available only while NO score has been entered
+  // anywhere in the session. `lineupChips` are the viewed round's players
+  // (on court + resting) as tappable swap targets.
+  const anyScored = !!roundHistory?.some((r) => r.matches.some((m) => m.status === "final" || m.scoreA !== null || m.scoreB !== null));
+  const canOwnerEdit = isOwner && !sessionEnded && !anyScored;
+  const lineupChips: { id: string; name: string; resting: boolean }[] = viewedRound
+    ? [
+        ...viewedRound.matches.flatMap((m) => [
+          ...m.teamAIds.map((id, i) => ({ id, name: m.teamANames[i] ?? "?", resting: false })),
+          ...m.teamBIds.map((id, i) => ({ id, name: m.teamBNames[i] ?? "?", resting: false })),
+        ]),
+        ...viewedRound.restingIds.map((id, i) => ({ id, name: viewedRound.restingNames[i] ?? "?", resting: true })),
+      ]
+    : [];
+
+  async function onSwapChip(playerId: string) {
+    if (!viewedRound) return;
+    if (swapSel === null) {
+      setSwapSel(playerId);
+      return;
+    }
+    if (swapSel === playerId) {
+      setSwapSel(null);
+      return;
+    }
+    const a = swapSel;
+    setSwapBusy(true);
+    setSaveError(null);
+    try {
+      await swapRoundPlayers(viewedRound.roundId, a, playerId);
+      setSwapSel(null);
+      load();
+      loadRoundHistory();
+      if (sessionId) notifyLiveUpdate(sessionId);
+    } catch (e) {
+      setSaveError(e instanceof Error ? e.message : "Couldn't swap those players.");
+    } finally {
+      setSwapBusy(false);
+    }
+  }
 
   const activeMatch = viewedRound?.matches.find((m) => m.id === pickerMatchId) ?? null;
 
@@ -1090,6 +1140,45 @@ export default function HostLivePage() {
                   <span className="text-win font-semibold shrink-0">Resting</span>
                   <span>{viewedRound.restingNames.join(", ")} this round — back on court next.</span>
                 </p>
+              )}
+
+              {/* Owner-only lineup swap — hidden from every other host. */}
+              {canOwnerEdit && (
+                <div className="mt-4">
+                  <button
+                    onClick={() => {
+                      setEditLineup((v) => !v);
+                      setSwapSel(null);
+                    }}
+                    className="text-[10.5px] font-semibold text-warm-gray/60 active:opacity-70"
+                  >
+                    {editLineup ? "Done editing" : "Edit lineup"}
+                  </button>
+                  {editLineup && (
+                    <div className="mt-2 rounded-2xl border border-dashed border-line bg-surface p-3">
+                      <p className="text-[11px] text-warm-gray mb-2">Tap two players to swap them. Only until scoring starts.</p>
+                      <div className="flex flex-wrap gap-2">
+                        {lineupChips.map((c) => (
+                          <button
+                            key={c.id}
+                            onClick={() => onSwapChip(c.id)}
+                            disabled={swapBusy}
+                            className={`rounded-full px-3 py-1.5 text-[12px] font-semibold border transition-colors disabled:opacity-40 ${
+                              swapSel === c.id
+                                ? "bg-graphite text-ivory border-graphite"
+                                : c.resting
+                                  ? "bg-surface-2 border-line text-warm-gray"
+                                  : "bg-surface border-line text-ink"
+                            }`}
+                          >
+                            {c.name}
+                            {c.resting ? " · rest" : ""}
+                          </button>
+                        ))}
+                      </div>
+                    </div>
+                  )}
+                </div>
               )}
 
               {canEdit && !allMatchesFinal && (

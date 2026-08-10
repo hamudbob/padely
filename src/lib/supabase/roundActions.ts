@@ -43,7 +43,7 @@ export interface GenerateNextRoundResult {
  * the server-side backstop), and refuses to persist a round with zero
  * playable courts rather than silently saving an empty one.
  */
-export async function generateNextRound(sessionId: string, seedOverride?: number): Promise<GenerateNextRoundResult> {
+export async function generateNextRound(sessionId: string, seedOverride?: number, forceRandom = false): Promise<GenerateNextRoundResult> {
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
     .select("id, format, scoring_format, ranking_basis, scheduling_seed, status, fixed_partner_style")
@@ -56,7 +56,7 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
   // session created before the rework (it used to be its own format value);
   // every session created since locks partners via fixed_partner_style on
   // top of a normal format instead — see 0004_fixed_partner_style.sql.
-  const knownFormats = ["americano", "mexicano", "team_sparring", "fixed_partner", "mix_americano", "mix_mexicano"];
+  const knownFormats = ["americano", "mexicano", "team_sparring", "fixed_partner", "mix_americano", "mix_mexicano", "side_americano"];
   if (!knownFormats.includes(session.format)) {
     throw new Error("Next round generation for this format isn't built yet.");
   }
@@ -82,7 +82,7 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
     // Ordered so activePlayerIds has a STABLE order — the seeded RNG consumes
     // it positionally, so an unordered fetch could make "Refresh" (same seed)
     // draw differently just because DB row order shifted after an edit.
-    supabase.from("players").select("id, status, team_side, gender").eq("session_id", sessionId).eq("status", "active").order("joined_at", { ascending: true }).order("id", { ascending: true }),
+    supabase.from("players").select("id, status, team_side, gender, preferred_side").eq("session_id", sessionId).eq("status", "active").order("joined_at", { ascending: true }).order("id", { ascending: true }),
     supabase.from("rounds").select("id, sequence, status").eq("session_id", sessionId).order("sequence", { ascending: true }),
     fetchPairs(),
   ]);
@@ -102,6 +102,16 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
   };
   // Mix Americano / Mix Mexicano only — every other format ignores this.
   const genderById = new Map<PlayerId, Gender>(playerRows.map((p) => [p.id, p.gender as Gender]));
+  // Fixed-Position Americano only — the L/R court side, keyed as a two-valued
+  // attribute so it can reuse the Mix Americano engine (left→"M", right→"F").
+  // preferred_side may be stored as "L"/"R" (code-joiners) or "left"/"right"
+  // (host-added via the wizard), so we normalise on the first letter.
+  const sideKeyById = new Map<PlayerId, Gender>(
+    playerRows.map((p) => {
+      const raw = ((p as { preferred_side?: string | null }).preferred_side ?? "").toString().trim().toLowerCase();
+      return [p.id, (raw.startsWith("l") ? "M" : "F") as Gender];
+    }),
+  );
 
   // Fixed Partner only — pairs are formed once at session creation and
   // never re-formed here; pairId is the REAL pairs.id (not the tempId-space
@@ -368,18 +378,43 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
                     history,
                     rng,
                   })
-                : session.format === "mix_mexicano"
-                  ? generateMixMexicanoRound({
+                : session.format === "side_americano"
+                  ? generateMixAmericanoRound({
                       activePlayerIds,
-                      genderById,
+                      genderById: sideKeyById,
                       statsById,
                       courtsAvailable: availableCourts.length,
-                      standings: standingsLookup,
-                      isFirstRound: false,
                       history,
                       rng,
                     })
-                  : generateMexicanoRound({
+                : session.format === "mix_mexicano"
+                  ? // "Randomize" ignores the standings ladder entirely — it draws a
+                    // fresh, fully random round (the gender-mixed random engine),
+                    // instead of the usual rank-based Mexicano pairing.
+                    forceRandom
+                    ? generateMixAmericanoRound({
+                        activePlayerIds,
+                        genderById,
+                        statsById,
+                        courtsAvailable: availableCourts.length,
+                        history,
+                        rng,
+                      })
+                    : generateMixMexicanoRound({
+                        activePlayerIds,
+                        genderById,
+                        statsById,
+                        courtsAvailable: availableCourts.length,
+                        standings: standingsLookup,
+                        isFirstRound: false,
+                        history,
+                        rng,
+                      })
+                  : session.format === "mexicano" && forceRandom
+                    ? // Randomize a plain Mexicano round with the standings-blind
+                      // Americano engine — one clean random draw, no rank tiers.
+                      generateAmericanoRound({ activePlayerIds, statsById, courtsAvailable: availableCourts.length, history, rng })
+                    : generateMexicanoRound({
                       activePlayerIds,
                       statsById,
                       courtsAvailable: availableCourts.length,
@@ -512,6 +547,14 @@ async function loadLatestTwoRounds(sessionId: string): Promise<{ latestId: strin
  * 'in_progress'. The host lands back on that round, able to re-score it or
  * generate the next one again.
  */
+/** Owner-only lineup fix (0033): swap two players within a round — trade two on
+ * court, or pull a rester on. Server-gated to a single account and only allowed
+ * before any score is entered. */
+export async function swapRoundPlayers(roundId: string, playerA: string, playerB: string): Promise<void> {
+  const { error } = await supabase.rpc("swap_round_players", { p_round_id: roundId, p_player_a: playerA, p_player_b: playerB });
+  if (error) throw new Error(error.message);
+}
+
 export async function deleteCurrentRound(sessionId: string): Promise<void> {
   const { latestId, prevId } = await loadLatestTwoRounds(sessionId);
   const { error: deleteError } = await supabase.from("rounds").delete().eq("id", latestId);
@@ -542,5 +585,8 @@ export async function regenerateCurrentRound(sessionId: string, opts: { randomiz
   // A large, non-negative integer seed keeps mulberry32 well-distributed. Vary
   // it only for randomize; refresh reuses generateNextRound's deterministic seed.
   const randomSeed = opts.randomize ? Math.floor(Math.random() * 2_000_000_000) : undefined;
-  return generateNextRound(sessionId, randomSeed);
+  // On Randomize, also tell generation to ignore the standings ladder so rank-
+  // based formats (Mexicano / Mix Mexicano) produce a genuinely random draw
+  // rather than just reshuffling within the same court tiers.
+  return generateNextRound(sessionId, randomSeed, opts.randomize);
 }

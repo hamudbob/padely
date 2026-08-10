@@ -595,6 +595,29 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
         <div className="rounded-2xl bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
           {events.map((ev) => {
             const open = openId === ev.id;
+            if (ev.isLive) {
+              return (
+                <Link
+                  key={ev.id}
+                  to={`/live/${ev.liveToken}?j=${ev.liveCode ?? ""}`}
+                  className="block border-t border-line first:border-t-0 px-4 py-3 active:bg-surface-2 transition-colors"
+                >
+                  <div className="flex items-center gap-3">
+                    <span className="flex-1 min-w-0">
+                      <span className="flex items-center gap-2">
+                        <span className="inline-flex items-center gap-1 rounded-full bg-court-lime/20 px-2 py-0.5">
+                          <span className="w-1.5 h-1.5 rounded-full bg-[#8FB01E]" aria-hidden />
+                          <span className="text-[9px] font-bold tracking-[0.12em] text-ink">LIVE</span>
+                        </span>
+                        <b className="text-[14px] font-semibold text-graphite truncate">{ev.title}</b>
+                      </span>
+                      <span className="block text-[11.5px] text-warm-gray mt-0.5">Session in play · tap to watch or join</span>
+                    </span>
+                    <span className="text-gold-ink text-[12px] font-semibold shrink-0">Open ›</span>
+                  </div>
+                </Link>
+              );
+            }
             return (
               <div key={ev.id} className="border-t border-line first:border-t-0">
                 <button onClick={() => setOpenId(open ? null : ev.id)} className="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-surface-2 transition-colors">

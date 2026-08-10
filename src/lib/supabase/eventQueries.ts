@@ -22,6 +22,12 @@ export interface ClubEvent {
   counts: { in: number; maybe: number; out: number };
   goingNames: string[];
   maybeNames: string[];
+  /** True once a session has been started from this event and is still live —
+   * members can then watch/join it right from the club page. */
+  isLive: boolean;
+  /** The live session's public token + join code (present only when isLive). */
+  liveToken: string | null;
+  liveCode: string | null;
 }
 
 export interface NewEvent {
@@ -95,6 +101,15 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
     .in("event_id", eventIds);
   if (rsvpError) throw rsvpError;
 
+  // Linked sessions (started from an event) — so we can show a live one as
+  // joinable and drop finished/past ones from the upcoming list.
+  const sessionIds = [...new Set(rows.map((e) => e.session_id).filter((s): s is string => !!s))];
+  const sessionById = new Map<string, { status: string; public_token: string; join_code: string }>();
+  if (sessionIds.length > 0) {
+    const { data: sess } = await supabase.from("sessions").select("id, status, public_token, join_code").in("id", sessionIds);
+    for (const s of sess ?? []) sessionById.set(s.id, { status: s.status, public_token: s.public_token, join_code: s.join_code });
+  }
+
   const profiles = await getProfiles([...new Set((rsvps ?? []).map((r) => r.user_id))]);
   const nameOf = (uid: string) => profiles.get(uid)?.displayName ?? "Player";
 
@@ -108,22 +123,46 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
     if (myId && r.user_id === myId) rec.mine = resp;
   }
 
-  return rows.map((e) => {
-    const rec = byEvent.get(e.id)!;
-    return {
-      id: e.id,
-      clubId: e.club_id,
-      title: e.title,
-      scheduledAt: e.scheduled_at,
-      location: e.location,
-      notes: e.notes,
-      status: e.status,
-      myResponse: rec.mine,
-      counts: { in: rec.in.length, maybe: rec.maybe.length, out: rec.out.length },
-      goingNames: rec.in,
-      maybeNames: rec.maybe,
-    };
-  });
+  const startOfToday = new Date();
+  startOfToday.setHours(0, 0, 0, 0);
+  const todayMs = startOfToday.getTime();
+
+  return rows
+    .map((e) => {
+      const rec = byEvent.get(e.id)!;
+      const sess = e.session_id ? sessionById.get(e.session_id) : undefined;
+      const isLive = sess?.status === "live";
+      const sessionEnded = sess?.status === "ended";
+      const scheduledMs = new Date(e.scheduled_at).getTime();
+      // Keep it in the list if it's live now, or it hasn't finished and isn't a
+      // past day. Drop ended sessions and yesterday-or-older events.
+      const keep = isLive || (!sessionEnded && (Number.isNaN(scheduledMs) || scheduledMs >= todayMs));
+      return {
+        event: {
+          id: e.id,
+          clubId: e.club_id,
+          title: e.title,
+          scheduledAt: e.scheduled_at,
+          location: e.location,
+          notes: e.notes,
+          status: e.status,
+          myResponse: rec.mine,
+          counts: { in: rec.in.length, maybe: rec.maybe.length, out: rec.out.length },
+          goingNames: rec.in,
+          maybeNames: rec.maybe,
+          isLive: !!isLive,
+          liveToken: isLive ? sess?.public_token ?? null : null,
+          liveCode: isLive ? sess?.join_code ?? null : null,
+        } as ClubEvent,
+        keep,
+        isLive: !!isLive,
+        scheduledMs,
+      };
+    })
+    .filter((x) => x.keep)
+    // Live sessions float to the top, then soonest upcoming first.
+    .sort((a, b) => (a.isLive === b.isLive ? a.scheduledMs - b.scheduledMs : a.isLive ? -1 : 1))
+    .map((x) => x.event);
 }
 
 /** An attendee shown on the public event page — enough to render an avatar row

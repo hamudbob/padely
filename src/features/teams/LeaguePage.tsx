@@ -163,9 +163,9 @@ export default function LeaguePage() {
             {board && board.totalSessions === 0
               ? "No team sessions this period yet. Attach a session to this team when you create it and it'll count here."
               : board && board.qualifyingSessions === 0
-                ? `${board.totalSessions} session${board.totalSessions === 1 ? "" : "s"} this period, but none reached the ${board.sessionFloor}-player turnout floor, so no points were awarded.`
+                ? `${board.totalSessions} session${board.totalSessions === 1 ? "" : "s"} this period, but none were set to count for the league, so no points were awarded.`
                 : board
-                  ? `${board.qualifyingSessions} qualifying session${board.qualifyingSessions === 1 ? "" : "s"} so far. Members appear once they've played ${board.minSessions}.`
+                  ? `${board.qualifyingSessions} counting session${board.qualifyingSessions === 1 ? "" : "s"} so far — standings appear as soon as one is played.`
                   : ""}
           </p>
         </div>

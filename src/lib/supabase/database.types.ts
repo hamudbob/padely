@@ -29,7 +29,7 @@ export interface Database {
           id: string;
           team_id: string;
           name: string;
-          format: "americano" | "mexicano" | "mix_americano" | "mix_mexicano" | "fixed_partner" | "team_sparring";
+          format: "americano" | "mexicano" | "mix_americano" | "mix_mexicano" | "fixed_partner" | "team_sparring" | "side_americano";
           scoring_format: "fixed_21" | "fixed_4_games" | "fixed_5_games" | "race_4" | "race_6";
           ranking_basis: "points_first" | "wins_first";
           status: "draft" | "live" | "ended";
@@ -53,6 +53,9 @@ export interface Database {
           /** Optional club this session belongs to (0018) — what a club's league
            * + leaderboard aggregate over. Null for an ad-hoc (non-team) session. */
           club_id: string | null;
+          /** Whether this session counts toward its club's league (0032) — the
+           * host's create-wizard choice, defaults true. Irrelevant when club_id is null. */
+          counts_for_league: boolean;
           created_by: string;
           created_at: string;
           updated_at: string;
@@ -74,6 +77,7 @@ export interface Database {
           team_score_mode?: Database["public"]["Tables"]["sessions"]["Row"]["team_score_mode"];
           fixed_partner_style?: Database["public"]["Tables"]["sessions"]["Row"]["fixed_partner_style"];
           club_id?: string | null;
+          counts_for_league?: boolean;
           created_by: string;
         };
         // Partial<Row>, not Partial<Insert> — Insert omits server/lifecycle
@@ -603,6 +607,10 @@ export interface Database {
       get_club_champions: {
         Args: { p_club_id: string };
         Returns: unknown; // jsonb { titles[], recent[] }
+      };
+      swap_round_players: {
+        Args: { p_round_id: string; p_player_a: string; p_player_b: string };
+        Returns: undefined; // void
       };
       get_claimable_players: {
         Args: { p_public_token: string };

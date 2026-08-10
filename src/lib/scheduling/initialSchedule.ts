@@ -6,12 +6,21 @@ import { generateMixMexicanoRound } from "./mixMexicano";
 import { Pair, PairFairnessState, generateFixedPartnerSchedule, generateFixedPartnerRankedRound } from "./fixedPartner";
 import { mulberry32, PlayerFairnessState, PlayerId, RoundResult } from "./types";
 
-export type ScheduleFormat = "americano" | "mexicano" | "mix_americano" | "mix_mexicano" | "team_sparring" | "fixed_partner";
+export type ScheduleFormat =
+  | "americano"
+  | "mexicano"
+  | "mix_americano"
+  | "mix_mexicano"
+  | "team_sparring"
+  | "fixed_partner"
+  | "side_americano";
 
 export interface SchedulePlayer {
   id: string;
   gender: Gender;
   teamSide: "A" | "B" | null;
+  /** Fixed-Position Americano only — the player's L/R court side. */
+  side?: "L" | "R" | null;
 }
 
 export interface InitialScheduleInput {
@@ -106,6 +115,14 @@ export function generateInitialRounds(input: InitialScheduleInput): RoundResult[
 
   if (format === "mix_americano") {
     return generateMixAmericanoSchedule({ activePlayerIds, genderById, courtsAvailable, roundCount, schedulingSeed });
+  }
+
+  if (format === "side_americano") {
+    // Same engine as Mix Americano, but the "mix" is court side (L/R) rather
+    // than gender — every team pairs one left with one right. The engine only
+    // cares that teammates differ, so we feed side as a two-valued key.
+    const sideKey = new Map<PlayerId, Gender>(players.map((p) => [p.id, (p.side === "L" ? "M" : "F") as Gender]));
+    return generateMixAmericanoSchedule({ activePlayerIds, genderById: sideKey, courtsAvailable, roundCount, schedulingSeed });
   }
 
   return generateAmericanoSchedule({ activePlayerIds, courtsAvailable, roundCount, schedulingSeed });

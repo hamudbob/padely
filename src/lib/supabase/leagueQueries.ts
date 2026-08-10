@@ -39,7 +39,6 @@ export interface LeagueBoard {
   rows: LeagueRow[];
   belowThreshold: number;
   minSessions: number;
-  sessionFloor: number;
   period: LeaguePeriod;
   periodLabel: string;
   periodStart: string;
@@ -139,25 +138,32 @@ export async function getClubLeague(clubId: string, reference: Date = new Date()
   if (clubError) throw clubError;
 
   const period = (club?.league_period ?? "monthly") as LeaguePeriod;
-  const sessionFloor = club?.session_floor ?? 10;
-  // Qualification scales with the period (audit #11): stored value is per-month.
-  const minSessions = Math.max(1, (club?.league_min_sessions ?? 3) * monthsInPeriod(period));
+  // A player now appears on the league table after a SINGLE session — clubs
+  // that play weekly shouldn't wait a month for a table (was league_min_sessions,
+  // typically 3). Kept as a named value so the empty-state copy still reads well.
+  const minSessions = 1;
   const start = periodStartFor(period, reference);
   const end = periodEndFor(period, start);
 
-  const [{ data: results, error: resultsError }, { data: memberRows, error: memberError }] = await Promise.all([
-    supabase
-      .from("session_results")
-      .select("user_id, session_id, rank, field_size, player_count, placement_points, podium_bonus, wins, perf_adj")
-      .eq("club_id", clubId)
-      .gte("session_date", start.toISOString())
-      .lt("session_date", end.toISOString()),
-    supabase.from("club_members").select("user_id").eq("club_id", clubId),
-  ]);
+  const [{ data: results, error: resultsError }, { data: memberRows, error: memberError }, { data: countingRows, error: countingError }] =
+    await Promise.all([
+      supabase
+        .from("session_results")
+        .select("user_id, session_id, rank, field_size, player_count, placement_points, podium_bonus, wins, perf_adj")
+        .eq("club_id", clubId)
+        .gte("session_date", start.toISOString())
+        .lt("session_date", end.toISOString()),
+      supabase.from("club_members").select("user_id").eq("club_id", clubId),
+      // Which of this club's sessions count toward the league — the host's
+      // per-session "Count for league" choice (replaces the old N-player floor).
+      supabase.from("sessions").select("id").eq("club_id", clubId).eq("counts_for_league", true),
+    ]);
   if (resultsError) throw resultsError;
   if (memberError) throw memberError;
+  if (countingError) throw countingError;
 
   const memberSet = new Set((memberRows ?? []).map((m) => m.user_id));
+  const countingSet = new Set((countingRows ?? []).map((s) => s.id));
 
   // Session-level turnout tallies for the empty-state help.
   const qualifyingSessionIds = new Set<string>();
@@ -166,9 +172,10 @@ export async function getClubLeague(clubId: string, reference: Date = new Date()
   const byUser = new Map<string, Agg>();
   for (const r of results ?? []) {
     allSessionIds.add(r.session_id);
-    if (r.player_count >= sessionFloor) qualifyingSessionIds.add(r.session_id);
-    // Only qualifying sessions award points, and only CURRENT members are ranked.
-    if (r.player_count < sessionFloor) continue;
+    if (countingSet.has(r.session_id)) qualifyingSessionIds.add(r.session_id);
+    // Only sessions the host marked "count for league" award points, and only
+    // CURRENT members are ranked.
+    if (!countingSet.has(r.session_id)) continue;
     if (!memberSet.has(r.user_id)) continue;
     const a = byUser.get(r.user_id) ?? { sessions: 0, totalPoints: 0, wins: 0, perfSum: 0, firsts: 0, rankSum: 0 };
     a.sessions += 1;
@@ -218,7 +225,6 @@ export async function getClubLeague(clubId: string, reference: Date = new Date()
     rows,
     belowThreshold,
     minSessions,
-    sessionFloor,
     period,
     periodLabel: periodLabelFor(period, start),
     periodStart: start.toISOString(),

@@ -34,6 +34,7 @@ const FORMAT_OPTIONS: { value: SessionFormat; label: string; sub: string; enable
   { value: "americano", label: "Americano", sub: "Individual · partners rotate every round", enabled: true },
   { value: "mexicano", label: "Mexicano", sub: "Individual · live rank-based pairing", enabled: true },
   { value: "mix_americano", label: "Mix Americano", sub: "Individual · partners rotate, every team gender-mixed", enabled: true },
+  { value: "side_americano", label: "Fixed Position", sub: "Individual · partners rotate, every team one left + one right", enabled: true },
   { value: "mix_mexicano", label: "Mix Mexicano", sub: "Individual · rank-based pairing, gender-mixed where possible", enabled: true },
   { value: "team_sparring", label: "Team Sparring", sub: "Two fixed teams · Team A vs Team B every match", enabled: true },
 ];
@@ -136,6 +137,9 @@ export default function CreateSessionPage() {
   // later. null = an ad-hoc session belonging to no team. myTeams is loaded once
   // on mount; the picker only renders if the host actually belongs to a team.
   const [clubId, setClubId] = useState<string | null>(() => searchParams.get("club"));
+  // Club sessions only — whether this session's results count toward the league.
+  // Defaults on; the host can turn it off for a casual/practice club session.
+  const [countsForLeague, setCountsForLeague] = useState(true);
   const [myTeams, setMyTeams] = useState<MyTeam[]>([]);
   const [teamsLoaded, setTeamsLoaded] = useState(false);
   // If this create flow was launched from a scheduled event, its id — used to
@@ -143,7 +147,14 @@ export default function CreateSessionPage() {
   const eventId = searchParams.get("event");
   const [format, setFormat] = useState<SessionFormat>("americano");
   const [players, setPlayers] = useState<DraftPlayer[]>([]);
-  const [courtCount, setCourtCount] = useState(4);
+  const [courtCount, setCourtCount] = useState(1);
+  // Courts auto-follow the player count (4–7→1, 8–12→2, 13–18→3, 19–24→4, …)
+  // until the host sets courts by hand — after that we stop touching it.
+  const [courtCountTouched, setCourtCountTouched] = useState(false);
+  const handleSetCourtCount = (n: number) => {
+    setCourtCountTouched(true);
+    setCourtCount(n);
+  };
   // Americano only — its whole schedule is generated upfront (score-independent
   // pairing). roundCount is auto-calculated from player/court count (see
   // recommendedAmericanoRounds) so the host never has to count rounds
@@ -254,6 +265,7 @@ export default function CreateSessionPage() {
     const snapshot = {
       name,
       clubId,
+      countsForLeague,
       format,
       scoringFormat,
       rankingBasis,
@@ -271,7 +283,7 @@ export default function CreateSessionPage() {
       });
     }, 600);
     return () => clearTimeout(t);
-  }, [lobbyId, step, name, clubId, format, scoringFormat, rankingBasis, courtCount, roundCount, teamScoreMode, fixedPartnerEnabled, pairingMode, manualPairs, players]);
+  }, [lobbyId, step, name, clubId, countsForLeague, format, scoringFormat, rankingBasis, courtCount, roundCount, teamScoreMode, fixedPartnerEnabled, pairingMode, manualPairs, players]);
 
   // Resume: if the wizard was opened from a "Resume setup" card (?resume=<id>),
   // hydrate the whole lobby back from the draft and land on the Players step
@@ -289,6 +301,7 @@ export default function CreateSessionPage() {
         const s = lobby.draftState as {
           name?: string;
           clubId?: string | null;
+          countsForLeague?: boolean;
           format?: SessionFormat;
           scoringFormat?: ScoringFormat;
           rankingBasis?: RankingBasis;
@@ -302,10 +315,14 @@ export default function CreateSessionPage() {
         };
         if (typeof s.name === "string") setName(s.name);
         if (typeof s.clubId === "string" || s.clubId === null) setClubId(s.clubId);
+        if (typeof s.countsForLeague === "boolean") setCountsForLeague(s.countsForLeague);
         if (s.format) setFormat(s.format);
         if (s.scoringFormat) setScoringFormat(s.scoringFormat);
         if (s.rankingBasis) setRankingBasis(s.rankingBasis);
-        if (typeof s.courtCount === "number") setCourtCount(s.courtCount);
+        if (typeof s.courtCount === "number") {
+          setCourtCount(s.courtCount);
+          setCourtCountTouched(true);
+        }
         if (typeof s.roundCount === "number") {
           setRoundCount(s.roundCount);
           setRoundCountTouched(true);
@@ -347,14 +364,28 @@ export default function CreateSessionPage() {
       : "round_robin";
   const isMixAmericano = format === "mix_americano";
   const isMixMexicano = format === "mix_mexicano";
+  const isSideAmericano = format === "side_americano";
   const needsGenderMix = isMixAmericano || isMixMexicano;
+
+  // Auto-size courts to the roster: ≤7 players → 1 court, then one more court
+  // per ~6 players (8–12→2, 13–18→3, 19–24→4…). Team Sparring is left alone —
+  // its usable courts are gated by the A/B split instead. Stops once the host
+  // adjusts courts manually.
+  useEffect(() => {
+    if (courtCountTouched || isTeamSparring) return;
+    const auto = players.length < 8 ? 1 : Math.ceil(players.length / 6);
+    setCourtCount((c) => (c === auto ? c : auto));
+  }, [players.length, courtCountTouched, isTeamSparring]);
+  // Fixed-Position Americano needs each player's L/R side set (like Fixed
+  // Partner's "by side" pairing) — that's what every team is built from.
+  const needsSide = isSideAmericano;
   // Formats whose entire schedule is generated upfront (score-independent
   // pairing) vs. round-by-round (pairing depends on live standings). Fixed
   // Partner inherits its base format's upfront-ness automatically — the
   // round_robin flavor only ever pairs with format === "americano" (already
   // upfront) and rank_based only ever pairs with "mexicano" (already
   // round-by-round) — so no separate isFixedPartner term is needed here.
-  const needsUpfrontSchedule = format === "americano" || format === "team_sparring" || isMixAmericano;
+  const needsUpfrontSchedule = format === "americano" || format === "team_sparring" || isMixAmericano || isSideAmericano;
 
   const genderById = useMemo(() => new Map<PlayerId, Gender>(players.map((p) => [p.tempId, p.gender])), [players]);
 
@@ -681,7 +712,12 @@ export default function CreateSessionPage() {
   const previewRounds: RoundResult[] = useMemo(() => {
     // Single source of truth shared with the lobby's Start (see initialSchedule.ts).
     return generateInitialRounds({
-      players: players.map((p) => ({ id: p.tempId, gender: p.gender, teamSide: p.teamSide ?? null })),
+      players: players.map((p) => ({
+        id: p.tempId,
+        gender: p.gender,
+        teamSide: p.teamSide ?? null,
+        side: p.preferredSide === "left" ? "L" : p.preferredSide === "right" ? "R" : null,
+      })),
       courtsAvailable: courtCount,
       format,
       schedulingSeed,
@@ -738,6 +774,7 @@ export default function CreateSessionPage() {
           pairs: isFixedPartner ? resolvedPairs : undefined,
           fixedPartnerStyle: isFixedPartner ? fixedPartnerStyle : undefined,
           clubId,
+          countsForLeague: clubId ? countsForLeague : undefined,
         },
         previewRounds,
         schedulingSeed,
@@ -818,6 +855,25 @@ export default function CreateSessionPage() {
               <p className="text-[11px] text-warm-gray mt-2 leading-snug">
                 Attaching a session lets it count toward that team's league and show up in its history. You can leave this as No team for a casual session.
               </p>
+
+              {clubId && (
+                <button
+                  type="button"
+                  onClick={() => setCountsForLeague((v) => !v)}
+                  className="mt-3 w-full flex items-center justify-between rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors"
+                >
+                  <span className="text-left">
+                    <span className="block text-[13px] font-semibold text-graphite">Count for the league</span>
+                    <span className="block text-[11px] text-warm-gray">Adds this session's results to the team's league table.</span>
+                  </span>
+                  <span
+                    className={`relative w-[42px] h-[24px] rounded-full transition-colors shrink-0 ${countsForLeague ? "bg-graphite" : "bg-stone"}`}
+                    aria-hidden
+                  >
+                    <span className={`absolute top-[3px] w-[18px] h-[18px] rounded-full bg-ivory transition-all ${countsForLeague ? "left-[21px]" : "left-[3px]"}`} />
+                  </span>
+                </button>
+              )}
             </div>
           )}
         </div>
@@ -935,6 +991,7 @@ export default function CreateSessionPage() {
             isFixedPartner={isFixedPartner}
             onTogglePreferredSide={togglePreferredSide}
             needsGenderMix={needsGenderMix}
+            needsSide={needsSide}
           />
           <FixedPartnerToggle
             available={fixedPartnerAvailable}
@@ -961,7 +1018,7 @@ export default function CreateSessionPage() {
       {step === 3 && (
         <CourtsStep
           courtCount={courtCount}
-          setCourtCount={setCourtCount}
+          setCourtCount={handleSetCourtCount}
           playerCount={players.length}
           minPlayersNeeded={minPlayersNeeded}
           courtsOk={courtsOk}
@@ -1100,6 +1157,7 @@ function PlayersStep({
   isFixedPartner,
   onTogglePreferredSide,
   needsGenderMix,
+  needsSide,
 }: {
   players: DraftPlayer[];
   onAddSingle: (name: string) => void;
@@ -1113,6 +1171,7 @@ function PlayersStep({
   isFixedPartner: boolean;
   onTogglePreferredSide: (tempId: string) => void;
   needsGenderMix: boolean;
+  needsSide: boolean;
 }) {
   const [mode, setMode] = useState<"single" | "bulk">("single");
   const [singleName, setSingleName] = useState("");
@@ -1185,7 +1244,13 @@ function PlayersStep({
           Players ({players.length}) — tap a name to toggle M/F
           {isTeamSparring ? ", tap the A/B chip to switch teams" : ""}
           {isFixedPartner ? ", tap the L/R chip for their preferred side" : ""}
+          {needsSide && !isFixedPartner ? ", tap the L/R chip to set each player's side" : ""}
         </p>
+        {needsSide && (
+          <p className="text-[11px] text-warm-gray mb-2">
+            Every team is built from one <b className="font-semibold text-ink-2">Left</b> and one <b className="font-semibold text-ink-2">Right</b> player — set each player's side with the L/R chip. Aim for a roughly even split.
+          </p>
+        )}
         {isTeamSparring && (
           <p className="text-[11px] font-semibold text-ink-2 mb-2">
             Team A: <span className="font-mono tnum">{teamACount}</span> players · Team B: <span className="font-mono tnum">{teamBCount}</span> players — new players auto-balance onto whichever team is smaller.
@@ -1221,10 +1286,16 @@ function PlayersStep({
                     Team {p.teamSide ?? "A"}
                   </button>
                 )}
-                {isFixedPartner && (
+                {(isFixedPartner || needsSide) && (
                   <button
                     onClick={() => onTogglePreferredSide(p.tempId)}
-                    className="text-[10px] font-bold rounded px-1.5 py-0.5 bg-surface-2 border border-line text-ink-2"
+                    className={`text-[10px] font-bold rounded px-1.5 py-0.5 border ${
+                      needsSide
+                        ? (p.preferredSide ?? "right") === "left"
+                          ? "bg-graphite text-ivory border-graphite"
+                          : "bg-gold-soft text-gold-ink border-gold/30"
+                        : "bg-surface-2 border-line text-ink-2"
+                    }`}
                   >
                     {(p.preferredSide ?? "right") === "left" ? "Left" : "Right"}
                   </button>

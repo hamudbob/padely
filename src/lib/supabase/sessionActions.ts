@@ -45,6 +45,8 @@ export interface SessionDraft {
   fixedPartnerStyle?: "round_robin" | "rank_based";
   /** Optional club (team) this session is being played for (0018). */
   clubId?: string | null;
+  /** Club sessions only — whether this session's results count toward the club league (0032). Defaults true. */
+  countsForLeague?: boolean;
 }
 
 function randomJoinCode(): string {
@@ -79,6 +81,8 @@ export interface CreateLobbyInput {
   fixedPartnerStyle?: "round_robin" | "rank_based";
   /** Optional club (team) this session is being played for (0018). */
   clubId?: string | null;
+  /** Club sessions only — whether this session's results count toward the club league (0032). Defaults true. */
+  countsForLeague?: boolean;
 }
 
 export async function createLobby(input: CreateLobbyInput): Promise<StartSessionResult> {
@@ -152,6 +156,7 @@ export async function finalizeAndStart(
       team_score_mode: draft.teamScoreMode ?? null,
       fixed_partner_style: draft.fixedPartnerStyle ?? null,
       club_id: draft.clubId ?? null,
+      counts_for_league: draft.clubId ? draft.countsForLeague ?? true : false,
       scheduling_seed: schedulingSeed,
     })
     .eq("id", sessionId);
