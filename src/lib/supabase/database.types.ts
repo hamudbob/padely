@@ -612,6 +612,10 @@ export interface Database {
         Args: { p_round_id: string; p_player_a: string; p_player_b: string };
         Returns: undefined; // void
       };
+      prune_notifications: {
+        Args: { p_days?: number; p_keep?: number };
+        Returns: number; // rows removed for the calling user
+      };
       get_claimable_players: {
         Args: { p_public_token: string };
         Returns: unknown; // jsonb [{ id, name }]

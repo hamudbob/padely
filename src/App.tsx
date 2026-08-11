@@ -1,6 +1,8 @@
-import { Routes, Route } from "react-router-dom";
+import { useEffect } from "react";
+import { Routes, Route, useLocation, useNavigate } from "react-router-dom";
 import HomePage from "./features/home/HomePage";
 import LoginPage from "./features/auth/LoginPage";
+import ResetPasswordPage from "./features/auth/ResetPasswordPage";
 import ProfilePage from "./features/profile/ProfilePage";
 import RequireHost from "./features/auth/RequireHost";
 import WatchPage from "./features/watch/WatchPage";
@@ -17,11 +19,36 @@ import EventPage from "./features/teams/EventPage";
 import PublicProfilePage from "./features/public-profile/PublicProfilePage";
 import NotificationsPage from "./features/notifications/NotificationsPage";
 
+/**
+ * Safety net for password recovery. Supabase only redirects to URLs on the
+ * project's allow-list; anything else silently falls back to the Site URL. That
+ * used to drop people on the home screen (already signed in, with no way to set
+ * a password) — the recovery token was simply consumed and lost. Here we spot
+ * the `type=recovery` token in the URL no matter which route it landed on and
+ * hand it to /reset-password with the hash intact.
+ */
+function useRecoveryRedirect() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  useEffect(() => {
+    const hash = window.location.hash;
+    const isRecovery = hash.includes("type=recovery") || hash.includes("error_code=otp_expired");
+    if (isRecovery && location.pathname !== "/reset-password") {
+      navigate(`/reset-password${hash}`, { replace: true });
+    }
+    // Runs once per mount; the hash is only present on the landing navigation.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+}
+
 export default function App() {
+  useRecoveryRedirect();
   return (
     <Routes>
       <Route path="/" element={<HomePage />} />
       <Route path="/login" element={<LoginPage />} />
+      {/* Where Supabase's password-recovery email lands. */}
+      <Route path="/reset-password" element={<ResetPasswordPage />} />
       <Route
         path="/profile"
         element={

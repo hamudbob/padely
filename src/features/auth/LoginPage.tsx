@@ -1,8 +1,9 @@
 import { FormEvent, useEffect, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { signInHost, signUpHost, resendConfirmation, ensureHostTeamForCurrentUser } from "../../lib/supabase/auth";
+import { signInHost, signUpHost, resendConfirmation, ensureHostTeamForCurrentUser, sendPasswordReset } from "../../lib/supabase/auth";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
+import PasswordField from "./PasswordField";
 
 /** Only allow returning to an in-app path — never an absolute/external URL
  * (guards against an open-redirect via a crafted ?next=). */
@@ -30,6 +31,11 @@ export default function LoginPage() {
   const [resend, setResend] = useState<"idle" | "sending" | "sent">("idle");
   const navigate = useNavigate();
   const [params] = useSearchParams();
+  // Forgot-password sub-flow. ?forgot=1 opens it directly, which is where the
+  // expired-link screen sends people.
+  const [forgot, setForgot] = useState(() => params.get("forgot") === "1");
+  const [resetEmail, setResetEmail] = useState("");
+  const [resetState, setResetState] = useState<"idle" | "sending" | "sent">("idle");
   // Where to land after a successful sign-in. Defaults home, but a shared link
   // (e.g. an event) sends the visitor here with ?next=/e/… so we return them to
   // exactly the page they were trying to open.
@@ -45,6 +51,9 @@ export default function LoginPage() {
 
   useEffect(() => {
     if (!user) return;
+    // Don't bounce someone out of the forgot-password flow just because they
+    // still have a live session (e.g. changing a password they half-remember).
+    if (forgot) return;
     let cancelled = false;
     ensureHostTeamForCurrentUser()
       .catch(() => {})
@@ -54,7 +63,7 @@ export default function LoginPage() {
     return () => {
       cancelled = true;
     };
-  }, [user, next, navigate]);
+  }, [user, next, navigate, forgot]);
 
   async function handleResend() {
     if (!pendingEmail) return;
@@ -64,6 +73,21 @@ export default function LoginPage() {
       setResend("sent");
     } catch {
       setResend("idle");
+    }
+  }
+
+  async function handleSendReset(e: FormEvent) {
+    e.preventDefault();
+    if (!resetEmail.trim()) return;
+    setResetState("sending");
+    setError(null);
+    try {
+      await sendPasswordReset(resetEmail, `${window.location.origin}/reset-password`);
+      setResetState("sent");
+    } catch (err) {
+      // Only real failures (rate limits) reach here — see sendPasswordReset.
+      setError(err instanceof Error ? err.message : "Couldn't send the email just now.");
+      setResetState("idle");
     }
   }
 
@@ -122,6 +146,80 @@ export default function LoginPage() {
       </Link>
     </div>
   );
+
+  // ── Forgot-password screen ─────────────────────────────────────────────────
+  if (forgot) {
+    return (
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+        {topBar}
+        {resetState === "sent" ? (
+          <>
+            <div className="w-14 h-14 rounded-2xl bg-gold-soft border border-line flex items-center justify-center mb-5">
+              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#8A6D33" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <rect x="3" y="5" width="18" height="14" rx="2" />
+                <path d="M3 7l9 6 9-6" />
+              </svg>
+            </div>
+            <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1]">Check your email</h1>
+            <p className="text-[13.5px] text-ink-2 mt-3 leading-relaxed">
+              If <span className="font-semibold text-graphite">{resetEmail.trim()}</span> has an account, a reset link is on its way.
+              Open it and you'll be able to set a new password.
+            </p>
+            <p className="text-[13px] text-warm-gray mt-3 leading-relaxed">
+              Nothing yet? Give it a minute and <span className="font-semibold text-ink-2">check spam</span> — these often land there.
+            </p>
+            <button
+              type="button"
+              onClick={() => {
+                setForgot(false);
+                setResetState("idle");
+                setMode("login");
+              }}
+              className="w-full mt-7 rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform"
+            >
+              Back to log in
+            </button>
+          </>
+        ) : (
+          <>
+            <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1]">Forgot your password?</h1>
+            <p className="text-[13.5px] text-ink-2 mt-2 mb-5 leading-relaxed">
+              Pop in your email and we'll send you a link to set a new one.
+            </p>
+            <form onSubmit={handleSendReset} className="space-y-3">
+              <input
+                className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+                placeholder="Email"
+                type="email"
+                autoComplete="email"
+                value={resetEmail}
+                onChange={(e) => setResetEmail(e.target.value)}
+                required
+              />
+              {error && <p className="text-[13px] text-loss">{error}</p>}
+              <button
+                type="submit"
+                disabled={resetState === "sending" || !resetEmail.trim()}
+                className="w-full flex items-center justify-center rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-50"
+              >
+                {resetState === "sending" ? "Sending…" : "Send reset link"}
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  setForgot(false);
+                  setError(null);
+                }}
+                className="w-full text-[13.5px] font-semibold text-warm-gray py-3 active:opacity-70"
+              >
+                Back to log in
+              </button>
+            </form>
+          </>
+        )}
+      </div>
+    );
+  }
 
   // ── Check-your-email screen (shown after a signup that needs confirmation) ──
   if (pendingEmail) {
@@ -209,15 +307,30 @@ export default function LoginPage() {
           onChange={(e) => setEmail(e.target.value)}
           required
         />
-        <input
-          className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
-          placeholder="Password"
-          type="password"
+        <PasswordField
           value={password}
-          onChange={(e) => setPassword(e.target.value)}
+          onChange={setPassword}
+          placeholder="Password"
+          autoComplete={mode === "signup" ? "new-password" : "current-password"}
           minLength={8}
           required
         />
+        {mode === "login" && (
+          <div className="flex justify-end -mt-1">
+            <button
+              type="button"
+              onClick={() => {
+                setForgot(true);
+                setResetEmail(email);
+                setError(null);
+                setInfo(null);
+              }}
+              className="text-[12.5px] font-semibold text-gold-ink active:opacity-70"
+            >
+              Forgot password?
+            </button>
+          </div>
+        )}
         {info && <p className="text-[13px] text-win">{info}</p>}
         {error && <p className="text-[13px] text-loss">{error}</p>}
         <button

@@ -61,6 +61,17 @@ export async function markAllNotificationsRead(): Promise<void> {
   if (error) throw error;
 }
 
+/**
+ * Opportunistic housekeeping (0034): drop the caller's own read notifications
+ * older than 60 days, and anything past the newest 200. Best-effort — a failure
+ * here must never stop the list rendering.
+ */
+export async function pruneNotifications(): Promise<number> {
+  const { data, error } = await supabase.rpc("prune_notifications", { p_days: 60, p_keep: 200 });
+  if (error) return 0;
+  return typeof data === "number" ? data : 0;
+}
+
 export async function deleteNotification(id: string): Promise<void> {
   const { error } = await supabase.from("notifications").delete().eq("id", id);
   if (error) throw error;

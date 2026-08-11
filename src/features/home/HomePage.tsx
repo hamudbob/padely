@@ -2,7 +2,7 @@ import { useEffect, useState } from "react";
 import { Link } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { getHostHomeSummary, HostHomeSession, HostHomeStats } from "../../lib/supabase/hostHomeQueries";
-import { getResumableLobbies, sweepStaleDrafts, ResumableLobby } from "../../lib/supabase/sessionActions";
+import { getResumableLobbies, sweepStaleDrafts, deleteSession, ResumableLobby } from "../../lib/supabase/sessionActions";
 import { getProfile } from "../../lib/supabase/profileQueries";
 
 const FORMAT_LABELS: Record<string, string> = {
@@ -81,6 +81,25 @@ export default function HomePage() {
   const [sessionsLoading, setSessionsLoading] = useState(false);
   const [resumable, setResumable] = useState<ResumableLobby[]>([]);
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
+  // Abandoned setups used to sit here until the 10-day sweep collected them,
+  // with no way to clear one by hand — drafts are deliberately hidden from the
+  // profile's session list, so this card was their only appearance.
+  const [discarding, setDiscarding] = useState<string | null>(null);
+
+  async function discardDraft(lobby: ResumableLobby) {
+    const label = lobby.name?.trim() || "this setup";
+    if (!confirm(`Discard ${label}? The roster you'd started and its join code are gone for good.`)) return;
+    setDiscarding(lobby.sessionId);
+    setSessionsError(null);
+    try {
+      await deleteSession(lobby.sessionId);
+      setResumable((prev) => prev.filter((l) => l.sessionId !== lobby.sessionId));
+    } catch (err) {
+      setSessionsError(err instanceof Error ? err.message : "Couldn't discard that setup.");
+    } finally {
+      setDiscarding(null);
+    }
+  }
 
   useEffect(() => {
     if (!user) {
@@ -227,12 +246,16 @@ export default function HomePage() {
         {resumable.length > 0 && (
           <div className="px-5 pt-4 flex flex-col gap-2.5">
             {resumable.map((l) => (
-              <Link
+              <div
                 key={l.sessionId}
-                to={`/create?resume=${l.sessionId}`}
-                className="anim-rise relative block rounded-2xl border-[1.5px] border-dashed border-[#D8C79A] bg-gold-soft/50 px-[18px] py-4 active:scale-[0.99] transition-transform"
+                className={`anim-rise relative rounded-2xl border-[1.5px] border-dashed border-[#D8C79A] bg-gold-soft/50 transition-opacity ${
+                  discarding === l.sessionId ? "opacity-40" : ""
+                }`}
               >
-                <div className="flex items-center justify-between gap-3">
+                <Link
+                  to={`/create?resume=${l.sessionId}`}
+                  className="block px-[18px] py-4 pr-[46px] active:scale-[0.99] transition-transform"
+                >
                   <div className="min-w-0">
                     <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-gold-ink">Resume setup</p>
                     <p className="font-serif font-semibold text-[17px] text-ink truncate mt-0.5">{l.name || "Untitled session"}</p>
@@ -240,9 +263,17 @@ export default function HomePage() {
                       {l.playerCount} {l.playerCount === 1 ? "player" : "players"} waiting · code <span className="font-mono">{l.joinCode}</span>
                     </p>
                   </div>
-                  <span className="text-gold-ink text-[18px] shrink-0" aria-hidden>›</span>
-                </div>
-              </Link>
+                  <span className="absolute right-[18px] bottom-4 text-gold-ink text-[18px]" aria-hidden>›</span>
+                </Link>
+                <button
+                  onClick={() => discardDraft(l)}
+                  disabled={discarding === l.sessionId}
+                  aria-label={`Discard ${l.name || "this setup"}`}
+                  className="absolute top-2 right-2 w-8 h-8 rounded-full text-warm-gray flex items-center justify-center text-[15px] leading-none active:bg-gold/15 transition-colors disabled:opacity-40"
+                >
+                  ✕
+                </button>
+              </div>
             ))}
           </div>
         )}

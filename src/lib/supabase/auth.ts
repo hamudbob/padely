@@ -77,6 +77,27 @@ async function ensureHostTeam(ownerId: string, name: string) {
   if (insertError) throw insertError;
 }
 
+/**
+ * Send the "reset your password" email. `redirectTo` must be on the project's
+ * allow-list (Supabase → Authentication → URL Configuration) or the link will
+ * silently fall back to the Site URL and land the user on the home screen with
+ * no way to actually set a new password.
+ *
+ * Always resolves, even for an unknown address — telling a stranger whether an
+ * email is registered is an account-enumeration leak.
+ */
+export async function sendPasswordReset(email: string, redirectTo: string) {
+  const { error } = await supabase.auth.resetPasswordForEmail(email.trim(), { redirectTo });
+  // Rate-limit errors are worth surfacing; "user not found" deliberately isn't.
+  if (error && /rate|too many/i.test(error.message)) throw error;
+}
+
+/** Set a new password for the currently-authenticated (or recovery) session. */
+export async function updatePassword(newPassword: string) {
+  const { error } = await supabase.auth.updateUser({ password: newPassword });
+  if (error) throw error;
+}
+
 export async function signOutHost() {
   const { error } = await supabase.auth.signOut();
   if (error) throw error;

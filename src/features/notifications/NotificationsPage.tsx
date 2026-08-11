@@ -5,6 +5,7 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
   deleteNotification,
+  pruneNotifications,
   AppNotification,
 } from "../../lib/supabase/notificationQueries";
 import { respondInvite } from "../../lib/supabase/clubJoinQueries";
@@ -34,6 +35,9 @@ export default function NotificationsPage() {
     load();
     // Mark everything read shortly after opening the panel.
     markAllNotificationsRead().catch(() => undefined);
+    // Opportunistic retention (0034) — notifications otherwise grow forever.
+    // Runs after the list is already on screen, and never blocks it.
+    pruneNotifications().catch(() => undefined);
   }, []);
 
   async function openTarget(n: AppNotification) {

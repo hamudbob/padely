@@ -10,3 +10,7 @@ vite.config.d.ts
 _to_delete/
 _to_delete/
 _git_stale_locks/
+
+# Scratch dirs used when git tooling cannot unlink on this mount
+_gitjunk/
+_to_delete/
