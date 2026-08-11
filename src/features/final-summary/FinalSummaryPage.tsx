@@ -3,6 +3,18 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { getSessionStandings, SessionStandings, StandingsRow } from "../../lib/supabase/standingsQueries";
 import { getRoundHistory, RoundHistoryEntry } from "../../lib/supabase/roundHistoryQueries";
 import { getHostLiveSnapshot, HostLiveSnapshot } from "../../lib/supabase/sessionQueries";
+import { getRecapExtras } from "../../lib/supabase/recapQueries";
+import { renderRecapCard } from "../../lib/recap/renderRecapCard";
+
+const FORMAT_LABELS: Record<string, string> = {
+  americano: "Americano",
+  mexicano: "Mexicano",
+  mix_americano: "Mix Americano",
+  mix_mexicano: "Mix Mexicano",
+  side_americano: "Fixed Position",
+  fixed_partner: "Fixed Partner",
+  team_sparring: "Team Sparring",
+};
 
 function initialsOf(name: string): string {
   const parts = name.trim().split(/[\s&]+/).filter(Boolean);
@@ -32,6 +44,16 @@ export default function FinalSummaryPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
+  // Shareable recap card. The image is rendered first and previewed, so the
+  // actual share tap is a fresh user gesture — iOS refuses navigator.share()
+  // if the gesture that started it has already been spent on a long await.
+  const [recapBusy, setRecapBusy] = useState(false);
+  const [recapUrl, setRecapUrl] = useState<string | null>(null);
+  const [recapBlob, setRecapBlob] = useState<Blob | null>(null);
+  const [recapError, setRecapError] = useState<string | null>(null);
+
+  useEffect(() => () => { if (recapUrl) URL.revokeObjectURL(recapUrl); }, [recapUrl]);
+
   useEffect(() => {
     if (!sessionId) return;
     setLoading(true);
@@ -59,6 +81,67 @@ export default function FinalSummaryPage() {
     } else if (typeof navigator !== "undefined" && navigator.clipboard) {
       navigator.clipboard.writeText(url).catch(() => {});
     }
+  }
+
+  /** Build the 1080×1920 recap image and show it for review. */
+  async function buildRecap() {
+    if (!sessionId || !standings) return;
+    setRecapBusy(true);
+    setRecapError(null);
+    try {
+      const top = standings.rows.slice(0, 3);
+      const extras = await getRecapExtras(sessionId, top.map((r) => r.subjectId));
+      const blob = await renderRecapCard({
+        sessionName: snapshot?.session.name ?? "Padel session",
+        clubName: extras.clubName,
+        date: extras.date,
+        formatLabel: FORMAT_LABELS[snapshot?.session.format ?? ""] ?? "",
+        playerCount: standings.rows.length,
+        roundCount: history?.length ?? 0,
+        podium: top.map((r) => ({
+          name: r.playerName,
+          points: Math.round(r.totalPoints),
+          avatarUrl: extras.avatarByPlayerId.get(r.subjectId) ?? null,
+        })),
+        liveUrl: snapshot?.session.publicToken
+          ? `${window.location.origin}/live/${snapshot.session.publicToken}`
+          : window.location.origin,
+      });
+      if (recapUrl) URL.revokeObjectURL(recapUrl);
+      setRecapBlob(blob);
+      setRecapUrl(URL.createObjectURL(blob));
+    } catch (err) {
+      setRecapError(err instanceof Error ? err.message : "Couldn't create the recap image.");
+    } finally {
+      setRecapBusy(false);
+    }
+  }
+
+  const recapFileName = `padelier-${(snapshot?.session.name ?? "session").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}.png`;
+
+  async function shareRecap() {
+    if (!recapBlob) return;
+    const file = new File([recapBlob], recapFileName, { type: "image/png" });
+    const nav = navigator as Navigator & { canShare?: (d: { files?: File[] }) => boolean };
+    if (nav.canShare?.({ files: [file] }) && navigator.share) {
+      try {
+        await navigator.share({ files: [file], title: snapshot?.session.name ?? "Padelier" });
+        return;
+      } catch {
+        return; // user dismissed the sheet — not an error worth surfacing
+      }
+    }
+    downloadRecap();
+  }
+
+  function downloadRecap() {
+    if (!recapUrl) return;
+    const a = document.createElement("a");
+    a.href = recapUrl;
+    a.download = recapFileName;
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
   }
 
   const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-10 text-center safe-top safe-bottom anim-fade";
@@ -185,10 +268,18 @@ export default function FinalSummaryPage() {
 
       <div className="h-5" />
       <button
-        onClick={handleShare}
-        className="w-full rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform"
+        onClick={buildRecap}
+        disabled={recapBusy}
+        className="w-full rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-50"
       >
-        Share result
+        {recapBusy ? "Making the recap…" : "Share recap"}
+      </button>
+      {recapError && <p className="text-[12px] text-loss mt-2">{recapError}</p>}
+      <button
+        onClick={handleShare}
+        className="w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-line text-ink-2 bg-surface active:scale-[0.99] transition-transform"
+      >
+        Share link instead
       </button>
       <Link
         to={`/session/${sessionId ?? ""}/host`}
@@ -202,6 +293,43 @@ export default function FinalSummaryPage() {
       >
         Back to sessions
       </button>
+
+      {/* Recap preview — review it, then share with a fresh tap */}
+      {recapUrl && (
+        <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true">
+          <div className="absolute inset-0 bg-graphite/55 anim-fade" onClick={() => setRecapUrl(null)} />
+          <div className="relative w-full max-w-sm bg-ivory rounded-t-[26px] px-5 pt-2.5 pb-7 anim-rise shadow-[0_-8px_40px_rgba(13,13,13,0.3)] max-h-[92vh] overflow-y-auto">
+            <div className="w-9 h-[5px] rounded-full bg-stone/70 mx-auto mb-3.5" />
+            <h4 className="font-serif text-[20px] font-semibold text-graphite text-center">Your recap</h4>
+            <p className="text-[12px] text-warm-gray text-center mt-1 mb-4">
+              Ready for WhatsApp or Stories — the QR opens the live view.
+            </p>
+            <img
+              src={recapUrl}
+              alt="Session recap card"
+              className="w-full rounded-2xl border border-line shadow-[0_1px_2px_rgba(13,13,13,0.06)]"
+            />
+            <button
+              onClick={shareRecap}
+              className="w-full mt-4 rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform"
+            >
+              Share image
+            </button>
+            <button
+              onClick={downloadRecap}
+              className="w-full mt-2.5 rounded-full px-4 py-3 font-semibold text-[14px] border-[1.5px] border-line text-ink-2 bg-surface active:scale-[0.99] transition-transform"
+            >
+              Save to photos
+            </button>
+            <button
+              onClick={() => setRecapUrl(null)}
+              className="w-full text-[13.5px] font-semibold text-warm-gray py-3 mt-1 active:opacity-70"
+            >
+              Done
+            </button>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
