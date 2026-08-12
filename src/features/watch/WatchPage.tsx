@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useState } from "react";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getJoinSession } from "../../lib/supabase/playerJoinQueries";
+import HelpDot from "../shell/HelpDot";
 
 /**
  * The single "enter a code" gateway (`/watch` and `/join`, optionally
@@ -62,7 +63,10 @@ export default function WatchPage() {
         </div>
       </div>
 
-      <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1]">Enter a code.</h1>
+      <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1] flex items-center gap-2">
+        Enter a code.
+        <HelpDot topic="join-code" label="How joining by code works" className="mt-[3px]" />
+      </h1>
       <p className="text-[13.5px] text-ink-2 leading-relaxed mb-6">
         Pop in the session code your host shared — you'll see the live standings and rounds, and from there you can watch, claim your spot, or join as a new player.
       </p>

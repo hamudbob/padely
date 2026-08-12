@@ -1,4 +1,5 @@
 import { ReactNode } from "react";
+import HelpDot from "../shell/HelpDot";
 
 /**
  * The shared visual language for a player's record.
@@ -96,7 +97,27 @@ export function RatingStrip({
     <>
       <div className="flex rounded-2xl bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
         <div className="flex-1 py-3.5 text-center">
-          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray">Rating</p>
+          {/* The "?" rides the label, not the number: it explains what this
+              column means, and putting it on the figure would read as a doubt
+              about the figure itself. */}
+          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray">
+            {/* The dot hangs off the label rather than sitting in the line with
+                it. In flow it would do two things I don't want: grow the line
+                box (dropping this column's number below Tier and Games), and
+                shift "RATING" left of the number it labels, because a centred
+                row centres the pair, not the word. Out of flow it costs the
+                layout nothing. */}
+            <span className="relative inline-block">
+              Rating
+              {/* The wrapper is what's positioned, not the dot: HelpDot carries
+                  `relative` for its own hit-area pseudo-element, and Tailwind
+                  emits .relative after .absolute, so an `absolute` passed in
+                  would quietly lose. */}
+              <span className="absolute left-full top-1/2 -translate-y-1/2 ml-[7px] leading-none">
+                <HelpDot topic="rating" label="How the rating works" />
+              </span>
+            </span>
+          </p>
           <p className="font-mono tnum text-[24px] font-semibold text-graphite leading-none mt-1.5">{Math.round(rating)}</p>
         </div>
         <div className="w-px bg-line" />

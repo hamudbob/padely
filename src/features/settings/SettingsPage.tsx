@@ -344,6 +344,15 @@ export default function SettingsPage() {
         </p>
       </form>
 
+      {/* ── Help ───────────────────────────────────────────────────────── */}
+      <Link to="/about" className={`${card} mb-3 flex items-center justify-between active:bg-surface-2 transition-colors`}>
+        <span>
+          <span className="block text-[14px] font-semibold text-graphite">How Padelier works</span>
+          <span className="block text-[12px] text-warm-gray mt-0.5">Formats, scoring, clubs and your rating</span>
+        </span>
+        <span className="text-stone text-[16px] shrink-0" aria-hidden>›</span>
+      </Link>
+
       {/* ── Account ────────────────────────────────────────────────────── */}
       <div className={`${card} mb-3`}>
         <p className={`${label} mb-2.5`}>Account</p>

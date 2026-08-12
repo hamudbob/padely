@@ -1,5 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
-import { useNavigate, useSearchParams } from "react-router-dom";
+import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getMyProfile, updateMyProfile, uploadAvatar } from "../../lib/supabase/profileQueries";
 import { updateHostPrefs, completeOnboarding } from "../../lib/supabase/auth";
 import { useHostSession } from "../../lib/supabase/useHostSession";
@@ -279,6 +279,8 @@ export default function OnboardingPage() {
                 stored and onboarding is marked done so this never reappears. */}
             <p className="text-[11.5px] text-warm-gray text-center leading-relaxed">
               You can add or change all of this later in your profile.
+              <br />
+              New to Padelier? <Link to="/about" className="font-semibold text-gold-ink">See how it works</Link>.
             </p>
           </div>
         </div>

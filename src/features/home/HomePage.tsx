@@ -94,9 +94,12 @@ export default function HomePage() {
         </div>
 
         <div className="flex-1 min-h-[20px]" />
-        <p className="text-[12px] leading-[1.5] text-warm-gray text-center px-6 py-7">
+        <p className="text-[12px] leading-[1.5] text-warm-gray text-center px-6 pt-7 pb-2">
           Want to host your own games?{" "}
           <Link to="/login" className="font-semibold text-gold-ink">Log in or sign up</Link>.
+        </p>
+        <p className="text-[12px] leading-[1.5] text-warm-gray text-center px-6 pb-7">
+          <Link to="/about" className="font-semibold text-gold-ink">How it all works</Link>
         </p>
       </div>
     </div>

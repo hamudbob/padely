@@ -7,6 +7,7 @@ import OnboardingPage from "./features/auth/OnboardingPage";
 import AppShell from "./features/shell/AppShell";
 import PlayPage from "./features/play/PlayPage";
 import SubShell from "./features/shell/SubShell";
+import AboutPage from "./features/about/AboutPage";
 import SettingsPage from "./features/settings/SettingsPage";
 import ProfilePage from "./features/profile/ProfilePage";
 import RequireHost from "./features/auth/RequireHost";
@@ -71,6 +72,9 @@ export default function App() {
     <Routes>
       <Route path="/" element={<RootRoute />} />
       <Route path="/login" element={<LoginPage />} />
+      {/* Public: it has to work as a link pasted into a group chat by someone
+          who hasn't signed up yet. */}
+      <Route path="/about" element={<AboutPage />} />
       {/* Where Supabase's password-recovery email lands. */}
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       {/* First run after email confirmation: name, photo, side, gender.
