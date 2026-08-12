@@ -321,11 +321,13 @@ export interface Database {
           id: string;
           display_name: string;
           avatar_url: string | null;
+          bio: string | null;
           rating: number;
           rating_deviation: number;
           rating_volatility: number;
           rating_games: number;
           stats: Record<string, unknown> | null;
+          onboarded_at: string | null;
           created_at: string;
           updated_at: string;
         };
@@ -333,6 +335,7 @@ export interface Database {
           id: string;
           display_name?: string;
           avatar_url?: string | null;
+          bio?: string | null;
           rating?: number;
           rating_deviation?: number;
           rating_volatility?: number;
@@ -611,6 +614,14 @@ export interface Database {
       swap_round_players: {
         Args: { p_round_id: string; p_player_a: string; p_player_b: string };
         Returns: undefined; // void
+      };
+      email_exists: {
+        Args: { p_email: string };
+        Returns: unknown; // jsonb { exists: boolean, confirmed: boolean }
+      };
+      complete_onboarding: {
+        Args: Record<string, never>;
+        Returns: undefined;
       };
       prune_notifications: {
         Args: { p_days?: number; p_keep?: number };

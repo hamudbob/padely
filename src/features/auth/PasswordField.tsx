@@ -1,20 +1,6 @@
-import { useState } from "react";
+import { forwardRef, useState } from "react";
 
-/**
- * Password input with a show/hide toggle. The eye sits inside the field so it
- * never competes with the submit button, and it's a real <button> so it can be
- * reached by keyboard — but it's kept out of the tab order (tabIndex -1) so
- * tabbing still runs email → password → submit the way people expect.
- */
-export default function PasswordField({
-  value,
-  onChange,
-  placeholder = "Password",
-  autoComplete = "current-password",
-  minLength,
-  required,
-  id,
-}: {
+interface PasswordFieldProps {
   value: string;
   onChange: (v: string) => void;
   placeholder?: string;
@@ -22,18 +8,48 @@ export default function PasswordField({
   minLength?: number;
   required?: boolean;
   id?: string;
-}) {
+  onFocus?: () => void;
+  onBlur?: () => void;
+  describedBy?: string;
+}
+
+/**
+ * Password input with a show/hide toggle. The eye sits inside the field so it
+ * never competes with the submit button, and it's a real <button> so it can be
+ * reached by keyboard — but it's kept out of the tab order (tabIndex -1) so
+ * tabbing still runs email → password → submit the way people expect.
+ *
+ * Forwards a ref to the input so the email-first flow can move focus straight
+ * into the password the moment the screen morphs — without that, the person has
+ * to tap the field they were just sent to.
+ */
+const PasswordField = forwardRef<HTMLInputElement, PasswordFieldProps>(function PasswordField({
+  value,
+  onChange,
+  placeholder = "Password",
+  autoComplete = "current-password",
+  minLength,
+  required,
+  id,
+  onFocus,
+  onBlur,
+  describedBy,
+}, ref) {
   const [shown, setShown] = useState(false);
 
   return (
     <div className="relative">
       <input
+        ref={ref}
         id={id}
         className="w-full rounded-2xl border border-line bg-surface pl-3.5 pr-12 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
         placeholder={placeholder}
         type={shown ? "text" : "password"}
         value={value}
         onChange={(e) => onChange(e.target.value)}
+        onFocus={onFocus}
+        onBlur={onBlur}
+        aria-describedby={describedBy}
         autoComplete={autoComplete}
         minLength={minLength}
         required={required}
@@ -63,4 +79,6 @@ export default function PasswordField({
       </button>
     </div>
   );
-}
+});
+
+export default PasswordField;

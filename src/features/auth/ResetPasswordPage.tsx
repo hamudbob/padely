@@ -1,8 +1,10 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabase/client";
 import { updatePassword } from "../../lib/supabase/auth";
+import { evaluatePassword } from "../../lib/passwordPolicy";
 import PasswordField from "./PasswordField";
+import PasswordStrength from "./PasswordStrength";
 
 type Stage = "checking" | "ready" | "invalid" | "done";
 
@@ -25,6 +27,13 @@ export default function ResetPasswordPage() {
   const [confirm, setConfirm] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  const [pwFocused, setPwFocused] = useState(false);
+  const [email, setEmail] = useState<string | null>(null);
+
+  // Same rules as signup. The recovery session tells us whose account this is,
+  // so the policy can also reject a password built from their own email.
+  const verdict = useMemo(() => evaluatePassword(password, { email: email ?? undefined }), [password, email]);
+  const showPolicy = pwFocused || password.length > 0;
 
   useEffect(() => {
     let settled = false;
@@ -41,6 +50,7 @@ export default function ResetPasswordPage() {
     const { data: sub } = supabase.auth.onAuthStateChange((event, session) => {
       if (event === "PASSWORD_RECOVERY" || (session && !settled)) {
         settled = true;
+        setEmail(session?.user?.email ?? null);
         setStage("ready");
       }
     });
@@ -51,6 +61,7 @@ export default function ResetPasswordPage() {
       if (settled) return;
       if (data.session) {
         settled = true;
+        setEmail(data.session.user?.email ?? null);
         setStage("ready");
       } else {
         // Give detectSessionInUrl a moment to finish the exchange.
@@ -68,8 +79,9 @@ export default function ResetPasswordPage() {
   async function handleSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
-    if (password.length < 8) {
-      setError("Use at least 8 characters.");
+    if (!verdict.valid) {
+      setPwFocused(true);
+      setError("Please meet all the password requirements below.");
       return;
     }
     if (password !== confirm) {
@@ -149,7 +161,7 @@ export default function ResetPasswordPage() {
     <div className={shell}>
       {wordmark}
       <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1]">Set a new password</h1>
-      <p className="text-[13.5px] text-ink-2 mt-2 mb-5 leading-relaxed">Pick something you'll remember — at least 8 characters.</p>
+      <p className="text-[13.5px] text-ink-2 mt-2 mb-5 leading-relaxed">Pick something you'll remember, and that nobody else would guess.</p>
 
       <form onSubmit={handleSubmit} className="space-y-3">
         <PasswordField
@@ -159,7 +171,13 @@ export default function ResetPasswordPage() {
           autoComplete="new-password"
           minLength={8}
           required
+          onFocus={() => setPwFocused(true)}
+          onBlur={() => setPwFocused(false)}
+          describedBy="password-policy"
         />
+        <div id="password-policy" aria-live="polite">
+          <PasswordStrength verdict={verdict} show={showPolicy} />
+        </div>
         <PasswordField
           value={confirm}
           onChange={setConfirm}
@@ -168,10 +186,13 @@ export default function ResetPasswordPage() {
           minLength={8}
           required
         />
+        {confirm.length > 0 && password !== confirm && (
+          <p className="text-[12px] text-warm-gray -mt-1">Those two don't match yet.</p>
+        )}
         {error && <p className="text-[13px] text-loss">{error}</p>}
         <button
           type="submit"
-          disabled={saving || !password || !confirm}
+          disabled={saving || !verdict.valid || password !== confirm}
           className="w-full flex items-center justify-center rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-50"
         >
           {saving ? "Saving…" : "Save new password"}

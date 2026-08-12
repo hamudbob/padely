@@ -97,3 +97,48 @@ button {
   from { background-position: 200% 0; }
   to { background-position: -200% 0; }
 }
+
+/* --- v2 tab bar -------------------------------------------------------- */
+
+/* Translucent chrome: content scrolls *under* the bar rather than the bar
+   permanently consuming a strip of a phone screen. The bright top edge is the
+   material catching light — it's what keeps the bar reading as a floating
+   surface instead of a flat grey band. */
+.tabbar-material {
+  background: rgba(255, 255, 255, 0.72);
+  -webkit-backdrop-filter: blur(20px) saturate(180%);
+  backdrop-filter: blur(20px) saturate(180%);
+  box-shadow: 0 -1px 0 rgba(255, 255, 255, 0.6) inset;
+}
+
+/* Some people turn translucency off at the OS level, and a blurred bar is
+   exactly the effect they're asking not to see. Go solid, drop the blur. */
+@media (prefers-reduced-transparency: reduce) {
+  .tabbar-material {
+    background: #ffffff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+  }
+}
+
+/* Higher contrast: a defined edge instead of a material. */
+@media (prefers-contrast: more) {
+  .tabbar-material {
+    background: #ffffff;
+    -webkit-backdrop-filter: none;
+    backdrop-filter: none;
+    border-top-color: #0d0d0d;
+  }
+}
+
+/* Keeps the last row of any tab clear of the floating bar. Height is the bar's
+   content plus the home-indicator inset, so it's correct on every phone. */
+.tabbar-gap {
+  padding-bottom: calc(4.25rem + env(safe-area-inset-bottom));
+}
+
+/* Horizontal card decks: native scroll-snap does the momentum, rubber-banding
+   and touch handling the platform already knows how to do — and unlike a
+   hand-rolled pointer handler it never fights the page's vertical scroll. */
+.no-scrollbar{-ms-overflow-style:none;scrollbar-width:none}
+.no-scrollbar::-webkit-scrollbar{display:none}

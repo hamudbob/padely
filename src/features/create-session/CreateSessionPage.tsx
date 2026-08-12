@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import PageHeader from "../shell/PageHeader";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Database } from "../../lib/supabase/database.types";
 import { mulberry32, PlayerFairnessState, PlayerId, RoundResult } from "../../lib/scheduling/types";
@@ -791,13 +792,10 @@ export default function CreateSessionPage() {
 
   return (
     <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
-      <button
-        onClick={() => (step > 0 ? setStep((s) => s - 1) : navigate(-1))}
-        aria-label="Back"
-        className="w-9 h-9 -ml-0.5 mb-3 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform"
-      >
-        ‹
-      </button>
+      <PageHeader
+        className="mb-4"
+        onBack={() => (step > 0 ? setStep((s) => s - 1) : navigate(-1))}
+      />
       <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1] mb-1">Create session</h1>
       <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-4">Step {step + 1} of {STEPS.length}: {STEPS[step]}</p>
 

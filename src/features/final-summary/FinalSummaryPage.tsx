@@ -1,3 +1,4 @@
+import PageHeader from "../shell/PageHeader";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { getSessionStandings, SessionStandings, StandingsRow } from "../../lib/supabase/standingsQueries";
@@ -200,6 +201,12 @@ export default function FinalSummaryPage() {
 
   return (
     <div className={shell}>
+      {/* This screen had no header at all. It's a place, not a task — the
+          scores are already saved and you're here to read and share — so it
+          gets the tab bar from SubShell and a way back like everything else.
+          text-left because `shell` centres everything, which a header must
+          not inherit. */}
+      <PageHeader className="mb-6 text-left" fallback="/play" />
       <p className="text-[10px] font-bold uppercase tracking-[0.22em] text-gold-ink">Session complete</p>
       <h1 className="font-serif text-[34px] font-semibold tracking-tight leading-[1.05] text-graphite mt-2">
         Well played, <span className="italic text-gold-ink">{firstNameOf(winner.playerName)}</span>.

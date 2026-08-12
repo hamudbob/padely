@@ -11,6 +11,8 @@ export interface Profile {
   id: string;
   displayName: string;
   avatarUrl: string | null;
+  /** Short "about me" shown on the profile. Capped at 280 chars in the DB (0036). */
+  bio: string | null;
   /** Persisted Glicko-2 state (global skill; never resets). */
   rating: number;
   ratingDeviation: number;
@@ -18,6 +20,16 @@ export interface Profile {
   ratingGames: number;
   /** Cached insights blob (populated at session end in a later increment). */
   stats: Record<string, unknown> | null;
+  /** Null until the person finishes (or skips) the /welcome setup screen. */
+  onboardedAt: string | null;
+  /**
+   * True ONLY for an account we can positively confirm has never been through
+   * /welcome. Deliberately separate from `onboardedAt === null`, because those
+   * two are not the same thing: if migration 0035 hasn't been applied the column
+   * simply isn't in the response, and reading that absence as "null" would drag
+   * every existing player through first-run setup. Absent column → false.
+   */
+  needsOnboarding: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -26,11 +38,13 @@ interface ProfileRow {
   id: string;
   display_name: string;
   avatar_url: string | null;
+  bio?: string | null;
   rating: number;
   rating_deviation: number;
   rating_volatility: number;
   rating_games: number;
   stats: Record<string, unknown> | null;
+  onboarded_at?: string | null;
   created_at: string;
   updated_at: string;
 }
@@ -40,11 +54,17 @@ function mapProfile(r: ProfileRow): Profile {
     id: r.id,
     displayName: r.display_name,
     avatarUrl: r.avatar_url,
+    bio: r.bio ?? null,
     rating: r.rating,
     ratingDeviation: r.rating_deviation,
     ratingVolatility: r.rating_volatility,
     ratingGames: r.rating_games,
     stats: r.stats,
+    onboardedAt: r.onboarded_at ?? null,
+    // "in" distinguishes "column missing" (migration not run) from "column
+    // present and null" (genuinely a new account). Only the second one is
+    // allowed to trigger onboarding — anything we can't confirm fails safe.
+    needsOnboarding: "onboarded_at" in r && r.onboarded_at === null,
     createdAt: r.created_at,
     updatedAt: r.updated_at,
   };
@@ -78,18 +98,31 @@ export async function getProfiles(userIds: string[]): Promise<Map<string, Profil
  * auth metadata, so existing screens that read `user.user_metadata.name` stay
  * in sync while `profiles` becomes the source of truth.
  */
-export async function updateMyProfile(patch: { displayName?: string; avatarUrl?: string | null }): Promise<Profile> {
+export async function updateMyProfile(patch: {
+  displayName?: string;
+  avatarUrl?: string | null;
+  bio?: string | null;
+}): Promise<Profile> {
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError) throw userError;
   const user = userData.user;
   if (!user) throw new Error("You're not signed in.");
 
-  const row: { id: string; display_name?: string; avatar_url?: string | null; updated_at: string } = {
+  const row: {
+    id: string;
+    display_name?: string;
+    avatar_url?: string | null;
+    bio?: string | null;
+    updated_at: string;
+  } = {
     id: user.id,
     updated_at: new Date().toISOString(),
   };
   if (patch.displayName !== undefined) row.display_name = patch.displayName.trim() || "Player";
   if (patch.avatarUrl !== undefined) row.avatar_url = patch.avatarUrl;
+  // Trimmed, and an empty bio is stored as NULL rather than "" so "no bio" is
+  // one state in the database instead of two.
+  if (patch.bio !== undefined) row.bio = patch.bio?.trim() ? patch.bio.trim().slice(0, 280) : null;
 
   const { data, error } = await supabase.from("profiles").upsert(row).select("*").single();
   if (error) throw error;

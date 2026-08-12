@@ -5,19 +5,55 @@ export interface HostCredentials {
   password: string;
 }
 
+/**
+ * Ask whether an address already has an account (0035). Powers the email-first
+ * screen: one field, then either a log-in or a sign-up.
+ *
+ * Returns null when the lookup can't be trusted — rate-limited, offline, or the
+ * RPC revoked. Callers MUST treat null as "don't know" and fall back to
+ * resolving on submit, never as "no account exists", or a returning user would
+ * be pushed into a sign-up that then fails.
+ */
+export async function emailHasAccount(email: string): Promise<{ exists: boolean; confirmed: boolean } | null> {
+  const { data, error } = await supabase.rpc("email_exists", { p_email: email });
+  if (error || !data || typeof data !== "object") return null;
+  const row = data as { exists?: boolean; confirmed?: boolean };
+  if (typeof row.exists !== "boolean") return null;
+  return { exists: row.exists, confirmed: row.confirmed === true };
+}
+
+/** Marks the caller's onboarding finished, so the router stops sending them to /welcome. */
+export async function completeOnboarding() {
+  const { error } = await supabase.rpc("complete_onboarding");
+  if (error) throw error;
+}
+
+/**
+ * Sign-up result. `alreadyRegistered` is the case Supabase hides: signing up
+ * with an address that already has a confirmed account returns a *fake success*
+ * (so strangers can't probe who's registered) with `identities: []` and no
+ * session. Without checking that array the UI shows "check your email" for a
+ * mail that is never sent, and the person waits forever.
+ */
+export interface SignUpOutcome {
+  needsConfirmation: boolean;
+  alreadyRegistered: boolean;
+}
+
 export async function signUpHost({
   name,
   email,
   password,
   redirectTo,
-}: HostCredentials & { name: string; redirectTo?: string }) {
+}: HostCredentials & { name?: string; redirectTo?: string }) {
   const { data, error } = await supabase.auth.signUp({
     email,
     password,
     // emailRedirectTo is where the confirmation link lands the user AFTER they
     // click it. We point it back at /login?next=… so a brand-new signup returns
     // to the page they were trying to reach (e.g. a shared event) instead of home.
-    options: { data: { name }, emailRedirectTo: redirectTo },
+    // `name` is optional now — it's collected on /welcome after confirmation.
+    options: { data: name ? { name } : {}, emailRedirectTo: redirectTo },
   });
   if (error) throw error;
 
@@ -28,9 +64,23 @@ export async function signUpHost({
   // this insert would silently fail RLS if we tried it now. ensureHostTeam()
   // runs again on first real sign-in instead, once a session truly exists.
   if (data.session && data.user) {
-    await ensureHostTeam(data.user.id, name);
+    await ensureHostTeam(data.user.id, name ?? email.split("@")[0]);
   }
   return data;
+}
+
+/**
+ * signUp, classified. Use this rather than reading `data` at the call site —
+ * the already-registered case is easy to miss and strands the user.
+ */
+export async function signUpAndClassify(
+  args: HostCredentials & { name?: string; redirectTo?: string },
+): Promise<SignUpOutcome> {
+  const data = await signUpHost(args);
+  // An empty identities array means Supabase recognised the address and quietly
+  // did nothing. A genuine new signup always comes back with one identity.
+  const alreadyRegistered = Array.isArray(data.user?.identities) && data.user.identities.length === 0;
+  return { needsConfirmation: !data.session && !alreadyRegistered, alreadyRegistered };
 }
 
 /** Re-send the sign-up confirmation email (for the "didn't get it / check spam" case). */
@@ -50,12 +100,36 @@ export async function ensureHostTeamForCurrentUser() {
   await ensureHostTeam(data.user.id, name);
 }
 
+/**
+ * Thrown ONLY when Supabase rejected the credentials themselves. Everything
+ * else — a network blip, a failed team insert — is a different kind of problem
+ * and must not be mistaken for "wrong password".
+ */
+export class InvalidCredentialsError extends Error {
+  constructor(message: string) {
+    super(message);
+    this.name = "InvalidCredentialsError";
+  }
+}
+
+/** Supabase's wording for a bad email/password pair, across versions. */
+function isCredentialFailure(message: string): boolean {
+  return /invalid login credentials|invalid email or password/i.test(message);
+}
+
 export async function signInHost({ email, password }: HostCredentials) {
   const { data, error } = await supabase.auth.signInWithPassword({ email, password });
-  if (error) throw error;
+  if (error) {
+    if (isCredentialFailure(error.message)) throw new InvalidCredentialsError(error.message);
+    throw error;
+  }
   if (data.user) {
     const fallbackName = (data.user.user_metadata?.name as string | undefined) ?? "My";
-    await ensureHostTeam(data.user.id, fallbackName);
+    // Non-fatal. The sign-in has already succeeded at this point — letting a
+    // team-row hiccup bubble up would make a perfectly good login look like a
+    // failed one, and callers that fall back to sign-up on failure would then
+    // try to create an account the person already has.
+    await ensureHostTeam(data.user.id, fallbackName).catch(() => undefined);
   }
   return data;
 }
@@ -96,6 +170,35 @@ export async function sendPasswordReset(email: string, redirectTo: string) {
 export async function updatePassword(newPassword: string) {
   const { error } = await supabase.auth.updateUser({ password: newPassword });
   if (error) throw error;
+}
+
+/**
+ * Change your password from inside the app (Settings), re-authenticating first.
+ *
+ * Supabase's updateUser({ password }) will happily change the password for any
+ * live session without asking for the old one. That's fine for the recovery
+ * flow, where the email link *is* the proof — but not here: an unattended phone
+ * or a stolen session token would otherwise be enough for someone to lock the
+ * real owner out of their own account. Verifying the current password first
+ * makes the change require something only the owner knows.
+ *
+ * The verification sign-in is against the same account that's already signed
+ * in, so a success is a no-op on the session and a failure changes nothing.
+ */
+export async function changePassword(currentPassword: string, newPassword: string): Promise<void> {
+  const { data: userData } = await supabase.auth.getUser();
+  const email = userData.user?.email;
+  if (!email) throw new Error("You're not signed in.");
+
+  const { error: checkError } = await supabase.auth.signInWithPassword({ email, password: currentPassword });
+  if (checkError) {
+    if (isCredentialFailure(checkError.message)) {
+      throw new InvalidCredentialsError("That's not your current password.");
+    }
+    throw checkError;
+  }
+
+  await updatePassword(newPassword);
 }
 
 export async function signOutHost() {

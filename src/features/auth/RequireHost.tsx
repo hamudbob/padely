@@ -1,7 +1,8 @@
-import { ReactNode } from "react";
-import { Link, useLocation } from "react-router-dom";
+import { ReactNode, useEffect, useState } from "react";
+import { Link, Navigate, useLocation } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
+import { getMyProfile } from "../../lib/supabase/profileQueries";
 
 /**
  * Wrap any page that needs a logged-in host with this. Renders a clear
@@ -12,8 +13,34 @@ import { useBackNav } from "../../lib/useBackNav";
 export default function RequireHost({ children }: { children: ReactNode }) {
   const { user, loading } = useHostSession();
   const location = useLocation();
-  const loginHref = `/login?next=${encodeURIComponent(location.pathname + location.search)}`;
+  const here = location.pathname + location.search;
+  const loginHref = `/login?next=${encodeURIComponent(here)}`;
   const back = useBackNav("/");
+
+  // Onboarding gate. A brand-new account has confirmed its email but has no
+  // name, side or gender yet, so it goes to /welcome first. `null` means "not
+  // checked yet"; `false` covers both "already onboarded" and "the check
+  // failed", because a lookup error must never lock someone out of their app.
+  const [needsOnboarding, setNeedsOnboarding] = useState<boolean | null>(null);
+  const onWelcome = location.pathname === "/welcome"; // never redirect to itself
+
+  useEffect(() => {
+    if (!user || onWelcome) {
+      setNeedsOnboarding(false);
+      return;
+    }
+    let cancelled = false;
+    getMyProfile()
+      .then((p) => {
+        if (!cancelled) setNeedsOnboarding(p?.needsOnboarding ?? false);
+      })
+      .catch(() => {
+        if (!cancelled) setNeedsOnboarding(false);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [user, onWelcome]);
 
   const topBar = (
     <div className="flex items-center justify-between mb-8">
@@ -65,6 +92,20 @@ export default function RequireHost({ children }: { children: ReactNode }) {
         </Link>
       </div>
     );
+  }
+
+  // Hold the page back for the one frame the profile check takes, so a new
+  // account never sees a flash of the app before being sent to /welcome.
+  if (needsOnboarding === null) {
+    return (
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+        <p className="text-sm text-warm-gray">Checking your session…</p>
+      </div>
+    );
+  }
+
+  if (needsOnboarding) {
+    return <Navigate to={`/welcome?next=${encodeURIComponent(here)}`} replace />;
   }
 
   return <>{children}</>;

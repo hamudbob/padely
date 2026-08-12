@@ -1,3 +1,4 @@
+import PageHeader from "../shell/PageHeader";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { getHostLiveSnapshot, HostLiveSnapshot } from "../../lib/supabase/sessionQueries";
@@ -855,57 +856,55 @@ export default function HostLivePage() {
 
   return (
     <div className="mx-auto max-w-sm min-h-screen bg-ivory px-4 safe-top safe-bottom relative anim-fade">
-      {/* Top bar: back + overflow menu */}
-      <div className="flex items-center justify-between mb-3">
-        <Link
-          to="/"
-          aria-label="Back to sessions"
-          className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center shrink-0 active:scale-95 transition-transform"
-        >
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M15 18l-6-6 6-6" />
-          </svg>
-        </Link>
-        {!sessionEnded && (
-          <div className="relative">
-            <button
-              onClick={() => setShowMenu((v) => !v)}
-              aria-label="Session menu"
-              className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center shrink-0 active:scale-95 transition-transform"
-            >
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor">
-                <circle cx="12" cy="5" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="12" cy="19" r="1.7" />
-              </svg>
-            </button>
-            {showMenu && (
-              <>
-                <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} aria-hidden />
-                <div className="absolute right-0 top-11 z-50 w-48 rounded-2xl border border-line bg-surface shadow-[0_20px_44px_-16px_rgba(13,13,13,0.35)] overflow-hidden">
-                  <button
-                    onClick={() => {
-                      setShowMenu(false);
-                      setShowManage(true);
-                    }}
-                    className="w-full text-left px-4 py-3 text-[13px] font-semibold text-ink active:bg-surface-2"
-                  >
-                    Manage session
-                  </button>
-                  <div className="h-px bg-line" />
-                  <button
-                    onClick={() => {
-                      setShowMenu(false);
-                      setShowEndConfirm(true);
-                    }}
-                    className="w-full text-left px-4 py-3 text-[13px] font-semibold text-loss active:bg-surface-2"
-                  >
-                    End session
-                  </button>
-                </div>
-              </>
-            )}
-          </div>
-        )}
-      </div>
+      {/* Top bar: back + wordmark + overflow menu. The wordmark matters more
+          here than anywhere — this screen has no tab bar (it's a task, and
+          leaving mid-round is a hazard), so it's the only thing on screen
+          telling you which app you're in, and it doubles as the way out. */}
+      <PageHeader
+        className="mb-3"
+        fallback="/play"
+        trailing={
+          sessionEnded ? undefined : (
+            <div className="relative">
+              <button
+                onClick={() => setShowMenu((v) => !v)}
+                aria-label="Session menu"
+                className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center shrink-0 active:scale-95 transition-transform"
+              >
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+                  <circle cx="12" cy="5" r="1.7" /><circle cx="12" cy="12" r="1.7" /><circle cx="12" cy="19" r="1.7" />
+                </svg>
+              </button>
+              {showMenu && (
+                <>
+                  <div className="fixed inset-0 z-40" onClick={() => setShowMenu(false)} aria-hidden />
+                  <div className="absolute right-0 top-11 z-50 w-48 rounded-2xl border border-line bg-surface shadow-[0_20px_44px_-16px_rgba(13,13,13,0.35)] overflow-hidden">
+                    <button
+                      onClick={() => {
+                        setShowMenu(false);
+                        setShowManage(true);
+                      }}
+                      className="w-full text-left px-4 py-3 text-[13px] font-semibold text-ink active:bg-surface-2"
+                    >
+                      Manage session
+                    </button>
+                    <div className="h-px bg-line" />
+                    <button
+                      onClick={() => {
+                        setShowMenu(false);
+                        setShowEndConfirm(true);
+                      }}
+                      className="w-full text-left px-4 py-3 text-[13px] font-semibold text-loss active:bg-surface-2"
+                    >
+                      End session
+                    </button>
+                  </div>
+                </>
+              )}
+            </div>
+          )
+        }
+      />
 
       {/* Session title + status */}
       <div className="flex items-center gap-2.5 mb-1">

@@ -26,6 +26,8 @@ export interface PublicProfile {
   id: string;
   displayName: string;
   avatarUrl: string | null;
+  /** Short "about me" (0036). Null until they write one. */
+  bio: string | null;
   rating: number;
   ratingGames: number;
   provisional: boolean;
@@ -53,6 +55,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     id: string;
     display_name: string | null;
     avatar_url: string | null;
+    bio?: string | null;
     rating: number | null;
     rating_games: number | null;
     provisional: boolean | null;
@@ -72,6 +75,9 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     id: d.id,
     displayName: d.display_name ?? "Player",
     avatarUrl: d.avatar_url,
+    // Undefined when 0036 hasn't been applied yet — treated the same as "no bio
+    // written", so an unrun migration just hides the section instead of crashing.
+    bio: d.bio ?? null,
     rating: Math.round(d.rating ?? 1500),
     ratingGames: d.rating_games ?? 0,
     provisional: !!d.provisional,

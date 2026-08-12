@@ -1,9 +1,21 @@
-import { FormEvent, useEffect, useState } from "react";
+import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
-import { signInHost, signUpHost, resendConfirmation, ensureHostTeamForCurrentUser, sendPasswordReset } from "../../lib/supabase/auth";
+import {
+  signInHost,
+  InvalidCredentialsError,
+  signUpAndClassify,
+  resendConfirmation,
+  ensureHostTeamForCurrentUser,
+  sendPasswordReset,
+  emailHasAccount,
+} from "../../lib/supabase/auth";
+import { getMyProfile } from "../../lib/supabase/profileQueries";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
+import { evaluatePassword } from "../../lib/passwordPolicy";
+import { checkEmailShape, checkEmailDomain, domainVerdictError } from "../../lib/emailValidation";
 import PasswordField from "./PasswordField";
+import PasswordStrength from "./PasswordStrength";
 
 /** Only allow returning to an in-app path — never an absolute/external URL
  * (guards against an open-redirect via a crafted ?next=). */
@@ -13,105 +25,211 @@ function safeNext(raw: string | null): string {
 }
 
 /**
- * Matches padel_wireframe.html screen 2. Real Supabase auth wiring (this one
- * is fully wired, not a stub) — host-only per the "minimal scope" decision;
- * players joining by code don't use this screen (see JoinPage).
+ * Unified email-first sign-in / sign-up.
+ *
+ * One field to start. On Continue we ask whether that address already has an
+ * account (email_exists, 0035) and the SAME screen becomes the right form —
+ * no tabs to choose between, no second route, and nobody has to know in advance
+ * whether they're a returning player or a new one.
+ *
+ *   email ──► signin   (password + "Forgot password?")
+ *         ├─► signup   (password + strength meter)
+ *         ├─► pending  (account exists but was never confirmed → resend)
+ *         └─► sent     (new signup, confirmation mail on its way)
+ *
+ * `unknown` is the important branch: if the lookup is rate-limited or offline we
+ * must NOT assume "no account". Instead we ask for a password without claiming
+ * which mode it is, try to sign in, and only fall back to signing up if that
+ * genuinely fails — so a returning user is never pushed into a doomed sign-up.
  */
+type Stage = "email" | "signin" | "signup" | "unknown" | "pending" | "sent" | "forgot";
+
 export default function LoginPage() {
-  const [mode, setMode] = useState<"login" | "signup">("login");
-  const [name, setName] = useState("");
+  // Read ?forgot=1 once, at mount. Doing this in an effect keyed on the search
+  // params would fight the user: useSearchParams hands back a fresh object each
+  // render, so leaving the reset flow would immediately snap back into it while
+  // ?forgot=1 was still in the URL.
+  const [stage, setStage] = useState<Stage>(() =>
+    new URLSearchParams(window.location.search).get("forgot") === "1" ? "forgot" : "email",
+  );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
+  const [emailError, setEmailError] = useState<string | null>(null);
+  const [suggestion, setSuggestion] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
-  // When signup needs email confirmation we show a dedicated "check your email"
-  // screen instead of silently bouncing to the login tab.
-  const [pendingEmail, setPendingEmail] = useState<string | null>(null);
+  const [pwFocused, setPwFocused] = useState(false);
   const [resend, setResend] = useState<"idle" | "sending" | "sent">("idle");
+  // Set only on the fallback path, where we genuinely can't tell whether the
+  // address has an account — it offers the sign-up door without ever guessing.
+  const [offerSignup, setOfferSignup] = useState(false);
+  const [resetState, setResetState] = useState<"idle" | "sending" | "sent">("idle");
+  const pwRef = useRef<HTMLInputElement | null>(null);
+
   const navigate = useNavigate();
   const [params] = useSearchParams();
-  // Forgot-password sub-flow. ?forgot=1 opens it directly, which is where the
-  // expired-link screen sends people.
-  const [forgot, setForgot] = useState(() => params.get("forgot") === "1");
-  const [resetEmail, setResetEmail] = useState("");
-  const [resetState, setResetState] = useState<"idle" | "sending" | "sent">("idle");
-  // Where to land after a successful sign-in. Defaults home, but a shared link
-  // (e.g. an event) sends the visitor here with ?next=/e/… so we return them to
-  // exactly the page they were trying to open.
   const next = safeNext(params.get("next"));
-  // Cancelling out of login returns to the previous page (the event/team they
-  // came from), falling back to Home only when login was opened cold.
   const back = useBackNav("/");
-  // The confirmation link lands the user back here (/login?next=…) with their
-  // session established from the URL. When that session appears, finish the
-  // team auto-creation and forward them to their intended destination.
   const { user } = useHostSession();
   const emailRedirectTo = `${window.location.origin}/login?next=${encodeURIComponent(next)}`;
 
+  const verdict = useMemo(() => evaluatePassword(password, { email }), [password, email]);
+  const isSignup = stage === "signup";
+  const showPolicy = isSignup && (pwFocused || password.length > 0);
+
+  // The confirmation link lands back here with a session already established.
+  // Finish team setup, then send them on.
+  //
+  // The onboarding check has to happen HERE as well as in RequireHost, because
+  // `next` is usually "/" — and Home is a public page with no guard on it. A
+  // brand-new account would otherwise sail straight past /welcome and end up
+  // named after the front of their email address.
   useEffect(() => {
-    if (!user) return;
-    // Don't bounce someone out of the forgot-password flow just because they
-    // still have a live session (e.g. changing a password they half-remember).
-    if (forgot) return;
+    if (!user || stage === "forgot") return;
     let cancelled = false;
-    ensureHostTeamForCurrentUser()
-      .catch(() => {})
-      .finally(() => {
-        if (!cancelled) navigate(next, { replace: true });
-      });
+    (async () => {
+      await ensureHostTeamForCurrentUser().catch(() => undefined);
+      let target = next;
+      try {
+        const profile = await getMyProfile();
+        if (profile?.needsOnboarding) {
+          target = `/welcome?next=${encodeURIComponent(next)}`;
+        }
+      } catch {
+        // Can't tell — send them to the app rather than trapping them here.
+      }
+      if (!cancelled) navigate(target, { replace: true });
+    })();
     return () => {
       cancelled = true;
     };
-  }, [user, next, navigate, forgot]);
+  }, [user, next, navigate, stage]);
 
-  async function handleResend() {
-    if (!pendingEmail) return;
-    setResend("sending");
-    try {
-      await resendConfirmation(pendingEmail, emailRedirectTo);
-      setResend("sent");
-    } catch {
-      setResend("idle");
-    }
-  }
-
-  async function handleSendReset(e: FormEvent) {
-    e.preventDefault();
-    if (!resetEmail.trim()) return;
-    setResetState("sending");
+  /** Move to a password stage and put the cursor in the field. */
+  function goToPassword(target: Stage) {
+    setStage(target);
     setError(null);
-    try {
-      await sendPasswordReset(resetEmail, `${window.location.origin}/reset-password`);
-      setResetState("sent");
-    } catch (err) {
-      // Only real failures (rate limits) reach here — see sendPasswordReset.
-      setError(err instanceof Error ? err.message : "Couldn't send the email just now.");
-      setResetState("idle");
-    }
+    requestAnimationFrame(() => pwRef.current?.focus());
   }
 
-  async function handleSubmit(e: FormEvent) {
+  // ── Step 1: the email ──────────────────────────────────────────────────────
+  async function handleEmailSubmit(e: FormEvent) {
     e.preventDefault();
     setError(null);
     setInfo(null);
+
+    const shape = checkEmailShape(email);
+    setEmail(shape.normalised); // trimmed + lowercased from here on
+    if (shape.error) {
+      setEmailError(shape.error);
+      setSuggestion(null);
+      return;
+    }
+    // A likely typo is offered, not enforced — pressing Continue again accepts
+    // what they typed, so nobody is trapped by a wrong guess.
+    if (shape.suggestion && shape.suggestion !== suggestion) {
+      setSuggestion(shape.suggestion);
+      setEmailError(null);
+      return;
+    }
+    setEmailError(null);
+    setSuggestion(null);
+    setLoading(true);
+
+    try {
+      // Deliverability and existence in parallel — one is a DNS round trip, the
+      // other a database call, and neither depends on the other.
+      const [verdictDomain, account] = await Promise.all([
+        checkEmailDomain(shape.normalised),
+        emailHasAccount(shape.normalised),
+      ]);
+
+      // Only block on a dead domain for a NEW account. A domain that has since
+      // lapsed must never lock an existing user out of their own account.
+      const domainProblem = domainVerdictError(verdictDomain);
+      if (domainProblem && account?.exists !== true) {
+        setEmailError(domainProblem);
+        return;
+      }
+
+      if (account === null) {
+        // Lookup unavailable — ask for a password without claiming which this is.
+        goToPassword("unknown");
+      } else if (!account.exists) {
+        goToPassword("signup");
+      } else if (!account.confirmed) {
+        // The account exists but the link was never clicked. Offering a password
+        // here would just fail; offering a resend is what they actually need.
+        setStage("pending");
+      } else {
+        goToPassword("signin");
+      }
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  // ── Step 2: the password ───────────────────────────────────────────────────
+  async function handlePasswordSubmit(e: FormEvent) {
+    e.preventDefault();
+    setError(null);
+    setInfo(null);
+
+    if (isSignup && !verdict.valid) {
+      setPwFocused(true);
+      setError("Please meet all the password requirements below.");
+      return;
+    }
     setLoading(true);
     try {
-      if (mode === "signup") {
-        const result = await signUpHost({ name, email, password, redirectTo: emailRedirectTo });
-        if (!result.session) {
-          // Email confirmation required — signUp() created the user but did NOT
-          // log them in. Show the dedicated "check your email" screen so they
-          // know exactly what to do (and to look in spam), instead of a silent
-          // bounce to the login tab that later fails mid-wizard.
-          setPendingEmail(email);
-          setLoading(false);
+      if (stage === "signin") {
+        await signInHost({ email, password });
+        navigate(next);
+        return;
+      }
+
+      if (stage === "unknown") {
+        // Try the returning-user path first: it's non-destructive, and a success
+        // means we never needed the lookup at all.
+        try {
+          await signInHost({ email, password });
+          navigate(next);
+          return;
+        } catch (signInErr) {
+          // Anything that isn't a credential rejection is a real error and must
+          // be shown as one — never quietly reinterpreted as "no such account".
+          if (!(signInErr instanceof InvalidCredentialsError)) throw signInErr;
+
+          // The password was wrong, OR there's no account — Supabase gives the
+          // same answer for both, on purpose.
+          //
+          // We deliberately do NOT try to settle it by calling signUp with the
+          // password they just typed. That's what produced the nonsense where
+          // someone logging in with a mistyped password was told their password
+          // was "known to be easy" — a leaked-password rejection from a sign-up
+          // they never asked for. Creating an account is now always something
+          // the person chooses, and it goes through the sign-up form with the
+          // strength meter attached.
+          setStage("signin");
+          setOfferSignup(true);
+          setError("That password didn't work. Try again, reset it below — or create an account if you're new here.");
           return;
         }
-      } else {
-        await signInHost({ email, password });
       }
-      navigate(next);
+
+      // stage === "signup"
+      const out = await signUpAndClassify({ email, password, redirectTo: emailRedirectTo });
+      if (out.alreadyRegistered) {
+        // The lookup said "new" but Supabase says otherwise — e.g. they signed
+        // up in another tab a moment ago. Send them to sign-in with what they
+        // already typed rather than showing a mail that will never arrive.
+        setStage("signin");
+        setError("You already have an account with this email — sign in instead.");
+        return;
+      }
+      if (out.needsConfirmation) setStage("sent");
+      else navigate(next);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Something went wrong.");
     } finally {
@@ -119,14 +237,61 @@ export default function LoginPage() {
     }
   }
 
-  // Shared top bar: back arrow (returns to the previous page) + the Padelier
-  // wordmark, which itself links Home — so there's always both a "back" and a
-  // "home" way out of the auth screens.
+  async function handleResend() {
+    setResend("sending");
+    setError(null);
+    try {
+      await resendConfirmation(email, emailRedirectTo);
+      setResend("sent");
+    } catch (err) {
+      // Surfaced rather than swallowed — a silent reset to "Resend email" looks
+      // like the button is broken when it's really just a rate limit.
+      setResend("idle");
+      setError(err instanceof Error ? err.message : "Couldn't resend just now — give it a minute.");
+    }
+  }
+
+  async function handleSendReset(e: FormEvent) {
+    e.preventDefault();
+    const shape = checkEmailShape(email);
+    if (shape.error) {
+      setEmailError(shape.error);
+      return;
+    }
+    setEmailError(null);
+    setResetState("sending");
+    setError(null);
+    try {
+      await sendPasswordReset(shape.normalised, `${window.location.origin}/reset-password`);
+      setResetState("sent");
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Couldn't send the email just now.");
+      setResetState("idle");
+    }
+  }
+
+  /** Back to a bare email field — the escape hatch from every dead end. */
+  function startOver(keepEmail = true) {
+    setStage("email");
+    setPassword("");
+    setError(null);
+    setInfo(null);
+    setEmailError(null);
+    setSuggestion(null);
+    setResend("idle");
+    setResetState("idle");
+    setOfferSignup(false);
+    if (!keepEmail) setEmail("");
+  }
+
+  // ── Chrome ────────────────────────────────────────────────────────────────
+  const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8 safe-top safe-bottom";
+
   const topBar = (
     <div className="flex items-center justify-between mb-8">
       <button
-        onClick={back}
-        aria-label="Back"
+        onClick={stage === "email" ? back : () => startOver()}
+        aria-label={stage === "email" ? "Back" : "Change email"}
         className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform"
       >
         ‹
@@ -147,37 +312,52 @@ export default function LoginPage() {
     </div>
   );
 
-  // ── Forgot-password screen ─────────────────────────────────────────────────
-  if (forgot) {
+  const mailIcon = (
+    <div className="w-14 h-14 rounded-2xl bg-gold-soft border border-line flex items-center justify-center mb-5">
+      <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#8A6D33" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+        <rect x="3" y="5" width="18" height="14" rx="2" />
+        <path d="M3 7l9 6 9-6" />
+      </svg>
+    </div>
+  );
+
+  const primaryBtn =
+    "w-full flex items-center justify-center rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-40 disabled:active:scale-100";
+  const quietBtn =
+    "w-full rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform disabled:opacity-40";
+  const inputCls =
+    "w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15";
+
+  /** The confirmed email, shown as a quiet row with a way to change it. */
+  const emailRow = (
+    <button
+      type="button"
+      onClick={() => startOver()}
+      className="w-full flex items-center justify-between gap-2 rounded-2xl border border-line bg-surface-2 px-3.5 py-2.5 mb-3 text-left active:scale-[0.995] transition-transform"
+    >
+      <span className="text-[13.5px] text-ink-2 truncate">{email}</span>
+      <span className="text-[12px] font-semibold text-gold-ink shrink-0">Change</span>
+    </button>
+  );
+
+  // ── Forgot password ───────────────────────────────────────────────────────
+  if (stage === "forgot") {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+      <div className={`${shell} anim-fade`}>
         {topBar}
         {resetState === "sent" ? (
           <>
-            <div className="w-14 h-14 rounded-2xl bg-gold-soft border border-line flex items-center justify-center mb-5">
-              <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#8A6D33" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-                <rect x="3" y="5" width="18" height="14" rx="2" />
-                <path d="M3 7l9 6 9-6" />
-              </svg>
-            </div>
+            {mailIcon}
             <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1]">Check your email</h1>
             <p className="text-[13.5px] text-ink-2 mt-3 leading-relaxed">
-              If <span className="font-semibold text-graphite">{resetEmail.trim()}</span> has an account, a reset link is on its way.
+              If <span className="font-semibold text-graphite">{email}</span> has an account, a reset link is on its way.
               Open it and you'll be able to set a new password.
             </p>
             <p className="text-[13px] text-warm-gray mt-3 leading-relaxed">
               Nothing yet? Give it a minute and <span className="font-semibold text-ink-2">check spam</span> — these often land there.
             </p>
-            <button
-              type="button"
-              onClick={() => {
-                setForgot(false);
-                setResetState("idle");
-                setMode("login");
-              }}
-              className="w-full mt-7 rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform"
-            >
-              Back to log in
+            <button type="button" onClick={() => startOver()} className={`${primaryBtn} mt-7`}>
+              Back to sign in
             </button>
           </>
         ) : (
@@ -188,31 +368,28 @@ export default function LoginPage() {
             </p>
             <form onSubmit={handleSendReset} className="space-y-3">
               <input
-                className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+                className={inputCls}
                 placeholder="Email"
                 type="email"
                 autoComplete="email"
-                value={resetEmail}
-                onChange={(e) => setResetEmail(e.target.value)}
+                value={email}
+                onChange={(e) => {
+                  setEmail(e.target.value);
+                  setEmailError(null);
+                }}
                 required
               />
+              {emailError && <p className="text-[13px] text-loss">{emailError}</p>}
               {error && <p className="text-[13px] text-loss">{error}</p>}
-              <button
-                type="submit"
-                disabled={resetState === "sending" || !resetEmail.trim()}
-                className="w-full flex items-center justify-center rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-50"
-              >
+              <button type="submit" disabled={resetState === "sending" || !email.trim()} className={primaryBtn}>
                 {resetState === "sending" ? "Sending…" : "Send reset link"}
               </button>
               <button
                 type="button"
-                onClick={() => {
-                  setForgot(false);
-                  setError(null);
-                }}
+                onClick={() => startOver()}
                 className="w-full text-[13.5px] font-semibold text-warm-gray py-3 active:opacity-70"
               >
-                Back to log in
+                Back to sign in
               </button>
             </form>
           </>
@@ -221,126 +398,185 @@ export default function LoginPage() {
     );
   }
 
-  // ── Check-your-email screen (shown after a signup that needs confirmation) ──
-  if (pendingEmail) {
+  // ── Confirmation sent (new signup) ────────────────────────────────────────
+  if (stage === "sent" || stage === "pending") {
+    const isPending = stage === "pending";
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8 flex flex-col">
+      <div className={`${shell} flex flex-col anim-fade`}>
         {topBar}
-        <div className="w-14 h-14 rounded-2xl bg-gold-soft border border-line flex items-center justify-center mb-5">
-          <svg width="26" height="26" viewBox="0 0 24 24" fill="none" stroke="#8A6D33" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <rect x="3" y="5" width="18" height="14" rx="2" />
-            <path d="M3 7l9 6 9-6" />
-          </svg>
-        </div>
-        <h1 className="font-serif text-[28px] font-medium tracking-tight text-graphite leading-[1.1]">Check your email</h1>
+        {mailIcon}
+        <h1 className="font-serif text-[28px] font-medium tracking-tight text-graphite leading-[1.1]">
+          {isPending ? "You've nearly got an account" : "Check your email"}
+        </h1>
         <p className="text-[14px] text-ink-2 mt-3 leading-relaxed">
-          We sent a confirmation link to <span className="font-semibold text-graphite">{pendingEmail}</span>. Open it to
-          activate your account, then come back and log in.
+          {isPending ? (
+            <>
+              There's already an account for <span className="font-semibold text-graphite">{email}</span>, but the
+              confirmation link was never opened. Send yourself a fresh one and you're in.
+            </>
+          ) : (
+            <>
+              We sent a confirmation link to <span className="font-semibold text-graphite">{email}</span>. Open it to
+              activate your account — you'll set your name and photo straight after.
+            </>
+          )}
         </p>
         <p className="text-[13px] text-warm-gray mt-3 leading-relaxed">
           Can't find it? Give it a minute, and <span className="font-semibold text-ink-2">check your spam / junk folder</span> —
-          confirmation emails sometimes land there.
+          these sometimes land there.
         </p>
+        {error && <p className="text-[13px] text-loss mt-3">{error}</p>}
 
         <div className="mt-auto pt-8 space-y-2.5">
-          <button
-            type="button"
-            onClick={handleResend}
-            disabled={resend !== "idle"}
-            className="w-full rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform disabled:opacity-50"
-          >
+          <button type="button" onClick={handleResend} disabled={resend !== "idle"} className={quietBtn}>
             {resend === "sending" ? "Sending…" : resend === "sent" ? "Sent again ✓" : "Resend email"}
           </button>
-          <button
-            type="button"
-            onClick={() => {
-              setPendingEmail(null);
-              setResend("idle");
-              setMode("login");
-              setInfo("Confirm your email, then log in here.");
-            }}
-            className="w-full rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform"
-          >
-            Back to log in
+          {/* The way out of a typo'd address — without this, the only options
+              are resending to the wrong inbox or giving up entirely. */}
+          <button type="button" onClick={() => startOver(false)} className={primaryBtn}>
+            Use a different email
           </button>
         </div>
       </div>
     );
   }
 
+  // ── Email, then password — same screen ────────────────────────────────────
+  const onEmailStage = stage === "email";
+
+  const heading = onEmailStage
+    ? "Welcome to Padelier."
+    : stage === "signin"
+      ? "Welcome back."
+      : stage === "signup"
+        ? "Let's get you on court."
+        : "One more step.";
+
+  const subheading = onEmailStage
+    ? "Sign in or create an account"
+    : stage === "signin"
+      ? "Enter your password"
+      : stage === "signup"
+        ? "Create a password"
+        : "Enter your password";
+
   return (
-    <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+    <div className={shell}>
       {topBar}
-      <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1]">Welcome back.</h1>
-      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-2 mb-5">Log in / Sign up</p>
-      <div className="flex rounded-full bg-surface border border-line p-1 mb-4">
-        <button
-          type="button"
-          onClick={() => setMode("login")}
-          className={`flex-1 rounded-full py-2 text-[12.5px] font-semibold ${mode === "login" ? "bg-graphite text-ivory" : "text-warm-gray"}`}
-        >
-          Log in
-        </button>
-        <button
-          type="button"
-          onClick={() => setMode("signup")}
-          className={`flex-1 rounded-full py-2 text-[12.5px] font-semibold ${mode === "signup" ? "bg-graphite text-ivory" : "text-warm-gray"}`}
-        >
-          Sign up
-        </button>
-      </div>
-      <form onSubmit={handleSubmit} className="space-y-3">
-        {mode === "signup" && (
+      <h1 key={heading} className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1] anim-fade">
+        {heading}
+      </h1>
+      <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-2 mb-5">{subheading}</p>
+
+      {onEmailStage ? (
+        <form onSubmit={handleEmailSubmit} className="space-y-3">
           <input
-            className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
-            placeholder="Name"
-            value={name}
-            onChange={(e) => setName(e.target.value)}
+            className={inputCls}
+            placeholder="Email"
+            type="email"
+            inputMode="email"
+            autoComplete="email"
+            autoFocus
+            value={email}
+            onChange={(e) => {
+              setEmail(e.target.value);
+              setEmailError(null);
+              setSuggestion(null);
+            }}
             required
           />
-        )}
-        <input
-          className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
-          placeholder="Email"
-          type="email"
-          value={email}
-          onChange={(e) => setEmail(e.target.value)}
-          required
-        />
-        <PasswordField
-          value={password}
-          onChange={setPassword}
-          placeholder="Password"
-          autoComplete={mode === "signup" ? "new-password" : "current-password"}
-          minLength={8}
-          required
-        />
-        {mode === "login" && (
-          <div className="flex justify-end -mt-1">
+          {emailError && <p className="text-[13px] text-loss">{emailError}</p>}
+
+          {suggestion && (
+            <div className="rounded-2xl border border-gold/40 bg-gold-soft/50 px-3.5 py-3 anim-fade">
+              <p className="text-[12.5px] text-ink-2">
+                Did you mean{" "}
+                <button
+                  type="button"
+                  onClick={() => {
+                    setEmail(suggestion);
+                    setSuggestion(null);
+                  }}
+                  className="font-semibold text-gold-ink underline underline-offset-2 active:opacity-70"
+                >
+                  {suggestion}
+                </button>
+                ?
+              </p>
+              <p className="text-[11.5px] text-warm-gray mt-1">Or press Continue to keep what you typed.</p>
+            </div>
+          )}
+
+          <button type="submit" disabled={loading || !email.trim()} className={primaryBtn}>
+            {loading ? "Checking…" : "Continue"}
+          </button>
+        </form>
+      ) : (
+        <form onSubmit={handlePasswordSubmit} className="space-y-3">
+          {emailRow}
+          <PasswordField
+            ref={pwRef}
+            value={password}
+            onChange={setPassword}
+            placeholder={isSignup ? "Create a password" : "Password"}
+            autoComplete={isSignup ? "new-password" : "current-password"}
+            minLength={8}
+            required
+            onFocus={() => setPwFocused(true)}
+            onBlur={() => setPwFocused(false)}
+            describedBy={isSignup ? "password-policy" : undefined}
+          />
+
+          {isSignup && (
+            <div id="password-policy" aria-live="polite">
+              <PasswordStrength verdict={verdict} show={showPolicy} />
+            </div>
+          )}
+
+          {/* Only offered where it makes sense: there's nothing to reset on a
+              brand-new account. */}
+          {stage !== "signup" && (
+            <div className="flex justify-end -mt-1">
+              <button
+                type="button"
+                onClick={() => {
+                  setStage("forgot");
+                  setError(null);
+                  setResetState("idle");
+                }}
+                className="text-[12.5px] font-semibold text-gold-ink active:opacity-70"
+              >
+                Forgot password?
+              </button>
+            </div>
+          )}
+
+          {info && <p className="text-[13px] text-win">{info}</p>}
+          {error && <p className="text-[13px] text-loss">{error}</p>}
+
+          <button
+            type="submit"
+            disabled={loading || !password || (isSignup && !verdict.valid)}
+            className={primaryBtn}
+          >
+            {loading ? "Please wait…" : isSignup ? "Create account" : "Sign in"}
+          </button>
+
+          {offerSignup && stage === "signin" && (
             <button
               type="button"
               onClick={() => {
-                setForgot(true);
-                setResetEmail(email);
-                setError(null);
-                setInfo(null);
+                setOfferSignup(false);
+                setPassword("");
+                goToPassword("signup");
               }}
-              className="text-[12.5px] font-semibold text-gold-ink active:opacity-70"
+              className="w-full text-[13px] font-semibold text-warm-gray py-2.5 active:opacity-70"
             >
-              Forgot password?
+              New here? Create an account instead
             </button>
-          </div>
-        )}
-        {info && <p className="text-[13px] text-win">{info}</p>}
-        {error && <p className="text-[13px] text-loss">{error}</p>}
-        <button
-          type="submit"
-          disabled={loading}
-          className="w-full flex items-center justify-center gap-2 rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-50"
-        >
-          {loading ? "Please wait…" : "Continue"}
-        </button>
-      </form>
+          )}
+        </form>
+      )}
     </div>
   );
 }

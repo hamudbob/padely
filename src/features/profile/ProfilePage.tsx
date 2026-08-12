@@ -1,14 +1,21 @@
 import { useEffect, useRef, useState, ChangeEvent } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
-import { signOutHost, updateHostPrefs } from "../../lib/supabase/auth";
+import TabHeader from "../shell/TabHeader";
+import {
+  RatingStrip,
+  RecordCard,
+  TrendCard,
+  SectionHeading,
+  StatCard,
+  InsightRow,
+  FormResult,
+} from "./playerStats";
 import { listHostSessions, HostSessionSummary } from "../../lib/supabase/hostSessionsQueries";
 import { deleteSession } from "../../lib/supabase/sessionActions";
 import { getMyPlayerSessions, PlayerSession } from "../../lib/supabase/playerJoinQueries";
 import { getMyProfile, updateMyProfile, uploadAvatar, Profile } from "../../lib/supabase/profileQueries";
-import { useBackNav } from "../../lib/useBackNav";
 import { getPlayerInsights, getRatingHistory, PlayerInsights, RatingPoint } from "../../lib/supabase/insightsQueries";
-import { getUnreadCount } from "../../lib/supabase/notificationQueries";
 
 const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
@@ -30,74 +37,21 @@ function formatSessionDate(iso: string): string {
 
 type RoleTab = "host" | "player";
 
-/** Tiny rating-over-time line for the profile header. */
-function RatingSparkline({ points }: { points: number[] }) {
-  if (points.length < 2) return null;
-  const w = 112;
-  const h = 34;
-  const pad = 3;
-  const min = Math.min(...points);
-  const max = Math.max(...points);
-  const span = max - min || 1;
-  const step = (w - pad * 2) / (points.length - 1);
-  const d = points
-    .map((v, i) => {
-      const x = pad + i * step;
-      const y = pad + (h - pad * 2) * (1 - (v - min) / span);
-      return `${i === 0 ? "M" : "L"}${x.toFixed(1)} ${y.toFixed(1)}`;
-    })
-    .join(" ");
-  const rising = points[points.length - 1] >= points[0];
-  return (
-    <svg width={w} height={h} viewBox={`0 0 ${w} ${h}`} className="shrink-0" aria-hidden>
-      <path d={d} fill="none" stroke={rising ? "#2E8B57" : "#D36A4A"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
-    </svg>
-  );
-}
-
-function MiniStat({ label, value }: { label: string; value: string }) {
-  return (
-    <div className="text-center">
-      <b className="block font-mono tnum text-[19px] font-bold text-graphite leading-none">{value}</b>
-      <span className="block text-[9px] font-bold uppercase tracking-[0.08em] text-warm-gray mt-1">{label}</span>
-    </div>
-  );
-}
-
-function InsightRow({ kind, label, who, detail }: { kind: "partner" | "rival"; label: string; who: string; detail: string }) {
-  return (
-    <div className="flex items-center gap-2.5">
-      <span className={`w-[26px] h-[26px] rounded-lg flex items-center justify-center shrink-0 ${kind === "partner" ? "bg-gold-soft text-gold-ink" : "bg-loss/10 text-loss"}`} aria-hidden>
-        {kind === "partner" ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /></svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M13 2 3 14h9l-1 8 10-12h-9z" /></svg>
-        )}
-      </span>
-      <div className="flex-1 min-w-0">
-        <p className="text-[9px] font-bold uppercase tracking-[0.08em] text-warm-gray leading-none">{label}</p>
-        <p className="text-[13px] font-semibold text-graphite truncate mt-0.5">
-          {who} <span className="font-normal text-warm-gray text-[11px]">· {detail}</span>
-        </p>
-      </div>
-    </div>
-  );
-}
-
 /**
- * Padelier dashboard — the personal hub reached from the home avatar. A single
- * place that reflects that one person can host, play, AND spectate: identity +
- * editable name, big-picture stat tiles, quick actions into each role, and a
- * tabbed session list (Host / Player / Spectator).
+ * You — the reflective half of the app, and the second of the three tabs.
  *
- * Only the Host tab has real data today; Player and Spectator show intentional
- * "coming" empty states — the frame Phase 3's player-join and spectator-join
- * features slot straight into.
+ * Reads top to bottom as an answer to "how am I doing?": who you are, then
+ * progress (rating and trend — the question people actually ask), then the
+ * record, then every session you've played, filterable by the role you were in.
+ *
+ * What used to be here and isn't any more: the teams shortcut (Club is a tab
+ * now), the quick-action rows into each role (navigation furniture that only
+ * existed because there was no tab bar), the sign-out footer and the playing
+ * preferences — both of which live behind the gear, in Settings.
  */
 export default function ProfilePage() {
   const { user } = useHostSession();
   const navigate = useNavigate();
-  const back = useBackNav("/");
 
   const [sessions, setSessions] = useState<HostSessionSummary[] | null>(null);
   const [sessionsLoading, setSessionsLoading] = useState(false);
@@ -115,7 +69,6 @@ export default function ProfilePage() {
   const [savingName, setSavingName] = useState(false);
   const [nameError, setNameError] = useState<string | null>(null);
 
-  const [signingOut, setSigningOut] = useState(false);
 
   // Phase 1: profile (avatar + global rating), insights, and rating trend.
   const [profile, setProfile] = useState<Profile | null>(null);
@@ -124,13 +77,6 @@ export default function ProfilePage() {
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
-  const [unread, setUnread] = useState(0);
-
-  // Default playing preferences, saved to the account so a signed-in join needs
-  // zero input. Seeded from metadata (default Right / Male until set).
-  const [prefSide, setPrefSide] = useState<"L" | "R">("R");
-  const [prefGender, setPrefGender] = useState<"M" | "F">("M");
-  const [savingPrefs, setSavingPrefs] = useState(false);
 
   const metadataName = (user?.user_metadata?.name as string | undefined)?.trim() || "";
   const emailPrefix = (user?.email ?? "").split("@")[0];
@@ -140,35 +86,6 @@ export default function ProfilePage() {
     if (!editingName) setDisplayName(metadataName || emailPrefix || "Player");
   }, [metadataName, emailPrefix, editingName]);
 
-  // Seed preference toggles from the account.
-  useEffect(() => {
-    const md = user?.user_metadata ?? {};
-    setPrefSide(md.preferred_side === "L" ? "L" : "R");
-    setPrefGender(md.gender === "F" ? "F" : "M");
-  }, [user]);
-
-  async function saveSide(side: "L" | "R") {
-    setPrefSide(side);
-    setSavingPrefs(true);
-    try {
-      await updateHostPrefs({ preferredSide: side });
-    } catch {
-      /* keep the optimistic value; a retry will re-save */
-    } finally {
-      setSavingPrefs(false);
-    }
-  }
-  async function saveGender(gender: "M" | "F") {
-    setPrefGender(gender);
-    setSavingPrefs(true);
-    try {
-      await updateHostPrefs({ gender });
-    } catch {
-      /* optimistic */
-    } finally {
-      setSavingPrefs(false);
-    }
-  }
 
   function reloadSessions() {
     setSessionsLoading(true);
@@ -244,9 +161,6 @@ export default function ProfilePage() {
     getRatingHistory(user.id)
       .then(setHistory)
       .catch(() => setHistory([]));
-    getUnreadCount()
-      .then(setUnread)
-      .catch(() => setUnread(0));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
@@ -291,15 +205,6 @@ export default function ProfilePage() {
     }
   }
 
-  async function handleSignOut() {
-    setSigningOut(true);
-    try {
-      await signOutHost();
-      navigate("/");
-    } finally {
-      setSigningOut(false);
-    }
-  }
 
   const avatarLetter = (displayName || user?.email || "?").charAt(0).toUpperCase();
 
@@ -314,35 +219,22 @@ export default function ProfilePage() {
   ];
 
   return (
-    <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 safe-top safe-bottom anim-fade">
-      {/* Top bar */}
-      <div className="flex items-center justify-between mb-6">
-        <button
-          onClick={back}
-          aria-label="Back"
-          className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform"
-        >
-          ‹
-        </button>
-        <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
-          Padelier
-          <span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
-        </div>
-        <Link
-          to="/notifications"
-          aria-label="Notifications"
-          className="relative w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center active:scale-95 transition-transform"
-        >
-          <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
-            <path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9" />
-            <path d="M13.73 21a2 2 0 0 1-3.46 0" />
-          </svg>
-          {unread > 0 && (
-            <span className="absolute -top-0.5 -right-0.5 min-w-[16px] h-[16px] px-1 rounded-full bg-loss text-white text-[9px] font-bold flex items-center justify-center">
-              {unread > 9 ? "9+" : unread}
-            </span>
-          )}
-        </Link>
+    <div className="px-5 anim-fade">
+      <div className="-mx-5">
+        <TabHeader
+          trailing={
+            <Link
+              to="/settings"
+              aria-label="Settings"
+              className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center active:scale-95 transition-transform"
+            >
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                <circle cx="12" cy="12" r="3.2" />
+                <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 1 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 1 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.6a1.65 1.65 0 0 0 1-1.51V3a2 2 0 1 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9v0a1.65 1.65 0 0 0 1.51 1H21a2 2 0 1 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+              </svg>
+            </Link>
+          }
+        />
       </div>
 
       {/* Identity */}
@@ -431,161 +323,103 @@ export default function ProfilePage() {
 
       {avatarError && <p className="text-[11px] text-loss -mt-3 mb-3">{avatarError}</p>}
 
-      {/* Level & insights */}
-      <div className="rounded-2xl border border-line bg-surface px-4 py-4 mb-5 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-        <div className="flex items-start justify-between">
-          <div>
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-gold-ink">Rating</p>
-            <div className="flex items-baseline gap-2 mt-1">
-              <span className="font-mono tnum text-[30px] font-bold text-graphite leading-none">
-                {profile ? Math.round(profile.rating) : "—"}
-              </span>
-              {history.length > 0 && Math.round(history[history.length - 1].delta) !== 0 && (
-                <span className={`font-mono tnum text-[12px] font-semibold ${history[history.length - 1].delta > 0 ? "text-win" : "text-loss"}`}>
-                  {history[history.length - 1].delta > 0 ? "+" : ""}
-                  {Math.round(history[history.length - 1].delta)}
-                </span>
-              )}
-            </div>
-            {profile && (profile.ratingDeviation > 110 || profile.ratingGames < 5) && (
-              <span className="inline-block mt-1.5 text-[9px] font-bold uppercase tracking-[0.08em] text-warm-gray bg-surface-2 border border-line px-2 py-[2px] rounded-full">
-                Provisional
-              </span>
-            )}
-          </div>
-          <RatingSparkline points={history.map((h) => h.rating)} />
-        </div>
-
-        {insights && insights.matchesPlayed > 0 ? (
-          <>
-            <div className="grid grid-cols-3 gap-2 mt-4 pt-3.5 border-t border-line">
-              <MiniStat label="Win rate" value={`${Math.round(insights.winRate * 100)}%`} />
-              <MiniStat label="Sessions" value={String(insights.sessionsPlayed)} />
-              <MiniStat label="Games" value={String(insights.matchesPlayed)} />
-            </div>
-            {(insights.bestPartner || insights.nemesis) && (
-              <div className="mt-3.5 space-y-2">
-                {insights.bestPartner && (
-                  <InsightRow kind="partner" label="Best partner" who={insights.bestPartner.label} detail={`${Math.round(insights.bestPartner.winRate * 100)}% together · ${insights.bestPartner.matches} games`} />
-                )}
-                {insights.nemesis && (
-                  <InsightRow kind="rival" label="Toughest rival" who={insights.nemesis.label} detail={`won ${Math.round(insights.nemesis.winRate * 100)}% vs · ${insights.nemesis.matches} games`} />
-                )}
-              </div>
-            )}
-            {insights.form.length > 0 && (
-              <div className="flex items-center gap-2 mt-3.5">
-                <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-warm-gray">Form</span>
-                <div className="flex gap-1">
-                  {insights.form.map((r, i) => (
-                    <span key={i} className={`w-5 h-5 rounded-md text-[10px] font-bold flex items-center justify-center ${r === "W" ? "bg-win/15 text-win" : r === "L" ? "bg-loss/15 text-loss" : "bg-surface-2 text-warm-gray border border-line"}`}>
-                      {r}
-                    </span>
-                  ))}
-                </div>
-              </div>
-            )}
-          </>
+      {/* Bio + join date. The bio is what you choose to say; the join date is
+          passive credibility. They do different jobs, so both stay — one
+          replacing the other would lose something. */}
+      <div className="mb-5">
+        {profile?.bio ? (
+          <p className="text-[13.5px] leading-relaxed text-ink-2">{profile.bio}</p>
         ) : (
-          <p className="text-[12px] text-warm-gray mt-3 pt-3 border-t border-line leading-relaxed">
-            Play a session and your rating, win rate, best partner and form will show up here.
+          <Link to="/settings" className="text-[13px] text-warm-gray active:opacity-70">
+            <span className="text-gold-ink font-semibold">Add a line about yourself</span> — it shows on your public profile.
+          </Link>
+        )}
+        {profile?.createdAt && (
+          <p className="text-[11.5px] text-warm-gray mt-1.5">
+            Playing since{" "}
+            {new Date(profile.createdAt).toLocaleDateString("en-GB", { month: "long", year: "numeric" })}
           </p>
         )}
       </div>
 
-      {/* Big-picture stat tiles */}
-      <div className="grid grid-cols-2 gap-2 mb-5">
-        {tiles.map((t) => (
-          <div key={t.label} className="rounded-2xl border border-line bg-surface py-3 px-2 text-center shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-            <b className="block font-mono tnum text-[24px] font-semibold text-graphite leading-none">{t.value}</b>
+      {/* ── Progress ────────────────────────────────────────────────────
+          Above the record on purpose: "am I improving?" is the question
+          people actually ask, and the tally is the supporting detail.
+          Built from the SAME components as the public profile so the two
+          screens can't drift apart again — see features/profile/playerStats. */}
+      <RatingStrip
+        rating={profile?.rating ?? 1500}
+        provisional={!!profile && (profile.ratingDeviation > 110 || profile.ratingGames < 5)}
+        games={profile?.ratingGames ?? 0}
+      />
+
+      {history.length >= 2 && (
+        <>
+          <SectionHeading>Rating trend</SectionHeading>
+          <TrendCard
+            rating={profile?.rating ?? 1500}
+            points={history.map((h) => h.rating)}
+            lastDelta={history[history.length - 1].delta}
+          />
+        </>
+      )}
+
+      <SectionHeading>Record</SectionHeading>
+      <RecordCard
+        wins={insights?.wins ?? 0}
+        losses={insights?.losses ?? 0}
+        draws={insights?.draws ?? 0}
+        form={(insights?.form ?? []) as FormResult[]}
+        emptyLabel="Play a session and your record shows up here."
+      />
+
+      {/* ── Partners & rivals — YOUR page only ──────────────────────────
+          These name another player and reveal their head-to-head record.
+          Fair to show you about your own games; not something a stranger
+          should read off a shared link about someone who never agreed to
+          it. get_public_profile deliberately doesn't return this data. */}
+      {insights && (insights.bestPartner || insights.nemesis) && (
+        <>
+          <SectionHeading>Partners &amp; rivals</SectionHeading>
+          <StatCard>
+            <div className="space-y-3">
+              {insights.bestPartner && (
+                <InsightRow
+                  kind="partner"
+                  label="Best partner"
+                  who={insights.bestPartner.label}
+                  detail={`${Math.round(insights.bestPartner.winRate * 100)}% together · ${insights.bestPartner.matches} games`}
+                />
+              )}
+              {insights.nemesis && (
+                <InsightRow
+                  kind="rival"
+                  label="Toughest rival"
+                  who={insights.nemesis.label}
+                  detail={`won ${Math.round(insights.nemesis.winRate * 100)}% vs · ${insights.nemesis.matches} games`}
+                />
+              )}
+            </div>
+          </StatCard>
+        </>
+      )}
+
+      {/* ── Sessions ────────────────────────────────────────────────── */}
+      <SectionHeading>Sessions</SectionHeading>
+      <div className="grid grid-cols-3 gap-2">
+        {[
+          { label: "Played", value: insights?.sessionsPlayed ?? playedCount },
+          { label: "Hosted", value: hostedCount },
+          { label: "Games", value: insights?.matchesPlayed ?? 0 },
+        ].map((t) => (
+          <div key={t.label} className="rounded-2xl bg-surface py-3 px-2 text-center shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+            <b className="block font-mono tnum text-[22px] font-semibold text-graphite leading-none">{t.value}</b>
             <span className="block text-[9.5px] font-bold uppercase tracking-[0.09em] text-warm-gray mt-1.5">{t.label}</span>
           </div>
         ))}
       </div>
 
-      {/* Quick actions into each role */}
-      <div className="space-y-2 mb-6">
-        {user?.id && (
-          <Link to={`/u/${user.id}`} className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-            <span className="w-[34px] h-[34px] rounded-[11px] bg-gold-soft text-gold-ink flex items-center justify-center shrink-0">
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><circle cx="12" cy="8" r="4" /><path d="M4 21a8 8 0 0 1 16 0" /></svg>
-            </span>
-            <span className="min-w-0 flex-1">
-              <b className="block text-[13.5px] font-semibold text-graphite">View public profile</b>
-              <span className="block text-[11px] text-warm-gray">What others see — rating &amp; teams</span>
-            </span>
-            <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
-          </Link>
-        )}
-        <Link to="/teams" className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-          <span className="w-[34px] h-[34px] rounded-[11px] bg-gold-soft text-gold-ink flex items-center justify-center shrink-0">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" /><circle cx="9" cy="7" r="4" /><path d="M23 21v-2a4 4 0 0 0-3-3.87" /><path d="M16 3.13a4 4 0 0 1 0 7.75" /></svg>
-          </span>
-          <span className="min-w-0 flex-1">
-            <b className="block text-[13.5px] font-semibold text-graphite">Your teams</b>
-            <span className="block text-[11px] text-warm-gray">Clubs, members &amp; the league</span>
-          </span>
-          <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
-        </Link>
-
-        <Link to="/create" className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-          <span className="w-[34px] h-[34px] rounded-[11px] bg-graphite text-gold flex items-center justify-center shrink-0">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round"><path d="M12 5v14M5 12h14" /></svg>
-          </span>
-          <span className="min-w-0 flex-1">
-            <b className="block text-[13.5px] font-semibold text-graphite">Host a session</b>
-            <span className="block text-[11px] text-warm-gray">Create &amp; run a new one</span>
-          </span>
-          <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
-        </Link>
-
-        <Link to="/watch" className="flex items-center gap-3 rounded-2xl border border-line bg-surface px-3.5 py-3 active:bg-surface-2 transition-colors shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-          <span className="w-[34px] h-[34px] rounded-[11px] bg-gold-soft text-gold-ink flex items-center justify-center shrink-0">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round"><rect x="3" y="3" width="7" height="7" rx="1.5" /><rect x="14" y="3" width="7" height="7" rx="1.5" /><rect x="3" y="14" width="7" height="7" rx="1.5" /><path d="M14 14.5h3.5M14 18h.01M17.5 18v3M20.5 14.5v6.5" /></svg>
-          </span>
-          <span className="min-w-0 flex-1">
-            <b className="block text-[13.5px] font-semibold text-graphite">Enter a code</b>
-            <span className="block text-[11px] text-warm-gray">Watch, claim your spot, or join a game</span>
-          </span>
-          <svg className="w-4 h-4 text-stone shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round"><path d="M9 18l6-6-6-6" /></svg>
-        </Link>
-      </div>
-
-      {/* Playing preferences — used to auto-fill a signed-in join */}
-      <div className="flex items-center justify-between mb-2">
-        <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray">Playing preferences</p>
-        {savingPrefs && <span className="text-[10px] text-warm-gray">saving…</span>}
-      </div>
-      <div className="flex gap-2 mb-6">
-        <div className="flex-1">
-          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-warm-gray mb-1.5">Side</p>
-          <div className="flex gap-1 rounded-2xl border border-line bg-surface p-1">
-            {(["L", "R"] as const).map((s) => (
-              <button
-                key={s}
-                onClick={() => saveSide(s)}
-                className={`flex-1 rounded-xl px-2 py-2 text-[13px] font-semibold transition-colors ${prefSide === s ? "bg-graphite text-ivory" : "text-ink-2 active:bg-surface-2"}`}
-              >
-                {s === "L" ? "Left" : "Right"}
-              </button>
-            ))}
-          </div>
-        </div>
-        <div className="flex-1">
-          <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-warm-gray mb-1.5">Gender</p>
-          <div className="flex gap-1 rounded-2xl border border-line bg-surface p-1">
-            {(["M", "F"] as const).map((g) => (
-              <button
-                key={g}
-                onClick={() => saveGender(g)}
-                className={`flex-1 rounded-xl px-2 py-2 text-[13px] font-semibold transition-colors ${prefGender === g ? "bg-graphite text-ivory" : "text-ink-2 active:bg-surface-2"}`}
-              >
-                {g === "M" ? "Male" : "Female"}
-              </button>
-            ))}
-          </div>
-        </div>
-      </div>
+      <div className="mt-7" />
 
       {/* Role tabs + session list */}
       <div className="flex gap-1 mb-3 rounded-2xl border border-line bg-surface p-1">
@@ -741,17 +575,6 @@ export default function ProfilePage() {
           </div>
         ))}
 
-      {/* Account */}
-      <div className="flex items-center justify-between border-t border-line mt-6 pt-4">
-        <p className="text-[12px] text-warm-gray truncate">Signed in as {user?.email}</p>
-        <button
-          onClick={handleSignOut}
-          disabled={signingOut}
-          className="shrink-0 ml-2 text-[12px] font-semibold text-ink-2 border border-line rounded-full px-3 py-1.5 bg-surface active:bg-surface-2 disabled:opacity-50"
-        >
-          {signingOut ? "…" : "Log out"}
-        </button>
-      </div>
     </div>
   );
 }
