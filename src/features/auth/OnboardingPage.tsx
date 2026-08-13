@@ -161,7 +161,7 @@ export default function OnboardingPage() {
           </p>
 
           <input
-            className="w-full rounded-2xl border border-line bg-surface px-3.5 py-3 text-ink text-[15px] placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+            className="w-full rounded-2xl border border-line bg-surface px-3.5 py-3 text-ink text-[16px] placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
             placeholder="Your name"
             value={name}
             onChange={(e) => {

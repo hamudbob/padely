@@ -233,7 +233,7 @@ export function RatingSparkline({ points, width = 112, height = 34 }: { points: 
   const rising = points[points.length - 1] >= points[0];
   return (
     <svg width={width} height={height} viewBox={`0 0 ${width} ${height}`} className="shrink-0" aria-hidden>
-      <path d={d} fill="none" stroke={rising ? "#2E8B57" : "#D36A4A"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
+      <path d={d} fill="none" stroke={rising ? "#27754A" : "#AE4A2A"} strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" />
     </svg>
   );
 }

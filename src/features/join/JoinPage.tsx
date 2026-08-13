@@ -246,7 +246,7 @@ export default function JoinPage() {
               onChange={(e) => setCode(e.target.value.replace(/\D/g, "").slice(0, 6))}
               placeholder="000000"
               aria-label="6-digit join code"
-              className="w-full rounded-2xl border border-line bg-surface px-4 py-4 text-center font-mono tnum text-[28px] tracking-[0.3em] text-graphite placeholder:text-stone focus:outline-none focus:ring-2 focus:ring-graphite/15"
+              className="w-full rounded-2xl border border-line bg-surface px-4 py-4 text-center font-mono tnum text-[28px] tracking-[0.3em] text-graphite placeholder:text-stone focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
             />
             {error && <p className="text-[13px] text-loss">{error}</p>}
             <button
@@ -315,7 +315,7 @@ export default function JoinPage() {
                 onChange={(e) => setName(e.target.value)}
                 maxLength={40}
                 placeholder="e.g. Hamud"
-                className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+                className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
               />
             </div>
 
@@ -371,7 +371,7 @@ export default function JoinPage() {
                   onChange={(e) => setEmail(e.target.value)}
                   onBlur={handleEmailBlur}
                   placeholder="you@email.com"
-                  className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+                  className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
                 />
                 <p className="text-[11px] text-warm-gray mt-1.5">We'll remember your details next time — and your history is saved if you ever make an account.</p>
               </div>

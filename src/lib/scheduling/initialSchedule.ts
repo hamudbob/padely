@@ -15,6 +15,43 @@ export type ScheduleFormat =
   | "fixed_partner"
   | "side_americano";
 
+/**
+ * Does this format write its WHOLE schedule at session start, or just round 1?
+ *
+ * This is the companion to `buildInitialSchedule` below and must always agree
+ * with it: return true exactly when that function returns every round. The live
+ * session screen uses it for two decisions that look unrelated and aren't —
+ * whether any round can be scored (not just the newest), and whether the
+ * Refresh/Randomize actions make sense (they don't, on a fixed schedule).
+ *
+ * It lives here, next to the generator, because it used to be duplicated as two
+ * inline boolean expressions in HostLivePage. Fixed Position was added to the
+ * generator and to the create wizard but not to those two copies, and the
+ * result was a format where six rounds out of seven silently refused to open
+ * the score picker. If you add a format, add it here and nowhere else.
+ *
+ * `fixed_partner` with no style is a legacy pre-rework row; it pre-generated.
+ */
+export function isFullyPreGeneratedFormat(
+  format: string,
+  // Deliberately widened to `string | null`: the caller reads this straight off
+  // a database row, and a stored value that isn't one of the two known styles
+  // should fall through to the format check rather than fail to compile.
+  fixedPartnerStyle?: string | null,
+): boolean {
+  // Locked partners answer this on their own terms: round-robin lays the whole
+  // fixture list out at once, rank-based draws each round from the standings.
+  if (fixedPartnerStyle === "round_robin") return true;
+  if (fixedPartnerStyle === "rank_based") return false;
+  return (
+    format === "americano" ||
+    format === "team_sparring" ||
+    format === "mix_americano" ||
+    format === "side_americano" ||
+    format === "fixed_partner"
+  );
+}
+
 export interface SchedulePlayer {
   id: string;
   gender: Gender;

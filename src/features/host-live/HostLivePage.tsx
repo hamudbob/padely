@@ -10,6 +10,7 @@ import { renameCourt, setCourtAvailability, addLatePlayer, markPlayerLeft, resto
 import { listJoinRequests, confirmJoinRequest, rejectJoinRequest, JoinRequest } from "../../lib/supabase/joinRequestQueries";
 import { getPendingClaims, respondPlayerClaim, PendingClaim } from "../../lib/supabase/claimQueries";
 import { isAutoFillFormat, scoreRangeForFormat, validateAndDeriveScore, ScoringFormat } from "../../lib/scoring/formats";
+import { isFullyPreGeneratedFormat } from "../../lib/scheduling/initialSchedule";
 import {
   enqueueScore,
   subscribeSyncQueue,
@@ -316,12 +317,7 @@ export default function HostLivePage() {
   useEffect(() => {
     if (hasAutoPositioned) return;
     if (!snapshot || !roundHistory) return;
-    const isFullyPreGenerated =
-      snapshot.session.format === "americano" ||
-      snapshot.session.format === "team_sparring" ||
-      snapshot.session.format === "mix_americano" ||
-      snapshot.session.fixedPartnerStyle === "round_robin" ||
-      snapshot.session.format === "fixed_partner"; // legacy pre-rework rows
+    const isFullyPreGenerated = isFullyPreGeneratedFormat(snapshot.session.format, snapshot.session.fixedPartnerStyle);
     if (!isFullyPreGenerated) {
       setHasAutoPositioned(true);
       return;
@@ -368,12 +364,11 @@ export default function HostLivePage() {
   // and Fixed Partner's rank_based flavor (Mexicano base) stay round-by-round
   // — their pairing needs live standings that don't exist until a round is
   // scored.
-  const fullyPreGenerated =
-    snapshot.session.format === "americano" ||
-    snapshot.session.format === "team_sparring" ||
-    snapshot.session.format === "mix_americano" ||
-    snapshot.session.fixedPartnerStyle === "round_robin" ||
-    snapshot.session.format === "fixed_partner"; // legacy pre-rework rows
+  // Single source of truth — see initialSchedule.ts. Adding a format to the
+  // scheduler used to mean remembering to add it here too, in two places; it
+  // didn't happen for Fixed Position, and every round but the last silently
+  // refused to open the score picker.
+  const fullyPreGenerated = isFullyPreGeneratedFormat(snapshot.session.format, snapshot.session.fixedPartnerStyle);
   const isTeamSparring = snapshot.session.format === "team_sparring";
   // Manage menu only — Fixed Partner blocks adding a player mid-session,
   // since a locked-pairs format has nobody for a newcomer to be paired with.
@@ -1538,7 +1533,7 @@ export default function HostLivePage() {
                         const value = e.target.value.trim();
                         if (value && value !== c.name) handleRenameCourt(c.id, value);
                       }}
-                      className="flex-1 min-w-0 text-sm font-semibold bg-transparent border-none focus:outline-none text-ink"
+                      className="flex-1 min-w-0 text-[16px] font-semibold bg-transparent border-none focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55 rounded-lg px-1 text-ink"
                     />
                     <svg className="w-3.5 h-3.5 text-warm-gray shrink-0" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
                       <path d="M12 20h9" />
@@ -1569,7 +1564,7 @@ export default function HostLivePage() {
             ) : (
               <div className="flex gap-2 mb-3">
                 <input
-                  className="flex-1 min-w-0 rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-sm text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+                  className="flex-1 min-w-0 rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
                   placeholder="New player name…"
                   value={newPlayerName}
                   onChange={(e) => setNewPlayerName(e.target.value)}

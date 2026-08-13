@@ -340,7 +340,7 @@ export default function PlayPage() {
                 { n: "03", t: "Rank", s: "A live leaderboard, right to the last game." },
               ].map((step) => (
                 <div key={step.n} className="flex gap-[15px] items-baseline">
-                  <span className="font-mono font-semibold text-[15px] text-gold min-w-[20px]">{step.n}</span>
+                  <span className="font-mono font-semibold text-[15px] text-gold-ink min-w-[20px]">{step.n}</span>
                   <div>
                     <div className="font-serif font-semibold text-base text-ink">{step.t}</div>
                     <div className="text-[13px] leading-[1.45] text-warm-gray">{step.s}</div>

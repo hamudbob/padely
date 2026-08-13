@@ -814,7 +814,7 @@ export default function CreateSessionPage() {
         <div className="space-y-2">
           <label className="block text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray">Session name</label>
           <input
-            className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+            className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder="Tuesday Night Padel"
@@ -1195,7 +1195,7 @@ function PlayersStep({
       {mode === "single" ? (
         <div className="flex gap-2">
           <input
-            className="flex-1 rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-sm text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+            className="flex-1 rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
             placeholder="Player name…"
             value={singleName}
             onChange={(e) => setSingleName(e.target.value)}
@@ -1219,7 +1219,7 @@ function PlayersStep({
       ) : (
         <div className="space-y-2">
           <textarea
-            className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-sm text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+            className="w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
             rows={5}
             placeholder={"One name per line\nOscar\nPriya\nQuinn"}
             value={bulkText}

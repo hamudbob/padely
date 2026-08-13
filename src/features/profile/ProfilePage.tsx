@@ -274,7 +274,7 @@ export default function ProfilePage() {
                     if (e.key === "Escape") setEditingName(false);
                   }}
                   maxLength={40}
-                  className="flex-1 min-w-0 rounded-xl border border-line bg-surface px-3 py-1.5 text-[16px] font-semibold text-ink focus:outline-none focus:ring-2 focus:ring-graphite/15"
+                  className="flex-1 min-w-0 rounded-xl border border-line bg-surface px-3 py-1.5 text-[16px] font-semibold text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
                 />
                 <button
                   onClick={handleSaveName}

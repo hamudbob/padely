@@ -19,15 +19,22 @@ export default {
         gold: {
           DEFAULT: "#BFA36A", // signature accent — premium / achievement / the ball. Sparingly.
           soft: "#F7F0E3",
-          ink: "#8A6D33",
+          // Darkened from #8A6D33: that value read 4.47:1 on ivory and 4.29:1
+          // on gold-soft — under AA on the app's own backgrounds, across 100+
+          // usages. #836529 clears it everywhere without changing the hue.
+          ink: "#836529",
         },
         "court-lime": "#C4E24B", // live energy only — a match in progress / live state
         win: {
-          DEFAULT: "#2E8B57", // success — a win recorded, a score confirmed (emerald)
+          // Was #2E8B57 (3.90:1 on ivory). Same emerald, dark enough to read.
+          DEFAULT: "#27754A", // success — a win recorded, a score confirmed (emerald)
           soft: "#E8F3EC",
         },
         loss: {
-          DEFAULT: "#D36A4A", // error & loss — warm terracotta, never alarming red
+          // Was #D36A4A: 3.25:1 on ivory and 3.12:1 on loss-soft, which made
+          // error messages the least legible text in the app. Still warm
+          // terracotta, never alarming red — just readable.
+          DEFAULT: "#AE4A2A", // error & loss — warm terracotta, never alarming red
           soft: "#FBEEE9",
         },
         // ---- Legacy tokens kept so not-yet-ported screens still compile and look

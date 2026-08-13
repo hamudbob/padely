@@ -147,7 +147,7 @@ export default function TeamsPage() {
             }}
             placeholder="Club name or code"
             aria-label="Search for a club by name, or enter a club code"
-            className="w-full rounded-2xl border border-line bg-surface pl-10 pr-10 py-3 text-[14px] text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+            className="w-full rounded-2xl border border-line bg-surface pl-10 pr-10 py-3 text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
           />
           {isSearching && (
             <button
@@ -289,7 +289,7 @@ export default function TeamsPage() {
                   maxLength={60}
                   autoFocus
                   placeholder="Club name"
-                  className="flex-1 min-w-0 rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-[14px] text-ink focus:outline-none focus:ring-2 focus:ring-graphite/15"
+                  className="flex-1 min-w-0 rounded-xl border border-line bg-surface-2 px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
                 />
                 <button
                   type="submit"

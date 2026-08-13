@@ -53,7 +53,7 @@ export default function MembersPage() {
 
       <div className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3.5 py-2.5 mt-4">
         <span className="text-warm-gray text-[15px]">⌕</span>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search members" className="flex-1 bg-transparent text-[14px] text-ink placeholder:text-warm-gray focus:outline-none" />
+        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search members" className="flex-1 bg-transparent text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55 rounded-lg px-1" />
       </div>
 
       {admins.length > 0 && (

@@ -564,6 +564,48 @@ export async function deleteCurrentRound(sessionId: string): Promise<void> {
 }
 
 /**
+ * Throws — without touching anything — if redrawing the latest round would
+ * leave the session unable to build a replacement.
+ *
+ * Mirrors the two conditions `generateNextRound` fails on once the round is
+ * already gone: the round it will treat as "the one just completed" must be
+ * fully scored, and there must be enough active players and available courts
+ * to fill at least one court.
+ */
+async function assertRegenerable(sessionId: string): Promise<void> {
+  const [roundsResult, courtsResult, playersResult] = await Promise.all([
+    supabase.from("rounds").select("id, sequence").eq("session_id", sessionId).order("sequence", { ascending: true }),
+    supabase.from("courts").select("id").eq("session_id", sessionId).eq("available", true),
+    supabase.from("players").select("id").eq("session_id", sessionId).eq("status", "active"),
+  ]);
+  if (roundsResult.error) throw roundsResult.error;
+  if (courtsResult.error) throw courtsResult.error;
+  if (playersResult.error) throw playersResult.error;
+
+  if ((courtsResult.data ?? []).length === 0) {
+    throw new Error("No courts are available — turn at least one back on before redrawing this round.");
+  }
+  if ((playersResult.data ?? []).length < 4) {
+    throw new Error("A round needs at least 4 active players. Add someone back before redrawing.");
+  }
+
+  const rounds = roundsResult.data ?? [];
+  const prev = rounds[rounds.length - 2];
+  if (!prev) return; // loadLatestTwoRounds already rejected a single-round session
+  const { data: prevMatches, error: matchError } = await supabase
+    .from("matches")
+    .select("id, status")
+    .eq("round_id", prev.id);
+  if (matchError) throw matchError;
+  const prevList = prevMatches ?? [];
+  if (prevList.length === 0 || prevList.some((m) => m.status !== "final")) {
+    throw new Error(
+      "The round before this one isn't fully scored yet, so there's nothing to redraw from. Score it first.",
+    );
+  }
+}
+
+/**
  * Redraws the current (latest) round in place: deletes it, then regenerates a
  * round at the same sequence from the CURRENT active roster and courts.
  *
@@ -580,6 +622,12 @@ export async function deleteCurrentRound(sessionId: string): Promise<void> {
  */
 export async function regenerateCurrentRound(sessionId: string, opts: { randomize: boolean }): Promise<GenerateNextRoundResult> {
   const { latestId } = await loadLatestTwoRounds(sessionId);
+  // Check BEFORE deleting anything. This used to delete first and regenerate
+  // second, so any condition that made generation throw — the previous round
+  // not fully scored, or the active roster having dropped below a full court —
+  // left the round deleted and nothing to put in its place. One tap, one round
+  // gone, permanently, with only an error toast to show for it.
+  await assertRegenerable(sessionId);
   const { error: deleteError } = await supabase.from("rounds").delete().eq("id", latestId);
   if (deleteError) throw deleteError;
   // A large, non-negative integer seed keeps mulberry32 well-distributed. Vary

@@ -235,7 +235,7 @@ export default function SessionJoinPanel({ publicToken, joinCode }: { publicToke
             onChange={(e) => setGName(e.target.value)}
             maxLength={40}
             placeholder="Your name"
-            className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[13px] text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+            className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
           />
           <div className="flex gap-2">
             <div className="flex-1 flex gap-1 rounded-xl border border-line bg-ivory p-1">
@@ -268,7 +268,7 @@ export default function SessionJoinPanel({ publicToken, joinCode }: { publicToke
             onChange={(e) => setGEmail(e.target.value)}
             type="email"
             placeholder="Email (optional)"
-            className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[13px] text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+            className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
           />
           {err && <p className="text-[11.5px] text-loss">{err}</p>}
           <button type="submit" disabled={busy === "guest" || !gName.trim()} className="w-full rounded-xl bg-graphite text-ivory px-3 py-2.5 text-[12.5px] font-semibold active:scale-[0.97] transition-transform disabled:opacity-40">

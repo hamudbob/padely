@@ -156,14 +156,25 @@ export async function getClubLeague(clubId: string, reference: Date = new Date()
       supabase.from("club_members").select("user_id").eq("club_id", clubId),
       // Which of this club's sessions count toward the league — the host's
       // per-session "Count for league" choice (replaces the old N-player floor).
-      supabase.from("sessions").select("id").eq("club_id", clubId).eq("counts_for_league", true),
+      //
+      // Through the RPC, NOT a direct read of `sessions`. 0021 dropped the
+      // members' SELECT policy on that table, so a direct read returns zero
+      // rows for anyone who didn't host — silently, because RLS denies by
+      // returning nothing rather than erroring. Every member but the host saw
+      // an empty league table. get_club_sessions is the members' door in, and
+      // 0038 taught it to return counts_for_league.
+      supabase.rpc("get_club_sessions", { p_club_id: clubId }),
     ]);
   if (resultsError) throw resultsError;
   if (memberError) throw memberError;
   if (countingError) throw countingError;
 
   const memberSet = new Set((memberRows ?? []).map((m) => m.user_id));
-  const countingSet = new Set((countingRows ?? []).map((s) => s.id));
+  const countingSet = new Set(
+    ((countingRows ?? []) as { id: string; counts_for_league: boolean | null }[])
+      .filter((s) => s.counts_for_league !== false)
+      .map((s) => s.id),
+  );
 
   // Session-level turnout tallies for the empty-state help.
   const qualifyingSessionIds = new Set<string>();

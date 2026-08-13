@@ -326,7 +326,7 @@ export default function LoginPage() {
   const quietBtn =
     "w-full rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform disabled:opacity-40";
   const inputCls =
-    "w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15";
+    "w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55";
 
   /** The confirmed email, shown as a quiet row with a way to change it. */
   const emailRow = (

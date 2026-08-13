@@ -469,7 +469,7 @@ function InviteSheet(props: {
         {isAdmin && props.emailMode && (
           <form onSubmit={props.onInvite} className="rounded-2xl bg-surface px-4 py-3.5 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
             <div className="flex gap-2">
-              <input value={props.inviteEmail} onChange={(e) => props.setInviteEmail(e.target.value)} type="email" placeholder="player@email.com" className="flex-1 min-w-0 rounded-xl border border-line bg-ivory px-3 py-2.5 text-[14px] text-ink focus:outline-none focus:ring-2 focus:ring-graphite/15" />
+              <input value={props.inviteEmail} onChange={(e) => props.setInviteEmail(e.target.value)} type="email" placeholder="player@email.com" className="flex-1 min-w-0 rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
               <button type="submit" disabled={props.inviting || !props.inviteEmail.trim()} className="shrink-0 rounded-xl bg-graphite text-ivory text-[13px] font-semibold px-4 disabled:opacity-40">{props.inviting ? "…" : "Send"}</button>
             </div>
             {props.inviteMsg && <p className="text-[11.5px] text-ink-2 mt-2">{props.inviteMsg}</p>}
@@ -577,9 +577,9 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
 
       {isAdmin && showForm && (
         <form onSubmit={submit} className="rounded-2xl bg-surface p-3.5 mb-2.5 space-y-2 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Session title" maxLength={80} className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[14px] text-ink focus:outline-none focus:ring-2 focus:ring-graphite/15" />
-          <input value={when} onChange={(e) => setWhen(e.target.value)} type="datetime-local" className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[14px] text-ink focus:outline-none focus:ring-2 focus:ring-graphite/15" />
-          <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location (optional)" maxLength={120} className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[14px] text-ink focus:outline-none focus:ring-2 focus:ring-graphite/15" />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Session title" maxLength={80} className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
+          <input value={when} onChange={(e) => setWhen(e.target.value)} type="datetime-local" className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
+          <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location (optional)" maxLength={120} className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
           {err && <p className="text-[11px] text-loss">{err}</p>}
           <button type="submit" disabled={busy || !title.trim() || !when} className="w-full rounded-full bg-graphite text-ivory text-[13px] font-semibold py-2.5 disabled:opacity-40">
             {busy ? "Scheduling…" : "Schedule session"}

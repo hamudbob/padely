@@ -581,7 +581,8 @@ export interface Database {
       };
       get_club_sessions: {
         Args: { p_club_id: string };
-        Returns: unknown; // setof { id, name, status, format, created_at, started_at, ended_at, public_token, created_by }
+        // 0038 added counts_for_league — the league board reads it through here.
+        Returns: unknown; // setof { id, name, status, format, created_at, started_at, ended_at, public_token, created_by, counts_for_league }
       };
       search_clubs: {
         Args: { p_query: string };

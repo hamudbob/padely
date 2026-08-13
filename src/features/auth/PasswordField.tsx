@@ -42,7 +42,7 @@ const PasswordField = forwardRef<HTMLInputElement, PasswordFieldProps>(function 
       <input
         ref={ref}
         id={id}
-        className="w-full rounded-2xl border border-line bg-surface pl-3.5 pr-12 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15"
+        className="w-full rounded-2xl border border-line bg-surface pl-3.5 pr-12 py-2.5 text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
         placeholder={placeholder}
         type={shown ? "text" : "password"}
         value={value}

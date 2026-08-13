@@ -216,7 +216,7 @@ export default function SettingsPage() {
   const card = "rounded-2xl border border-line bg-surface px-4 py-4";
   const label = "text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray";
   const input =
-    "w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus:ring-2 focus:ring-graphite/15";
+    "w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55";
   const primaryBtn =
     "w-full flex items-center justify-center rounded-full px-4 py-3 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-40 disabled:active:scale-100";
 

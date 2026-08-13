@@ -2,7 +2,13 @@
 <html lang="en">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no, viewport-fit=cover" />
+    <!-- No maximum-scale / user-scalable: blocking pinch-zoom fails WCAG 1.4.4,
+         and in the installed PWA iOS honours it absolutely, so a low-vision
+         user has no way to enlarge anything. The reason it was there — iOS
+         zooming the page when you focus a small input — is handled properly
+         instead, by giving every input a 16px font size. viewport-fit=cover
+         stays: it's what makes env(safe-area-inset-*) work. -->
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover" />
     <meta name="theme-color" content="#F7F5F2" />
     <title>Padelier</title>
     <!-- Installable app (PWA): home-screen icon + fullscreen standalone launch. No service worker (kept off to avoid stale-cache bugs). -->
