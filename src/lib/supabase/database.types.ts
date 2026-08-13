@@ -623,6 +623,11 @@ export interface Database {
         Args: Record<string, never>;
         Returns: undefined;
       };
+      /** 0037 — erases the caller's identity, keeps match rows anonymised. */
+      delete_my_account: {
+        Args: Record<string, never>;
+        Returns: undefined; // void
+      };
       prune_notifications: {
         Args: { p_days?: number; p_keep?: number };
         Returns: number; // rows removed for the calling user

@@ -8,6 +8,8 @@ import AppShell from "./features/shell/AppShell";
 import PlayPage from "./features/play/PlayPage";
 import SubShell from "./features/shell/SubShell";
 import AboutPage from "./features/about/AboutPage";
+import LegalPage from "./features/legal/LegalPage";
+import { PRIVACY, TERMS } from "./features/legal/legalContent";
 import SettingsPage from "./features/settings/SettingsPage";
 import ProfilePage from "./features/profile/ProfilePage";
 import RequireHost from "./features/auth/RequireHost";
@@ -75,6 +77,11 @@ export default function App() {
       {/* Public: it has to work as a link pasted into a group chat by someone
           who hasn't signed up yet. */}
       <Route path="/about" element={<AboutPage />} />
+      {/* Public for the same reason, and for one more: a privacy notice that
+          only a signed-in person can read is no notice at all — it has to be
+          readable *before* someone hands over an email address. */}
+      <Route path="/privacy" element={<LegalPage doc={PRIVACY} other="terms" />} />
+      <Route path="/terms" element={<LegalPage doc={TERMS} other="privacy" />} />
       {/* Where Supabase's password-recovery email lands. */}
       <Route path="/reset-password" element={<ResetPasswordPage />} />
       {/* First run after email confirmation: name, photo, side, gender.

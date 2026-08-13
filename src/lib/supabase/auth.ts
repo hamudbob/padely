@@ -206,6 +206,48 @@ export async function signOutHost() {
   if (error) throw error;
 }
 
+/**
+ * Erases the signed-in person's identity and ends the session (0037).
+ *
+ * Order matters. The avatar goes FIRST, through the storage API rather than
+ * from SQL: deleting the storage.objects row server-side would drop the
+ * metadata and strand the actual file in the bucket — public, at a guessable
+ * path — with nothing left to delete it by. This call needs the user's own
+ * token, which is why it can't wait until after the RPC has cut the session.
+ *
+ * A failure here is not fatal to the deletion. Stranding one image is bad; a
+ * person stuck unable to delete their account because a storage call timed out
+ * is worse, and the RPC clears avatar_url regardless so nothing points at it.
+ */
+export async function deleteMyAccount(): Promise<{ avatarRemoved: boolean }> {
+  const { data: userData } = await supabase.auth.getUser();
+  const uid = userData.user?.id;
+
+  let avatarRemoved = true;
+  if (uid) {
+    try {
+      const { data: files } = await supabase.storage.from("avatars").list(uid);
+      const paths = (files ?? []).map((f) => `${uid}/${f.name}`);
+      if (paths.length) {
+        const { error } = await supabase.storage.from("avatars").remove(paths);
+        if (error) avatarRemoved = false;
+      }
+    } catch {
+      avatarRemoved = false;
+    }
+  }
+
+  const { error } = await supabase.rpc("delete_my_account");
+  if (error) throw error;
+
+  // Best effort: the RPC has already deleted the server-side session, so this
+  // is really just clearing the local token. Failing here must not look like a
+  // failed deletion.
+  await supabase.auth.signOut().catch(() => undefined);
+
+  return { avatarRemoved };
+}
+
 /** Updates the host's display name (stored on the auth user's metadata, the
  * same `name` set at sign-up). Returns the refreshed user. */
 export async function updateHostName(name: string) {

@@ -1,5 +1,5 @@
 import { useEffect, useState } from "react";
-import { useLocation } from "react-router-dom";
+import { Link, useLocation } from "react-router-dom";
 import PageHeader from "../shell/PageHeader";
 import { GROUPS, UI, CONTACT_EMAIL, Lang } from "./aboutContent";
 
@@ -126,7 +126,17 @@ export default function AboutPage() {
         </a>
       </div>
 
-      <p className="text-[11px] text-warm-gray text-center mt-6">
+      <p className="text-[12px] text-warm-gray text-center mt-6">
+        <Link to="/privacy" className="font-semibold text-gold-ink">
+          {lang === "id" ? "Kebijakan Privasi" : "Privacy policy"}
+        </Link>
+        <span className="mx-2" aria-hidden>·</span>
+        <Link to="/terms" className="font-semibold text-gold-ink">
+          {lang === "id" ? "Ketentuan Penggunaan" : "Terms of use"}
+        </Link>
+      </p>
+
+      <p className="text-[11px] text-warm-gray text-center mt-4">
         Padelier
         <span className="mx-1.5" aria-hidden>·</span>
         v2.0.0

@@ -98,8 +98,13 @@ export default function HomePage() {
           Want to host your own games?{" "}
           <Link to="/login" className="font-semibold text-gold-ink">Log in or sign up</Link>.
         </p>
-        <p className="text-[12px] leading-[1.5] text-warm-gray text-center px-6 pb-7">
+        <p className="text-[12px] leading-[1.5] text-warm-gray text-center px-6 pb-2">
           <Link to="/about" className="font-semibold text-gold-ink">How it all works</Link>
+        </p>
+        <p className="text-[11.5px] leading-[1.5] text-warm-gray text-center px-6 pb-7">
+          <Link to="/privacy" className="text-warm-gray underline underline-offset-2">Privacy</Link>
+          <span className="mx-2" aria-hidden>·</span>
+          <Link to="/terms" className="text-warm-gray underline underline-offset-2">Terms</Link>
         </p>
       </div>
     </div>

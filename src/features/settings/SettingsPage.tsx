@@ -1,7 +1,13 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { Link, useNavigate } from "react-router-dom";
 import { getMyProfile, updateMyProfile, uploadAvatar, Profile } from "../../lib/supabase/profileQueries";
-import { changePassword, updateHostPrefs, signOutHost, InvalidCredentialsError } from "../../lib/supabase/auth";
+import {
+  changePassword,
+  updateHostPrefs,
+  signOutHost,
+  deleteMyAccount,
+  InvalidCredentialsError,
+} from "../../lib/supabase/auth";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
 import { evaluatePassword } from "../../lib/passwordPolicy";
@@ -55,6 +61,11 @@ export default function SettingsPage() {
   const [savingPw, setSavingPw] = useState(false);
   const [pwMsg, setPwMsg] = useState<string | null>(null);
   const [pwErr, setPwErr] = useState<string | null>(null);
+
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
+  const [confirmText, setConfirmText] = useState("");
+  const [deleting, setDeleting] = useState(false);
+  const [delErr, setDelErr] = useState<string | null>(null);
 
   const verdict = useMemo(
     () => evaluatePassword(newPw, { name, email: user?.email ?? undefined }),
@@ -168,6 +179,27 @@ export default function SettingsPage() {
       );
     } finally {
       setSavingPw(false);
+    }
+  }
+
+  /**
+   * Deletion asks for the word, not for a second "are you sure?".
+   * A confirm dialog is dismissed by reflex; typing DELETE can't be.
+   */
+  async function handleDelete() {
+    if (confirmText.trim().toUpperCase() !== "DELETE") return;
+    setDeleting(true);
+    setDelErr(null);
+    try {
+      await deleteMyAccount();
+      navigate("/", { replace: true });
+    } catch (err) {
+      setDelErr(
+        err instanceof Error
+          ? `Couldn't delete the account — ${err.message}`
+          : "Couldn't delete the account just now. Check your connection and try again.",
+      );
+      setDeleting(false);
     }
   }
 
@@ -371,6 +403,94 @@ export default function SettingsPage() {
         >
           Sign out
         </button>
+      </div>
+
+      {/* ── The documents ──────────────────────────────────────────────
+          Reachable from inside the app, not only from the logged-out home.
+          Someone deciding whether to delete their account is exactly the
+          person who wants to read what happens to their data. */}
+      <div className={`${card} mb-3`}>
+        <p className={`${label} mb-2.5`}>Legal</p>
+        <Link
+          to="/privacy"
+          className="flex items-center justify-between text-[13.5px] text-ink-2 py-2 active:opacity-70"
+        >
+          Privacy policy <span className="text-stone" aria-hidden>›</span>
+        </Link>
+        <div className="h-px bg-line" />
+        <Link
+          to="/terms"
+          className="flex items-center justify-between text-[13.5px] text-ink-2 py-2 active:opacity-70"
+        >
+          Terms of use <span className="text-stone" aria-hidden>›</span>
+        </Link>
+      </div>
+
+      {/* ── Deleting the account ───────────────────────────────────────
+          Last on the page, plain rather than alarming, and honest about the
+          one thing people actually want to know: what survives. Hiding this
+          behind an email request would be the easy build and the wrong one —
+          erasure is a right, and a right you have to ask a stranger for by
+          email isn't much of one. */}
+      <div className="rounded-2xl border border-line bg-surface px-4 py-4 mb-3">
+        <p className={`${label} mb-2.5`}>Delete account</p>
+        <p className="text-[12.5px] text-ink-2 leading-relaxed">
+          Your name, email, password, photo and bio are erased straight away, and you're signed out
+          everywhere. Matches you played stay as anonymous records — other people were in them, and
+          their history is built from the same scores.
+        </p>
+        <p className="text-[12px] text-warm-gray leading-relaxed mt-2">
+          This can't be undone, and the same email can be used to start again from scratch.
+        </p>
+
+        {!confirmingDelete ? (
+          <button
+            onClick={() => setConfirmingDelete(true)}
+            className="w-full rounded-full border-[1.5px] border-loss/35 text-loss bg-surface px-4 py-3 font-semibold text-[13.5px] mt-3 active:scale-[0.99] transition-transform"
+          >
+            Delete my account
+          </button>
+        ) : (
+          <div className="mt-3 anim-fade">
+            <label htmlFor="confirm-delete" className="block text-[12.5px] text-ink-2 mb-2">
+              Type <span className="font-mono font-semibold text-graphite">DELETE</span> to confirm.
+            </label>
+            <input
+              id="confirm-delete"
+              value={confirmText}
+              onChange={(e) => {
+                setConfirmText(e.target.value);
+                setDelErr(null);
+              }}
+              autoComplete="off"
+              autoCapitalize="characters"
+              spellCheck={false}
+              className={input}
+              placeholder="DELETE"
+            />
+            {delErr && <p className="text-[13px] text-loss mt-2">{delErr}</p>}
+            <div className="flex gap-2 mt-3">
+              <button
+                onClick={() => {
+                  setConfirmingDelete(false);
+                  setConfirmText("");
+                  setDelErr(null);
+                }}
+                disabled={deleting}
+                className="flex-1 rounded-full border-[1.5px] border-line text-ink-2 bg-surface px-4 py-3 font-semibold text-[13.5px] active:scale-[0.99] transition-transform disabled:opacity-40"
+              >
+                Keep it
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={deleting || confirmText.trim().toUpperCase() !== "DELETE"}
+                className="flex-1 rounded-full bg-loss text-ivory px-4 py-3 font-semibold text-[13.5px] active:scale-[0.99] transition-transform disabled:opacity-40 disabled:active:scale-100"
+              >
+                {deleting ? "Deleting…" : "Delete"}
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

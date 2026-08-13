@@ -562,6 +562,20 @@ export default function LoginPage() {
             {loading ? "Please wait…" : isSignup ? "Create account" : "Sign in"}
           </button>
 
+          {/* Only on the sign-up branch: consent has to be given before the
+              account exists, and telling someone signing IN that they "agree"
+              by signing in is the pattern these documents are meant to avoid.
+              Under the button, not above it — it describes what the button
+              does, and reads as a footnote rather than a wall to clear. */}
+          {isSignup && (
+            <p className="text-[11.5px] leading-relaxed text-warm-gray text-center">
+              By creating an account you agree to our{" "}
+              <Link to="/terms" className="font-semibold text-gold-ink">Terms of use</Link> and{" "}
+              <Link to="/privacy" className="font-semibold text-gold-ink">Privacy policy</Link>. You
+              must be 18 or over.
+            </p>
+          )}
+
           {offerSignup && stage === "signin" && (
             <button
               type="button"
