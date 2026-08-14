@@ -1,10 +1,8 @@
 import PageHeader from "../shell/PageHeader";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
-import { getSessionStandings, SessionStandings, StandingsRow } from "../../lib/supabase/standingsQueries";
-import { getRoundHistory, RoundHistoryEntry } from "../../lib/supabase/roundHistoryQueries";
-import { getHostLiveSnapshot, HostLiveSnapshot } from "../../lib/supabase/sessionQueries";
-import { getRecapExtras } from "../../lib/supabase/recapQueries";
+import { StandingsRow } from "../../lib/supabase/standingsQueries";
+import { getPublicSessionById, PublicSessionData } from "../../lib/supabase/publicSessionQueries";
 import { renderRecapCard } from "../../lib/recap/renderRecapCard";
 
 const FORMAT_LABELS: Record<string, string> = {
@@ -29,19 +27,27 @@ function firstNameOf(name: string): string {
 }
 
 /**
- * Champion / final-summary screen (`/session/:sessionId/final`). Wired to real
- * data via the existing read-only queries (getSessionStandings + getRoundHistory
- * + getHostLiveSnapshot for the session name) — no new backend. Route is public
- * in App.tsx; note getSessionStandings/getHostLiveSnapshot read tables directly,
- * so a non-host viewer only fully renders this if project RLS allows it
- * (flagged for QA).
+ * Champion / final-summary screen (`/session/:sessionId/final`).
+ *
+ * THE RULE: once a session has ended, every way into it lands here. Not a
+ * different render per entry point — one podium, for the host, for the players,
+ * and for whoever the link gets forwarded to. "Standings & rounds" is a button
+ * on this page, not a competing destination.
+ *
+ * That rule is why this page now loads from get_public_session_by_id (0039)
+ * instead of getSessionStandings + getRoundHistory + getHostLiveSnapshot. Those
+ * three read `players` / `matches` / `rounds` directly, and every policy on
+ * those tables is host-scoped — so for anyone but the host they returned an
+ * empty result rather than an error, and this page rendered a podium with one
+ * name in it and no standings. The RPC returns the same raw ingredients the
+ * spectator view uses, fed through the same `assembleStandings`, so the podium
+ * here and the board on the host's screen cannot disagree — including the
+ * Fixed-Partner case, where the subject is a pair and not a player.
  */
 export default function FinalSummaryPage() {
   const { sessionId } = useParams();
   const navigate = useNavigate();
-  const [standings, setStandings] = useState<SessionStandings | null>(null);
-  const [history, setHistory] = useState<RoundHistoryEntry[] | null>(null);
-  const [snapshot, setSnapshot] = useState<HostLiveSnapshot | null>(null);
+  const [data, setData] = useState<PublicSessionData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
@@ -59,19 +65,15 @@ export default function FinalSummaryPage() {
     if (!sessionId) return;
     setLoading(true);
     setError(null);
-    Promise.all([
-      getSessionStandings(sessionId),
-      getRoundHistory(sessionId),
-      // Session name is a nicety — if RLS blocks the snapshot for a non-host
-      // viewer, degrade to a generic title rather than failing the whole page.
-      getHostLiveSnapshot(sessionId).catch(() => null),
-    ])
-      .then(([s, h, snap]) => {
-        setStandings(s);
-        setHistory(h);
-        setSnapshot(snap);
+    getPublicSessionById(sessionId)
+      .then((d) => {
+        if (!d) {
+          setError("That session isn't available — it may have been deleted, or never started.");
+          return;
+        }
+        setData(d);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load the results."))
+      .catch((err) => setError(err instanceof Error ? err.message : "Couldn't load the results. Check your connection and try again."))
       .finally(() => setLoading(false));
   }, [sessionId]);
 
@@ -86,26 +88,29 @@ export default function FinalSummaryPage() {
 
   /** Build the 1080×1920 recap image and show it for review. */
   async function buildRecap() {
-    if (!sessionId || !standings) return;
+    if (!sessionId || !data) return;
     setRecapBusy(true);
     setRecapError(null);
     try {
-      const top = standings.rows.slice(0, 3);
-      const extras = await getRecapExtras(sessionId, top.map((r) => r.subjectId));
+      const top = data.standings.slice(0, 3);
       const blob = await renderRecapCard({
-        sessionName: snapshot?.session.name ?? "Padel session",
-        clubName: extras.clubName,
-        date: extras.date,
-        formatLabel: FORMAT_LABELS[snapshot?.session.format ?? ""] ?? "",
-        playerCount: standings.rows.length,
-        roundCount: history?.length ?? 0,
+        sessionName: data.session.name || "Padel session",
+        clubName: data.clubName ?? null,
+        // renderRecapCard formats this itself (and yields "" for anything it
+        // can't parse), so hand it the raw ISO value rather than pre-formatting.
+        date: data.sessionDate ?? "",
+        formatLabel: FORMAT_LABELS[data.session.format] ?? "",
+        playerCount: data.standings.length,
+        roundCount: data.rounds.length,
         podium: top.map((r) => ({
           name: r.playerName,
           points: Math.round(r.totalPoints),
-          avatarUrl: extras.avatarByPlayerId.get(r.subjectId) ?? null,
+          // In Fixed Partner the subject is a pair, so there's no single face to
+          // show — the pair's name carries it instead.
+          avatarUrl: data.avatarByPlayerId?.get(r.subjectId) ?? null,
         })),
-        liveUrl: snapshot?.session.publicToken
-          ? `${window.location.origin}/live/${snapshot.session.publicToken}`
+        liveUrl: data.publicToken
+          ? `${window.location.origin}/live/${data.publicToken}`
           : window.location.origin,
       });
       if (recapUrl) URL.revokeObjectURL(recapUrl);
@@ -118,7 +123,7 @@ export default function FinalSummaryPage() {
     }
   }
 
-  const recapFileName = `padelier-${(snapshot?.session.name ?? "session").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}.png`;
+  const recapFileName = `padelier-${(data?.session.name ?? "session").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}.png`;
 
   async function shareRecap() {
     if (!recapBlob) return;
@@ -126,7 +131,7 @@ export default function FinalSummaryPage() {
     const nav = navigator as Navigator & { canShare?: (d: { files?: File[] }) => boolean };
     if (nav.canShare?.({ files: [file] }) && navigator.share) {
       try {
-        await navigator.share({ files: [file], title: snapshot?.session.name ?? "Padelier" });
+        await navigator.share({ files: [file], title: data?.session.name ?? "Padelier" });
         return;
       } catch {
         return; // user dismissed the sheet — not an error worth surfacing
@@ -166,7 +171,7 @@ export default function FinalSummaryPage() {
     );
   }
 
-  const rows: StandingsRow[] = standings?.rows ?? [];
+  const rows: StandingsRow[] = data?.standings ?? [];
 
   if (rows.length === 0) {
     return (
@@ -184,10 +189,10 @@ export default function FinalSummaryPage() {
   const winner = rows[0];
   const podium = rows.slice(0, 3);
   const rest = rows.slice(3);
-  const roundCount = history?.length ?? 0;
-  const matchCount = (history ?? []).reduce((n, r) => n + r.matches.length, 0);
+  const roundCount = data?.rounds.length ?? 0;
+  const matchCount = data?.matches.filter((m) => m.status === "final").length ?? 0;
   const playerCount = rows.length;
-  const sessionName = snapshot?.session.name ?? "This session";
+  const sessionName = data?.session.name || "This session";
 
   // Podium columns laid out 2nd · 1st · 3rd (prototype order). Missing places
   // (fewer than 3 players) simply drop out.
@@ -288,12 +293,18 @@ export default function FinalSummaryPage() {
       >
         Share link instead
       </button>
-      <Link
-        to={`/session/${sessionId ?? ""}/host`}
-        className="block w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform"
-      >
-        View all rounds &amp; scores
-      </Link>
+      {/* Points at the read-only spectator view, not /host. The host screen is
+          gated to the host, so for a player this button used to be a login
+          wall on a session they played in. That view has every round, every
+          court and the full board, and it works for anyone with the link. */}
+      {data?.publicToken && (
+        <Link
+          to={`/live/${data.publicToken}`}
+          className="block w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform"
+        >
+          Standings &amp; rounds
+        </Link>
+      )}
       <button
         onClick={() => navigate("/")}
         className="w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold text-warm-gray bg-transparent active:opacity-70"

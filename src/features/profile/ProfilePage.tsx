@@ -542,7 +542,10 @@ export default function ProfilePage() {
             {playerSessions.map((s) => (
               <Link
                 key={s.id}
-                to={`/live/${s.publicToken}`}
+                // One destination per state: an ended session always opens the
+                // podium (same page the host and a shared link land on), a live
+                // one opens the spectator view.
+                to={s.status === "ended" ? `/session/${s.id}/final` : `/live/${s.publicToken}`}
                 className="flex items-center gap-3 px-4 py-3.5 border-t border-line first:border-t-0 active:bg-surface-2 transition-colors"
               >
                 <span

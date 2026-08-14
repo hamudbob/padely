@@ -228,7 +228,18 @@ export default function HostLivePage() {
   function load() {
     if (!sessionId) return;
     getHostLiveSnapshot(sessionId)
-      .then(setSnapshot)
+      .then((snap) => {
+        // An ended session has one home, and it isn't this screen. Everything
+        // this page still offered once the scores were locked — the board, every
+        // round — the podium either shows or links to, and it's the page players
+        // and shared links land on too. `replace` so Back doesn't bounce here
+        // and immediately forward again.
+        if (snap?.session.status === "ended") {
+          navigate(`/session/${sessionId}/final`, { replace: true });
+          return;
+        }
+        setSnapshot(snap);
+      })
       .catch((err) => setError(err instanceof Error ? err.message : "Could not load this session."));
   }
 

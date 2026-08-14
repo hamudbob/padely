@@ -17,6 +17,13 @@ import { RankingBasis } from "../scoring/standings";
  */
 export interface PublicSessionData {
   session: { id: string; name: string; format: string; scoringFormat: string; rankingBasis: RankingBasis; status: "draft" | "live" | "ended" };
+  /** Only set when loaded by id (0039) — the podium needs it to link on to standings & rounds. */
+  publicToken?: string | null;
+  /** Only set when loaded by id (0039) — for the recap card's caption. */
+  clubName?: string | null;
+  sessionDate?: string | null;
+  /** playerId → avatar, for the recap card's podium faces. Only set when loaded by id. */
+  avatarByPlayerId?: Map<string, string | null>;
   players: { id: string; displayName: string; status: string }[];
   rounds: { id: string; sequence: number; status: string }[];
   /** Ranked leaderboard rows, computed via assembleStandings — identical to host. */
@@ -44,7 +51,10 @@ interface RawPublicSession {
     fixed_partner_style?: string | null;
     status?: PublicSessionData["session"]["status"];
   };
-  players?: { id: string; display_name: string; status: string; team_side: "A" | "B" | null }[];
+  players?: { id: string; display_name: string; status: string; team_side: "A" | "B" | null; avatar_url?: string | null }[];
+  public_token?: string | null;
+  club_name?: string | null;
+  session_date?: string | null;
   rounds?: { id: string; sequence: number; status: string }[];
   adjustments?: { player_id: string | null; pair_id: string | null; amount: number }[];
   pairs?: { id: string; player_a_id: string; player_b_id: string }[];
@@ -66,8 +76,26 @@ export async function getPublicSession(publicToken: string): Promise<PublicSessi
   const { data, error } = await supabase.rpc("get_public_session", { p_public_token: publicToken });
   if (error) throw error;
   if (!data) return null; // RPC returns null when the token matches nothing.
+  return mapPublicSession(data as RawPublicSession);
+}
 
-  const d = data as RawPublicSession;
+/**
+ * The same payload, addressed by session id instead of token (0039).
+ *
+ * This is what makes one podium page work for everyone. The final screen is
+ * routed by id, and its old queries read `players` / `matches` directly — which
+ * host-only RLS answers with an empty result, not an error. So a player opening
+ * their own finished session got a podium with one name in it and no standings,
+ * while the host saw the real thing on the same URL.
+ */
+export async function getPublicSessionById(sessionId: string): Promise<PublicSessionData | null> {
+  const { data, error } = await supabase.rpc("get_public_session_by_id", { p_session_id: sessionId });
+  if (error) throw error;
+  if (!data) return null; // null for an unknown id, or a session still in draft.
+  return mapPublicSession(data as RawPublicSession);
+}
+
+function mapPublicSession(d: RawPublicSession): PublicSessionData {
   const players = d.players ?? [];
   const matches = d.matches ?? [];
   const pairs = d.pairs ?? [];
@@ -93,6 +121,10 @@ export async function getPublicSession(publicToken: string): Promise<PublicSessi
   };
   const { rows } = assembleStandings(standingsInput);
 
+  const avatarByPlayerId = new Map<string, string | null>(
+    players.filter((p) => p.avatar_url !== undefined).map((p) => [p.id, p.avatar_url ?? null]),
+  );
+
   return {
     session: {
       id: d.session?.id ?? "",
@@ -102,6 +134,10 @@ export async function getPublicSession(publicToken: string): Promise<PublicSessi
       rankingBasis: d.session?.ranking_basis ?? "points_first",
       status: d.session?.status ?? "live",
     },
+    publicToken: d.public_token ?? null,
+    clubName: d.club_name ?? null,
+    sessionDate: d.session_date ?? null,
+    avatarByPlayerId: avatarByPlayerId.size > 0 ? avatarByPlayerId : undefined,
     players: players.map((p) => ({ id: p.id, displayName: p.display_name, status: p.status })),
     rounds: (d.rounds ?? []).map((r) => ({ id: r.id, sequence: r.sequence, status: r.status })),
     standings: rows,

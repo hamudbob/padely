@@ -629,6 +629,16 @@ export interface Database {
         Args: Record<string, never>;
         Returns: undefined; // void
       };
+      /** 0039 — spectator payload addressed by session id (the podium route). */
+      get_public_session_by_id: {
+        Args: { p_session_id: string };
+        Returns: unknown; // jsonb — same shape as get_public_session + token/club/date/avatars
+      };
+      /** 0039 — the caller's own player rows, matches and co-players. */
+      get_my_participation: {
+        Args: Record<string, never>;
+        Returns: unknown; // jsonb { my_players, my_participations, matches, participants, rounds, sessions, people }
+      };
       prune_notifications: {
         Args: { p_days?: number; p_keep?: number };
         Returns: number; // rows removed for the calling user

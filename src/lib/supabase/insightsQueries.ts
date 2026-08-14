@@ -57,63 +57,60 @@ export async function getRatingHistory(userId: string): Promise<RatingPoint[]> {
   return (data ?? []).map((r) => ({ rating: r.rating, delta: r.delta, createdAt: r.created_at }));
 }
 
+/** The rows behind a record, as returned by get_my_participation (0039). */
+interface ParticipationPayload {
+  my_players: { id: string; session_id: string }[];
+  my_participations: { match_id: string; player_id: string; side: "A" | "B" }[];
+  matches: { id: string; round_id: string; outcome: string | null; status: string }[];
+  participants: { match_id: string; player_id: string; side: "A" | "B" }[];
+  rounds: { id: string; session_id: string; sequence: number }[];
+  sessions: { id: string; created_at: string }[];
+  people: { id: string; display_name: string; linked_user_id: string | null }[];
+}
+
+/**
+ * The caller's own record: W/L/D, form, best partner, toughest rival.
+ *
+ * Reads through the get_my_participation RPC rather than the tables. It used to
+ * query `players`, `match_participants`, `matches` and `rounds` directly, and
+ * every policy on those is host-scoped — so for anyone who PLAYED a session
+ * rather than hosting it, the first query came back empty and this returned
+ * EMPTY. The symptom was a You tab claiming "play a session and your record
+ * shows up here", with Played 0 and Games 0, directly beneath a rating strip
+ * showing a real rating and a real game count (profiles is world-readable, and
+ * the host's apply_session_ratings had already written it).
+ *
+ * `userId` is kept in the signature for call-site clarity, but the RPC scopes to
+ * auth.uid() itself — a client can't ask for someone else's record.
+ */
 export async function getPlayerInsights(userId: string): Promise<PlayerInsights> {
-  // Every player row that belongs to this account (one per session played).
-  const { data: myPlayers, error: myErr } = await supabase
-    .from("players")
-    .select("id, session_id")
-    .eq("linked_user_id", userId);
-  if (myErr) throw myErr;
-  const myPlayerIds = (myPlayers ?? []).map((p) => p.id);
+  void userId;
+  const { data: raw, error: rpcError } = await supabase.rpc("get_my_participation");
+  if (rpcError) throw rpcError;
+  const payload = (raw ?? {}) as Partial<ParticipationPayload>;
+
+  const myPlayers = payload.my_players ?? [];
+  const myPlayerIds = myPlayers.map((p) => p.id);
   if (myPlayerIds.length === 0) return EMPTY;
-  const sessionIds = [...new Set((myPlayers ?? []).map((p) => p.session_id))];
+  const sessionIds = [...new Set(myPlayers.map((p) => p.session_id))];
 
-  // The matches I took part in (via my player rows).
-  const { data: myParts, error: mpErr } = await supabase
-    .from("match_participants")
-    .select("match_id, player_id, side")
-    .in("player_id", myPlayerIds);
-  if (mpErr) throw mpErr;
   const mySideByMatch = new Map<string, "A" | "B">();
-  for (const p of myParts ?? []) mySideByMatch.set(p.match_id, p.side);
-  const matchIds = [...mySideByMatch.keys()];
-  if (matchIds.length === 0) return { ...EMPTY, sessionsPlayed: sessionIds.length };
+  for (const p of payload.my_participations ?? []) mySideByMatch.set(p.match_id, p.side);
+  if (mySideByMatch.size === 0) return { ...EMPTY, sessionsPlayed: sessionIds.length };
 
-  // Those matches (final + decisive/draw only), all their participants, the
-  // rounds (for chronology), and the sessions (for chronology).
-  const [
-    { data: matches, error: mErr },
-    { data: allParts, error: apErr },
-  ] = await Promise.all([
-    supabase.from("matches").select("id, round_id, outcome, status").in("id", matchIds).eq("status", "final"),
-    supabase.from("match_participants").select("match_id, player_id, side").in("match_id", matchIds),
-  ]);
-  if (mErr) throw mErr;
-  if (apErr) throw apErr;
-
-  const finalMatches = (matches ?? []).filter((m) => m.outcome && m.outcome !== "cancelled");
+  const allParts = payload.participants ?? [];
+  const finalMatches = (payload.matches ?? []).filter(
+    (m) => m.status === "final" && m.outcome && m.outcome !== "cancelled",
+  );
   if (finalMatches.length === 0) return { ...EMPTY, sessionsPlayed: sessionIds.length };
 
-  // Chronology: order matches by session date then round sequence.
-  const roundIds = [...new Set(finalMatches.map((m) => m.round_id))];
-  const [{ data: rounds, error: rErr }, { data: sessions, error: sErr }] = await Promise.all([
-    supabase.from("rounds").select("id, session_id, sequence").in("id", roundIds),
-    supabase.from("sessions").select("id, created_at").in("id", sessionIds),
-  ]);
-  if (rErr) throw rErr;
-  if (sErr) throw sErr;
-  const roundInfo = new Map((rounds ?? []).map((r) => [r.id, { sessionId: r.session_id, sequence: r.sequence }]));
-  const sessionAt = new Map((sessions ?? []).map((s) => [s.id, s.created_at]));
+  const roundInfo = new Map((payload.rounds ?? []).map((r) => [r.id, { sessionId: r.session_id, sequence: r.sequence }]));
+  const sessionAt = new Map((payload.sessions ?? []).map((s) => [s.id, s.created_at]));
 
-  // Names for partners/opponents; identity keyed by account (if any) else name.
-  const involvedIds = [...new Set((allParts ?? []).map((p) => p.player_id))];
-  const { data: playerRows, error: prErr } = await supabase
-    .from("players")
-    .select("id, display_name, linked_user_id")
-    .in("id", involvedIds);
-  if (prErr) throw prErr;
+  // Identity keyed by account where there is one, else by name — so the same
+  // person merges across sessions whether or not they'd signed up yet.
   const personOf = new Map(
-    (playerRows ?? []).map((p) => [
+    (payload.people ?? []).map((p) => [
       p.id,
       { key: p.linked_user_id ?? `name:${p.display_name.trim().toLowerCase()}`, label: p.display_name.trim().split(/\s+/)[0] || "Player" },
     ]),
@@ -121,7 +118,7 @@ export async function getPlayerInsights(userId: string): Promise<PlayerInsights>
 
   // Participants grouped by match + side.
   const sidesByMatch = new Map<string, { A: string[]; B: string[] }>();
-  for (const p of allParts ?? []) {
+  for (const p of allParts) {
     const rec = sidesByMatch.get(p.match_id) ?? { A: [], B: [] };
     (p.side === "A" ? rec.A : rec.B).push(p.player_id);
     sidesByMatch.set(p.match_id, rec);
