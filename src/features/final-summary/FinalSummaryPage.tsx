@@ -188,7 +188,13 @@ export default function FinalSummaryPage() {
 
   const winner = rows[0];
   const podium = rows.slice(0, 3);
-  const rest = rows.slice(3);
+  // The full board, not rows.slice(3). The podium is a summary, not a
+  // substitute: with three or fewer subjects a slice(3) table is empty, and in
+  // Fixed Partner the subject is a PAIR — so a six-player session has three
+  // pairs and the "rest" was nothing at all. Rank 1 appearing both on the
+  // podium and at the top of the table is the same thing the spectator view
+  // does, and it reads as a summary followed by the detail.
+  const rest = rows;
   const roundCount = data?.rounds.length ?? 0;
   const matchCount = data?.matches.filter((m) => m.status === "final").length ?? 0;
   const playerCount = rows.length;

@@ -204,7 +204,6 @@ export default function PublicLivePage() {
   const earlierMatches = matches.filter((m) => m.roundSequence === activeEarlierSeq);
 
   const podium = board.slice(0, 3);
-  const rest = board.slice(3);
   const podiumSlots = [podium[1], podium[0], podium[2]]; // 2nd · 1st · 3rd
   const podiumHeights = ["h-16", "h-24", "h-12"];
   const podiumBar = ["bg-stone/50", "bg-gold/30", "bg-stone/50"];
@@ -331,7 +330,16 @@ export default function PublicLivePage() {
             <span className="w-12 text-right">Pts</span>
           </div>
           <div className="divide-y divide-line">
-            {(isLive ? board : rest).map((row) => {
+            {/* An ended session used to render only the board MINUS the podium
+                here, under a heading that reads "Full standings". With three or
+                fewer subjects that table came out empty — and in Fixed Partner
+                the subjects are PAIRS, so any session of six or fewer players
+                hit it: a podium, a "Full standings" heading, and nothing at all
+                underneath. The heading was the honest half; the data was the
+                wrong half. Now it renders the whole board in both states, with
+                rank 1 highlighted as it already was, and the podium above it
+                stays what it always was — a visual summary, not a substitute. */}
+            {board.map((row) => {
               const top = row.rank === 1;
               return (
                 <div key={`${row.rank}-${row.name}`} className={`flex items-center gap-3 px-4 py-2.5 ${top ? "bg-gold-soft/50" : ""}`}>
@@ -348,9 +356,6 @@ export default function PublicLivePage() {
               );
             })}
           </div>
-          {!isLive && rest.length === 0 && (
-            <div className="px-4 py-2.5 text-[12px] text-warm-gray">Top three are on the podium above.</div>
-          )}
           {board.some((r) => r.comp > 0) && (
             <p className="px-4 py-2 text-[10px] text-warm-gray border-t border-line">+N = points credited for rounds rested (kept fair).</p>
           )}
