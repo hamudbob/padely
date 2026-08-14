@@ -639,6 +639,11 @@ export interface Database {
         Args: Record<string, never>;
         Returns: unknown; // jsonb { my_players, my_participations, matches, participants, rounds, sessions, people }
       };
+      /** 0040 — deletes a session and reverses the rating it applied. */
+      delete_session_and_unrate: {
+        Args: { p_session_id: string };
+        Returns: number; // sessions removed (0 if not the caller's to delete)
+      };
       prune_notifications: {
         Args: { p_days?: number; p_keep?: number };
         Returns: number; // rows removed for the calling user

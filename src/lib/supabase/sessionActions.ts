@@ -292,17 +292,23 @@ export async function endSession(sessionId: string): Promise<void> {
  * a live/ended session.
  */
 export async function deleteSession(sessionId: string): Promise<number> {
-  // .select() so we can tell an actual deletion from an RLS no-op (a delete that
-  // matches no visible row returns success with zero rows under RLS). Returns the
-  // number of rows removed; callers that don't care can ignore it.
-  const { data, error } = await supabase.from("sessions").delete().eq("id", sessionId).select("id");
+  // Through the RPC (0040), not a table delete, because deleting a session has
+  // to take its rating with it. profiles.rating is a snapshot overwritten at the
+  // end of each session; the cascade removed the matches and the league rows but
+  // left the points, so a test session you ran and threw away kept its spike
+  // forever and the rating stopped corresponding to any game that exists.
+  // Unrating and deleting belong in one transaction, which is what this is.
+  //
+  // Returns the number of sessions removed — 0 when the row wasn't the caller's
+  // to delete — so existing callers keep working unchanged.
+  const { data, error } = await supabase.rpc("delete_session_and_unrate", { p_session_id: sessionId });
   if (error) {
     // Surface the real Postgres message (Supabase errors aren't Error instances,
     // so a bare throw stringifies to "[object Object]").
     const parts = [error.message, error.details, error.hint, error.code ? `code ${error.code}` : ""].filter(Boolean);
     throw new Error(parts.join(" · "));
   }
-  return (data ?? []).length;
+  return typeof data === "number" ? data : 0;
 }
 
 /**
