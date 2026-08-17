@@ -24,7 +24,7 @@ import {
   mulberry32,
   recordRoundInHistory,
 } from "./types";
-import { selectPlayersForRound, hasUnavoidableConsecutiveRest } from "./fairness";
+import { selectPlayersForRound, hasUnavoidableConsecutiveRest, balancePoolByKey } from "./fairness";
 
 export type Gender = "M" | "F";
 
@@ -94,11 +94,15 @@ export interface GenerateMixAmericanoRoundInput {
 export function generateMixAmericanoRound(input: GenerateMixAmericanoRoundInput): RoundResult {
   const { activePlayerIds, genderById, statsById, courtsAvailable, history, rng, tries = 300 } = input;
 
-  const { playingIds, restingIds, courtsUsed } = selectPlayersForRound(
-    activePlayerIds,
+  // Fairness picks WHO rests; balancePoolByKey then evens the gender split of
+  // whoever is left on court. Without the second step the pool can be all one
+  // gender — measured at 8 players on 1 court, every round after the first —
+  // and no amount of searching below can mix a team out of nobody. See
+  // fairness.ts for the numbers.
+  const { playingIds, restingIds, courtsUsed } = balancePoolByKey(
+    selectPlayersForRound(activePlayerIds, statsById, courtsAvailable, rng),
+    genderById,
     statsById,
-    courtsAvailable,
-    rng,
   );
 
   if (courtsUsed === 0) {

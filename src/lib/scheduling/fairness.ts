@@ -84,6 +84,77 @@ export function selectPlayersForRound(
   return { playingIds, restingIds, courtsUsed };
 }
 
+/**
+ * Rebalance a round's pool so both halves of a two-valued attribute are equally
+ * represented — without giving up the fairness order that produced it.
+ *
+ * WHY THIS EXISTS. selectPlayersForRound is deliberately blind to everything
+ * except playing time, which is right for Americano and Mexicano and quietly
+ * catastrophic for the formats where every TEAM must contain one of each key:
+ * Mix Americano and Mix Mexicano (gender), and Fixed Position (court side).
+ * Those engines score a non-mixed team at 100x any other fault — but no amount
+ * of searching can mix a pool that has nobody to mix with.
+ *
+ * Measured, 8 players (4M/4F) on 1 court, before this existed:
+ *
+ *   round 1: pool 0M/4F -> 2 non-mixed teams
+ *   round 2: pool 4M/0F -> 2 non-mixed teams
+ *   round 3: pool 0M/4F -> 2 non-mixed teams        ...every round, forever.
+ *
+ * Sorting by matchesPlayed alone marched the whole roster through in blocks,
+ * and each block happened to be one gender. Round 1 looked perfect and every
+ * round after it was wrong — which is exactly how it was reported.
+ *
+ * THE REPAIR. Keep the fairness pick, then swap the minimum number of players
+ * to even the split: take the over-represented player who has ALREADY PLAYED
+ * THE MOST (so the swap costs the least fairness) and exchange them with the
+ * under-represented rester who has played the LEAST (so the swap pays fairness
+ * back). If the roster itself can't support an even split — seven men and one
+ * woman — this gets as close as the roster allows and stops. It never changes
+ * how MANY play, so it can't leave a court short.
+ */
+export function balancePoolByKey(
+  selection: RestSelectionResult,
+  keyById: Map<PlayerId, string>,
+  stateById: Map<PlayerId, PlayerFairnessState>,
+): RestSelectionResult {
+  const { playingIds, restingIds, courtsUsed } = selection;
+  if (courtsUsed === 0 || restingIds.length === 0) return selection;
+
+  const played = (id: PlayerId) => stateById.get(id)?.matchesPlayed ?? 0;
+  const playing = [...playingIds];
+  const resting = [...restingIds];
+
+  // Two-valued by construction (M/F, L/R). Anything else is left alone rather
+  // than guessed at.
+  const keys = [...new Set([...playing, ...resting].map((id) => keyById.get(id) ?? ""))].filter(Boolean);
+  if (keys.length !== 2) return selection;
+
+  const target = playing.length / 2;
+
+  for (let guard = 0; guard < playing.length; guard++) {
+    const countOf = (k: string) => playing.filter((id) => (keyById.get(id) ?? "") === k).length;
+    const over = countOf(keys[0]) > target ? keys[0] : countOf(keys[1]) > target ? keys[1] : null;
+    if (!over) break; // already even, or as even as an odd slot count allows
+    const under = over === keys[0] ? keys[1] : keys[0];
+
+    // Costs the least fairness: they've had the most court time already.
+    const out = playing
+      .filter((id) => (keyById.get(id) ?? "") === over)
+      .sort((a, b) => played(b) - played(a))[0];
+    // Pays it back: they've had the least.
+    const inn = resting
+      .filter((id) => (keyById.get(id) ?? "") === under)
+      .sort((a, b) => played(a) - played(b))[0];
+    if (!out || !inn) break; // the roster can't do better than this
+
+    playing[playing.indexOf(out)] = inn;
+    resting[resting.indexOf(inn)] = out;
+  }
+
+  return { playingIds: playing, restingIds: resting, courtsUsed };
+}
+
 /** True if any resting player also rested the previous round — surfaced in diagnostics (PRD §7). */
 export function hasUnavoidableConsecutiveRest(
   restingIds: PlayerId[],
