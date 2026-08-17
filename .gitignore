@@ -14,3 +14,10 @@ _git_stale_locks/
 # Scratch dirs used when git tooling cannot unlink on this mount
 _gitjunk/
 _to_delete/
+
+# E2E (Playwright). .env.test holds two real Supabase accounts' credentials,
+# and tests/.auth holds their live access tokens — neither ever gets committed.
+.env.test
+tests/.auth/
+test-results/
+playwright-report/

@@ -115,12 +115,33 @@ export default function ProfilePage() {
     const removed = new Set<string>();
     let failed = 0;
     let firstError: string | null = null;
-    const results = await Promise.allSettled(ids.map(async (id) => ({ id, n: await deleteSession(id) })));
-    for (const r of results) {
-      if (r.status === "fulfilled" && r.value.n > 0) removed.add(r.value.id);
-      else {
+    // SEQUENTIALLY, oldest first — not Promise.allSettled.
+    //
+    // delete_session_and_unrate (0040) decides how to reverse a session's rating
+    // by asking whether it is the player's MOST RECENT rated session: if it is,
+    // restore the stored snapshot exactly; if not, subtract that session's
+    // delta. Run concurrently, that question gets answered against a database
+    // mid-flight, so two rated sessions deleted in one batch could both read
+    // "I'm the most recent" and the resulting rating would depend on which
+    // transaction committed first. Deleting one at a time makes the outcome
+    // deterministic and correct: each call sees the state the previous one left.
+    //
+    // Oldest first so the newest deletion is the one that restores a snapshot —
+    // the exact path — rather than subtracting from a number that has already
+    // been rewound.
+    const ordered = [...ids].sort((a, b) => {
+      const at = sessions?.find((s) => s.id === a)?.createdAt ?? "";
+      const bt = sessions?.find((s) => s.id === b)?.createdAt ?? "";
+      return at < bt ? -1 : at > bt ? 1 : 0;
+    });
+    for (const id of ordered) {
+      try {
+        const n = await deleteSession(id);
+        if (n > 0) removed.add(id);
+        else failed += 1;
+      } catch (err) {
         failed += 1;
-        if (r.status === "rejected" && !firstError) firstError = r.reason instanceof Error ? r.reason.message : String(r.reason);
+        if (!firstError) firstError = err instanceof Error ? err.message : String(err);
       }
     }
     // Optimistically drop the ones that really deleted, then reconcile from server.

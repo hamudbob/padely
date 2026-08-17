@@ -1,0 +1,22 @@
+{
+  // The root tsconfig only `include`s "src" (deliberately — see the comment in
+  // it), so the E2E files would otherwise never be type-checked at all. This
+  // extends the same strict settings and adds the Node globals the harness
+  // needs (process.env, node:fs, node:path).
+  //
+  //   npx tsc --noEmit -p tests/e2e
+  //
+  "extends": "../../tsconfig.json",
+  "compilerOptions": {
+    "types": ["node"],
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    // The harness imports Node built-ins (`node:fs`) and dotenv, both of which
+    // are CJS with `export =` shapes.
+    "esModuleInterop": true,
+    "noEmit": true
+  },
+  "include": ["**/*.ts", "../../playwright.config.ts"]
+}
