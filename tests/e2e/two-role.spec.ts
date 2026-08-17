@@ -494,7 +494,9 @@ async function readPodiumTable(page: Page): Promise<PodiumRow[]> {
   const texts = await podiumTableRows(page).allInnerTexts();
   return texts.map((raw) => {
     const text = raw.replace(/\s+/g, " ").trim();
-    const match = /^(\d+)\s+(.+?)\s+(\d+)$/.exec(text);
+    // No \\s+ after the rank: the rank <span> and the name sit flush in
+    // innerText, so a real row reads "1Cahya Dwi & Damar Eko 27".
+    const match = /^(\d+)\s*(.+?)\s+(\d+)$/.exec(text);
     if (!match) throw new Error(`Could not read "rank subject points" out of a standings row (got "${text}").`);
     return {
       rank: Number.parseInt(match[1], 10),
@@ -667,7 +669,10 @@ function clubIdFromUrl(url: string): string {
 async function createClubAsHost(page: Page, name: string): Promise<{ id: string; code: string }> {
   await gotoTab(page, "club");
   await page.getByRole("button", { name: "Or create your own club", exact: true }).click();
-  const input = page.getByPlaceholder("Club name");
+  // exact: the club SEARCH field reads "Club name or code", which a substring
+  // match also hits — two elements, strict-mode violation, and a failure that
+  // looks like the form never opened.
+  const input = page.getByPlaceholder("Club name", { exact: true });
   await expect(input, "the create-a-club form never opened").toBeVisible();
   await input.fill(name);
   await page.getByRole("button", { name: "Create", exact: true }).click();
@@ -782,18 +787,12 @@ function trackSession(id: string): string {
   return id;
 }
 
-test.beforeEach(async ({ hostPage, playerPage }) => {
-  // Several destructive actions in this app sit behind window.confirm — deleting
-  // sessions from the You tab (which is what fixtures' deleteSessionAsHost
-  // drives), discarding a draft, leaving a club. Playwright DISMISSES dialogs
-  // when nothing is listening, and a dismissed confirm() is a "no", so without
-  // this handler those actions silently do nothing at all.
-  for (const page of [hostPage, playerPage]) {
-    page.on("dialog", (dialog) => {
-      void dialog.accept();
-    });
-  }
-});
+// Native confirms are accepted by the page fixtures themselves (see
+// fixtures.ts: acceptNativeConfirms). Registering a SECOND listener here would
+// not double the safety — the first accept() resolves the dialog and the second
+// throws "Cannot accept dialog which is already handled", failing the test after
+// the click has already gone through. That mistake cost this suite five
+// cascading failures, so the handler lives in exactly one place.
 
 test.afterEach(async ({ hostPage, playerPage }) => {
   // Sessions first. Deleting one goes through delete_session_and_unrate, which

@@ -452,18 +452,12 @@ function forgetSession(id: string): void {
   if (at >= 0) createdSessions.splice(at, 1);
 }
 
-test.beforeEach(async ({ hostPage, playerPage }) => {
-  // Deleting sessions from the You tab, discarding a draft from Play — both sit
-  // behind window.confirm. Playwright DISMISSES dialogs when nothing is
-  // listening, and a dismissed confirm() is a "no", so without this handler
-  // every delete in this file (including fixtures' deleteSessionAsHost) silently
-  // does nothing.
-  for (const page of [hostPage, playerPage]) {
-    page.on("dialog", (dialog) => {
-      void dialog.accept();
-    });
-  }
-});
+// Native confirms are accepted by the page fixtures themselves (see
+// fixtures.ts: acceptNativeConfirms). Registering a SECOND listener here would
+// not double the safety — the first accept() resolves the dialog and the second
+// throws "Cannot accept dialog which is already handled", failing the test after
+// the click has already gone through. That mistake cost this suite five
+// cascading failures, so the handler lives in exactly one place.
 
 test.afterEach(async ({ hostPage }) => {
   while (createdSessions.length > 0) {
