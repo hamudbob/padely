@@ -684,7 +684,23 @@ async function createClubAsHost(page: Page, name: string): Promise<{ id: string;
   const codeValue = page.getByText("Team code", { exact: true }).locator("xpath=following-sibling::p[1]");
   await expect(codeValue, "the invite sheet never showed the club code").toBeVisible();
   const code = (await codeValue.innerText()).trim();
-  await page.getByRole("button", { name: "Done", exact: true }).click();
+
+  // Guard the stacking-context bug this test found: the screen root's filling
+  // `anim-fade` used to make a stacking context, so this z-50 sheet lost to the
+  // z-40 tab bar and "Done" was untappable behind it. Without this check the
+  // symptom is a 20s click timeout whose message blames the button.
+  const done = page.getByRole("button", { name: "Done", exact: true });
+  await expect(done).toBeVisible();
+  const covering = await done.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    const hit = document.elementFromPoint(box.x + box.width / 2, box.y + box.height / 2);
+    return hit === el || el.contains(hit) ? null : (hit?.closest("[aria-label]")?.getAttribute("aria-label") ?? hit?.tagName ?? "something");
+  });
+  expect(
+    covering,
+    "the invite sheet's Done button is painted over by other chrome — a modal is sitting below the tab bar (stacking context; see features/shell/Sheet.tsx)",
+  ).toBeNull();
+  await done.click();
   if (!/^[A-Za-z0-9]{4,6}$/.test(code)) {
     throw new Error(`"${code}" doesn't look like a club code, so the join-by-code path can't be driven with it.`);
   }

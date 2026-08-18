@@ -56,15 +56,28 @@ button {
 }
 
 /* --- Purposeful, brand-light motion (CSS-only, no dependency) --- */
+/* FILL MODE IS `backwards`, NOT `both`, AND THAT MATTERS.
+   `both` includes `forwards`: the animation keeps applying opacity/transform
+   after it has finished, and an element with a filling opacity or transform
+   animation forms a STACKING CONTEXT for good — exactly as `opacity: 0.99`
+   would. Every screen root carries `anim-fade`, so with `both` a
+   `fixed ... z-50` sheet written inside a screen was not at 50 on the page,
+   it was at 50 inside a box sitting at auto — and the `z-40` tab bar painted
+   over it. On the club page that put the sheet's "Done" button under the bar,
+   untappable, with no other way out. Proved in Chromium: same markup, `both`
+   -> elementFromPoint returns the nav; `backwards` -> it returns the button.
+   `backwards` still holds the from-state through any animation-delay (which is
+   what the stagger below needs) and every keyframe here ends on the property's
+   default anyway, so dropping `forwards` changes nothing visually. */
 @media (prefers-reduced-motion: no-preference) {
   .anim-rise {
-    animation: rise 0.34s cubic-bezier(0.22, 0.8, 0.24, 1) both;
+    animation: rise 0.34s cubic-bezier(0.22, 0.8, 0.24, 1) backwards;
   }
   .anim-fade {
-    animation: fade 0.3s ease both;
+    animation: fade 0.3s ease backwards;
   }
   .anim-pop {
-    animation: pop 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.25) both;
+    animation: pop 0.28s cubic-bezier(0.2, 0.9, 0.3, 1.25) backwards;
   }
   /* stagger helper for lists */
   .anim-rise:nth-child(1) { animation-delay: 0.02s; }

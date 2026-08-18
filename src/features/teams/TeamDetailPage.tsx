@@ -5,6 +5,7 @@ import { getTeam, getTeamMembers, leaveTeam, uploadClubLogo, getClubStats, Team,
 import { getClubJoinRequests, respondJoinRequest, inviteByEmail, requestToJoin, JoinRequestItem } from "../../lib/supabase/clubJoinQueries";
 import { getClubEvents, createEvent, setRsvp, cancelEvent, ClubEvent, RsvpResponse } from "../../lib/supabase/eventQueries";
 import { useBackNav } from "../../lib/useBackNav";
+import Sheet from "../shell/Sheet";
 
 const ROLE_LABEL: Record<TeamRole, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -438,7 +439,11 @@ function InviteSheet(props: {
 }) {
   const { code, teamName, isAdmin } = props;
   return (
-    <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true">
+    // Portalled to <body>: nested inside the screen this sheet lost to the tab
+    // bar, because the screen root's filling `anim-fade` makes a stacking
+    // context. See features/shell/Sheet.tsx.
+    <Sheet>
+      <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true">
       <div className="absolute inset-0 bg-graphite/45 anim-fade" onClick={props.onClose} />
       <div className="relative w-full max-w-sm bg-ivory rounded-t-[26px] px-5 pt-2.5 pb-7 anim-rise shadow-[0_-8px_40px_rgba(13,13,13,0.25)]">
         <div className="w-9 h-[5px] rounded-full bg-stone/70 mx-auto mb-3.5" />
@@ -478,7 +483,8 @@ function InviteSheet(props: {
 
         <button onClick={props.onClose} className="w-full text-[14px] font-semibold text-warm-gray py-3 mt-1.5 active:opacity-70">Done</button>
       </div>
-    </div>
+      </div>
+    </Sheet>
   );
 }
 

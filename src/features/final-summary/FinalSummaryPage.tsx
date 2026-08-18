@@ -1,4 +1,5 @@
 import PageHeader from "../shell/PageHeader";
+import Sheet from "../shell/Sheet";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { StandingsRow } from "../../lib/supabase/standingsQueries";
@@ -320,6 +321,9 @@ export default function FinalSummaryPage() {
 
       {/* Recap preview — review it, then share with a fresh tap */}
       {recapUrl && (
+        // Portalled to <body> — nested here it would sit under the tab bar, the
+        // same way the club invite sheet did. See features/shell/Sheet.tsx.
+        <Sheet>
         <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true">
           <div className="absolute inset-0 bg-graphite/55 anim-fade" onClick={() => setRecapUrl(null)} />
           <div className="relative w-full max-w-sm bg-ivory rounded-t-[26px] px-5 pt-2.5 pb-7 anim-rise shadow-[0_-8px_40px_rgba(13,13,13,0.3)] max-h-[92vh] overflow-y-auto">
@@ -353,6 +357,7 @@ export default function FinalSummaryPage() {
             </button>
           </div>
         </div>
+        </Sheet>
       )}
     </div>
   );
