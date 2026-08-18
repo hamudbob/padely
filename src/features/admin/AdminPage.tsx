@@ -7,7 +7,16 @@ import {
   AdminSession,
   AdminUser,
   ErrorGroup,
+  Growth,
   HealthCheck,
+  LiveSession,
+  SearchHit,
+  AppSettings,
+  adminSearch,
+  getAdminAppSettings,
+  getGrowth,
+  getLiveNow,
+  saveAppSettings,
   getAdminActivity,
   getAdminErrors,
   getAdminHealth,
@@ -18,6 +27,7 @@ import {
 } from "../../lib/supabase/adminQueries";
 import { applySessionRatings } from "../../lib/supabase/ratingActions";
 import { applySessionResults } from "../../lib/supabase/resultActions";
+import { invalidateAppSettings } from "../../lib/supabase/appSettings";
 
 /**
  * The operator's view of Padelier.
@@ -36,15 +46,27 @@ import { applySessionResults } from "../../lib/supabase/resultActions";
  * has to work on a phone — hence the same type scale and touch targets.
  */
 
-type Tab = "overview" | "health" | "people" | "sessions" | "errors" | "activity";
+type Tab =
+  | "overview"
+  | "live"
+  | "health"
+  | "people"
+  | "sessions"
+  | "growth"
+  | "errors"
+  | "activity"
+  | "settings";
 
 const TABS: { id: Tab; label: string }[] = [
   { id: "overview", label: "Overview" },
+  { id: "live", label: "Live" },
   { id: "health", label: "Health" },
   { id: "people", label: "People" },
   { id: "sessions", label: "Sessions" },
+  { id: "growth", label: "Growth" },
   { id: "errors", label: "Errors" },
   { id: "activity", label: "Activity" },
+  { id: "settings", label: "Settings" },
 ];
 
 // ── Small shared pieces ──────────────────────────────────────────────────
@@ -415,13 +437,13 @@ function SessionsTab() {
             return (
               <div key={s.id} className="px-4 py-3 border-t border-line first:border-t-0">
                 <div className="flex items-start justify-between gap-3">
-                  <span className="min-w-0">
+                  <Link to={`/admin/s/${s.id}`} className="min-w-0 active:opacity-70">
                     <b className="block text-[14px] font-semibold text-graphite truncate">{s.name}</b>
                     <span className="block text-[11.5px] text-warm-gray truncate">
                       {s.format} · {s.host_name ?? "unknown host"}
                       {s.club_name ? ` · ${s.club_name}` : ""} · {relativeTime(s.created_at)}
                     </span>
-                  </span>
+                  </Link>
                   <span className="text-[11px] font-semibold shrink-0 text-warm-gray uppercase tracking-[0.08em]">
                     {s.status}
                   </span>
@@ -588,6 +610,357 @@ function ActivityTab() {
   );
 }
 
+
+// ── Search ───────────────────────────────────────────────────────────────
+
+/**
+ * One box, anything in it: a join code, a public token, a uuid, an email, a
+ * name. Support conversations don't arrive sorted by entity type — "the code
+ * is ABC123" and "his email is x@y" are the same question — so neither does
+ * this.
+ */
+function SearchBox() {
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function run(e: React.FormEvent) {
+    e.preventDefault();
+    if (query.trim().length < 2) return;
+    setBusy(true);
+    try {
+      setHits(await adminSearch(query));
+    } catch {
+      setHits([]);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const href = (h: SearchHit) =>
+    h.type === "user" ? `/admin/u/${h.id}` : `/admin/s/${h.id}`;
+
+  return (
+    <div className="mb-4">
+      <form onSubmit={run} className="flex gap-2">
+        <input
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          placeholder="Code, email, name, or id"
+          aria-label="Search everything"
+          className="flex-1 min-w-0 rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+        />
+        <button className="shrink-0 rounded-xl bg-graphite text-ivory text-[13px] font-semibold px-4">
+          {busy ? "…" : "Find"}
+        </button>
+        {hits !== null && (
+          <button
+            type="button"
+            onClick={() => {
+              setHits(null);
+              setQuery("");
+            }}
+            className="shrink-0 rounded-xl border border-line text-ink-2 text-[13px] font-semibold px-3 bg-surface"
+          >
+            Clear
+          </button>
+        )}
+      </form>
+
+      {hits !== null && (
+        <Card className="overflow-hidden mt-2">
+          {hits.length === 0 ? (
+            <Empty>Nothing matches that.</Empty>
+          ) : (
+            hits.map((h) => (
+              <Link
+                key={`${h.type}-${h.id}-${h.label}`}
+                to={href(h)}
+                className="flex items-center gap-3 px-4 py-2.5 border-t border-line first:border-t-0 active:bg-surface-2"
+              >
+                <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-warm-gray w-[52px] shrink-0">
+                  {h.type}
+                </span>
+                <span className="min-w-0">
+                  <b className="block text-[13px] font-semibold text-graphite truncate">{h.label}</b>
+                  <span className="block text-[11.5px] text-warm-gray truncate">{h.sublabel}</span>
+                </span>
+              </Link>
+            ))
+          )}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ── Live now ─────────────────────────────────────────────────────────────
+
+function LiveTab() {
+  const { data, error, loading, reload } = useAsync<LiveSession[]>(getLiveNow, []);
+  // A live screen that doesn't move is a lie. Cheap enough: one small RPC.
+  useEffect(() => {
+    const id = window.setInterval(reload, 30_000);
+    return () => window.clearInterval(id);
+  }, [reload]);
+
+  if (!data) return <Loading error={error} loading={loading} />;
+  if (data.length === 0) return <Empty>Nothing is live right now.</Empty>;
+
+  return (
+    <div className="space-y-2">
+      {data.map((s) => {
+        const idleMinutes = Math.round((Date.now() - new Date(s.last_activity).getTime()) / 60000);
+        const stale = idleMinutes > 30;
+        return (
+          <Card key={s.id} className="px-4 py-3.5">
+            <div className="flex items-start justify-between gap-3">
+              <Link to={`/admin/s/${s.id}`} className="min-w-0 active:opacity-70">
+                <b className="block text-[14px] font-semibold text-graphite truncate">{s.name}</b>
+                <span className="block text-[11.5px] text-warm-gray truncate">
+                  {s.format} · {s.host_name ?? "unknown host"}
+                  {s.club_name ? ` · ${s.club_name}` : ""} · code {s.join_code}
+                </span>
+              </Link>
+              <span className={`text-[11.5px] font-semibold shrink-0 ${stale ? "text-loss" : "text-win"}`}>
+                {idleMinutes < 1 ? "just now" : `${idleMinutes}m idle`}
+              </span>
+            </div>
+            <div className="flex flex-wrap gap-x-3 gap-y-1 mt-1.5 text-[11.5px] text-ink-2 font-mono tnum">
+              <span>{s.players} players</span>
+              <span>round {s.current_round ?? "–"} of {s.rounds}</span>
+              <span>{s.scored} scored</span>
+              <span>{s.unscored} open</span>
+            </div>
+            {stale && (
+              <p className="text-[11.5px] text-ink-2 mt-1.5 leading-relaxed">
+                No score for {idleMinutes} minutes — either it finished and nobody pressed End, or the host lost
+                the tab. Open it to see which.
+              </p>
+            )}
+          </Card>
+        );
+      })}
+    </div>
+  );
+}
+
+// ── Growth ───────────────────────────────────────────────────────────────
+
+function Bar({ label, value, of }: { label: string; value: number; of: number }) {
+  const pct = of === 0 ? 0 : Math.round((value / of) * 100);
+  return (
+    <div className="py-1.5">
+      <div className="flex items-baseline justify-between gap-3">
+        <span className="text-[12.5px] text-graphite">{label}</span>
+        <span className="font-mono tnum text-[12.5px] text-ink-2">
+          {value} <span className="text-warm-gray">· {pct}%</span>
+        </span>
+      </div>
+      <div className="h-[6px] rounded-full bg-surface-2 mt-1 overflow-hidden">
+        <div className="h-full rounded-full bg-gold-soft" style={{ width: `${pct}%` }} />
+      </div>
+    </div>
+  );
+}
+
+function GrowthTab() {
+  const { data, error, loading } = useAsync<Growth>(getGrowth, []);
+  if (!data) return <Loading error={error} loading={loading} />;
+  const f = data.funnel;
+
+  return (
+    <div className="space-y-4">
+      <Card className="px-4 py-3.5">
+        <p className="text-[13px] font-semibold text-ink-2">Of everyone who signed up over a week ago</p>
+        <p className="text-[11.5px] text-warm-gray mt-0.5 mb-2">
+          Newer accounts are excluded — they haven’t had a fair chance to play yet, and counting them would flatter
+          nobody.
+        </p>
+        <Bar label="Finished onboarding" value={f.onboarded} of={f.accounts} />
+        <Bar label="Played at least once" value={f.played_ever} of={f.accounts} />
+        <Bar label="Played within their first week" value={f.played_in_7d} of={f.accounts} />
+        <Bar label="Came back for a second session" value={f.played_twice} of={f.accounts} />
+        <Bar label="Hosted something themselves" value={f.hosted_ever} of={f.accounts} />
+        <p className="text-[11.5px] text-warm-gray mt-2">{f.accounts} accounts counted.</p>
+      </Card>
+
+      <Card className="px-4 py-3.5">
+        <p className="text-[13px] font-semibold text-ink-2 mb-2">Week by week</p>
+        <div className="space-y-1">
+          <div className="flex text-[10px] font-bold uppercase tracking-[0.1em] text-warm-gray">
+            <span className="flex-1">Week</span>
+            <span className="w-14 text-right">Signups</span>
+            <span className="w-14 text-right">Sessions</span>
+            <span className="w-14 text-right">Hosts</span>
+            <span className="w-14 text-right">Players</span>
+          </div>
+          {data.weekly.map((w) => (
+            <div key={w.week} className="flex text-[12px] font-mono tnum text-ink-2">
+              <span className="flex-1 text-graphite">{w.week.slice(5)}</span>
+              <span className="w-14 text-right">{w.signups}</span>
+              <span className="w-14 text-right">{w.sessions}</span>
+              <span className="w-14 text-right">{w.active_hosts}</span>
+              <span className="w-14 text-right">{w.active_players}</span>
+            </div>
+          ))}
+        </div>
+      </Card>
+
+      {data.stalled.length > 0 && (
+        <Card className="px-4 py-3.5">
+          <p className="text-[13px] font-semibold text-ink-2">Signed up, never played</p>
+          <p className="text-[11.5px] text-warm-gray mt-0.5 mb-2">
+            The list worth acting on: an account is here a week after signing up with no session to its name.
+          </p>
+          {data.stalled.map((u) => (
+            <Link
+              key={u.id}
+              to={`/admin/u/${u.id}`}
+              className="flex items-baseline justify-between gap-3 py-1.5 border-t border-line first:border-t-0 active:opacity-70"
+            >
+              <span className="text-[12.5px] text-graphite truncate">
+                {u.display_name}
+                {!u.onboarded && <span className="text-loss"> · never finished setup</span>}
+              </span>
+              <span className="text-[11.5px] text-warm-gray shrink-0">{relativeTime(u.created_at)}</span>
+            </Link>
+          ))}
+        </Card>
+      )}
+    </div>
+  );
+}
+
+// ── Settings ─────────────────────────────────────────────────────────────
+
+/**
+ * The switches the app reads on load. Worth being honest in the UI about
+ * what each one really does — a pause on signups is enforced in the signup
+ * form, not in the database, so it stops the ordinary route and not a
+ * determined person with an API client.
+ */
+function SettingsTab() {
+  const { data, error, loading, reload } = useAsync<AppSettings>(getAdminAppSettings, []);
+  const [draft, setDraft] = useState<AppSettings | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [note, setNote] = useState<string | null>(null);
+
+  useEffect(() => {
+    if (data) setDraft(data);
+  }, [data]);
+
+  if (!draft) return <Loading error={error} loading={loading} />;
+
+  async function save() {
+    if (!draft) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      await saveAppSettings({
+        banner_message: draft.banner_message?.trim() ? draft.banner_message.trim() : null,
+        banner_tone: draft.banner_tone,
+        banner_until: draft.banner_until,
+        signups_paused: draft.signups_paused,
+        maintenance_message: draft.maintenance_message?.trim() ? draft.maintenance_message.trim() : null,
+      });
+      invalidateAppSettings(); // so the banner updates without a reload
+      setNote("Saved. It’s on every screen from the next page load.");
+      reload();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "That didn’t save.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <div className="space-y-4">
+      <Card className="px-4 py-3.5">
+        <p className="text-[13px] font-semibold text-ink-2">Announcement banner</p>
+        <p className="text-[11.5px] text-warm-gray mt-0.5 mb-2">
+          Shown at the top of every screen, signed in or not, until someone dismisses it or it expires.
+        </p>
+        <textarea
+          value={draft.banner_message ?? ""}
+          onChange={(e) => setDraft({ ...draft, banner_message: e.target.value })}
+          rows={2}
+          placeholder="League resets on Sunday."
+          className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[15px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+        />
+        <div className="flex gap-2 mt-2">
+          {(["info", "warn"] as const).map((tone) => (
+            <button
+              key={tone}
+              onClick={() => setDraft({ ...draft, banner_tone: tone })}
+              className={`text-[12.5px] font-semibold rounded-full px-3 py-1.5 border ${
+                draft.banner_tone === tone ? "bg-graphite text-ivory border-graphite" : "bg-surface text-ink-2 border-line"
+              }`}
+            >
+              {tone === "info" ? "Quiet" : "Attention"}
+            </button>
+          ))}
+        </div>
+        <label className="block text-[11.5px] text-warm-gray mt-3">
+          Stops showing after (optional)
+          <input
+            type="datetime-local"
+            value={draft.banner_until ? new Date(draft.banner_until).toISOString().slice(0, 16) : ""}
+            onChange={(e) =>
+              setDraft({ ...draft, banner_until: e.target.value ? new Date(e.target.value).toISOString() : null })
+            }
+            className="block w-full mt-1 rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink"
+          />
+        </label>
+      </Card>
+
+      <Card className="px-4 py-3.5">
+        <p className="text-[13px] font-semibold text-ink-2">Maintenance note</p>
+        <p className="text-[11.5px] text-warm-gray mt-0.5 mb-2">
+          Takes over the banner and always reads as urgent. Nothing is blocked — people can still use the app, which
+          is deliberate: a padel session in progress must not be interrupted by a notice.
+        </p>
+        <textarea
+          value={draft.maintenance_message ?? ""}
+          onChange={(e) => setDraft({ ...draft, maintenance_message: e.target.value })}
+          rows={2}
+          placeholder="Scores may be slow to sync for the next hour."
+          className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[15px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+        />
+      </Card>
+
+      <Card className="px-4 py-3.5">
+        <div className="flex items-start justify-between gap-3">
+          <span>
+            <p className="text-[13px] font-semibold text-ink-2">Pause new signups</p>
+            <p className="text-[11.5px] text-warm-gray mt-0.5">
+              The sign-up form refuses and explains. Existing accounts are untouched. Enforced in the app, not the
+              database — it closes the front door, it isn’t a lock.
+            </p>
+          </span>
+          <button
+            onClick={() => setDraft({ ...draft, signups_paused: !draft.signups_paused })}
+            className={`shrink-0 text-[12.5px] font-semibold rounded-full px-3.5 py-2 border ${
+              draft.signups_paused ? "bg-loss text-ivory border-loss" : "bg-surface text-ink-2 border-line"
+            }`}
+          >
+            {draft.signups_paused ? "Paused" : "Open"}
+          </button>
+        </div>
+      </Card>
+
+      <button
+        onClick={save}
+        disabled={busy}
+        className="w-full rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-40"
+      >
+        {busy ? "Saving…" : "Save"}
+      </button>
+      {note && <p className="text-[12px] text-ink-2 text-center">{note}</p>}
+    </div>
+  );
+}
+
 // ── The page ─────────────────────────────────────────────────────────────
 
 export default function AdminPage() {
@@ -618,12 +991,17 @@ export default function AdminPage() {
         ))}
       </div>
 
+      <SearchBox />
+
       {tab === "overview" && <OverviewTab />}
+      {tab === "live" && <LiveTab />}
       {tab === "health" && <HealthTab />}
       {tab === "people" && <PeopleTab />}
       {tab === "sessions" && <SessionsTab />}
+      {tab === "growth" && <GrowthTab />}
       {tab === "errors" && <ErrorsTab />}
       {tab === "activity" && <ActivityTab />}
+      {tab === "settings" && <SettingsTab />}
     </div>
   );
 }

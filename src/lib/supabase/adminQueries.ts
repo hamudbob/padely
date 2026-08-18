@@ -226,3 +226,200 @@ export const setAdmin = (userId: string, isAdmin: boolean) =>
 
 export const resolveErrorGroup = (fingerprint: string, resolved = true) =>
   call<number>("admin_resolve_error", { p_fingerprint: fingerprint, p_resolved: resolved });
+
+
+// ── 0043: sessions, live, search, growth, settings ───────────────────────
+
+export interface SessionPlayer {
+  id: string;
+  display_name: string;
+  gender: string | null;
+  team_side: string | null;
+  preferred_side: string | null;
+  status: string;
+  matches_played: number;
+  rests: number;
+  email: string | null;
+  linked_user_id: string | null;
+  account_name: string | null;
+  account_email: string | null;
+  /** False on a linked player means their Player tab can't see this session —
+   *  get_player_sessions matches on a confirmed join request's email, and a
+   *  claimed spot never files one. */
+  has_join_request: boolean;
+}
+
+export interface SessionMatch {
+  id: string;
+  court_label: string | null;
+  court_ordinal: number | null;
+  score_a: number | null;
+  score_b: number | null;
+  outcome: string | null;
+  status: string;
+  team_a: string | null;
+  team_b: string | null;
+}
+
+export interface SessionDetail {
+  session: {
+    id: string;
+    name: string;
+    format: string;
+    scoring_format: string;
+    ranking_basis: string;
+    status: string;
+    join_code: string;
+    public_token: string;
+    fixed_partner_style: string | null;
+    team_score_mode: string | null;
+    counts_for_league: boolean | null;
+    ratings_applied: boolean;
+    results_applied: boolean;
+    created_at: string;
+    started_at: string | null;
+    ended_at: string | null;
+    created_by: string | null;
+    host_name: string | null;
+    host_email: string | null;
+    club_id: string | null;
+    club_name: string | null;
+  } | null;
+  players: SessionPlayer[];
+  rounds: {
+    id: string;
+    sequence: number;
+    status: string;
+    generation_reason: string | null;
+    generated_at: string | null;
+    matches: SessionMatch[];
+  }[];
+  score_edits: {
+    id: string;
+    old_score_a: number | null;
+    old_score_b: number | null;
+    new_score_a: number | null;
+    new_score_b: number | null;
+    reason: string | null;
+    edited_at: string;
+    edited_by: string | null;
+  }[];
+  ratings: {
+    user_id: string;
+    display_name: string | null;
+    rating: number;
+    delta: number | null;
+    rating_before: number | null;
+    games_before: number | null;
+    games_after: number | null;
+    created_at: string;
+  }[];
+  league_rows: {
+    user_id: string;
+    display_name: string | null;
+    rank: number;
+    placement_points: number;
+    podium_bonus: number;
+    wins: number;
+    losses: number;
+    draws: number;
+    perf_adj: number;
+  }[];
+  join_requests: {
+    id: string;
+    display_name: string;
+    email: string | null;
+    status: string;
+    player_id: string | null;
+    created_at: string;
+    decided_at: string | null;
+  }[];
+  claims: {
+    id: string;
+    player_id: string;
+    claimant_user_id: string | null;
+    claimant: string | null;
+    status: string;
+    created_at: string;
+    decided_at: string | null;
+  }[];
+}
+
+export interface LiveSession {
+  id: string;
+  name: string;
+  format: string;
+  status: string;
+  join_code: string;
+  public_token: string;
+  started_at: string | null;
+  host_name: string | null;
+  club_name: string | null;
+  players: number;
+  current_round: number | null;
+  rounds: number;
+  scored: number;
+  unscored: number;
+  /** Newest of: last score, last round generated, session start. How stale a
+   *  live session is says more than that it is live. */
+  last_activity: string;
+}
+
+export interface SearchHit {
+  weight: number;
+  type: "session" | "user" | "club" | "player";
+  id: string;
+  label: string;
+  sublabel: string | null;
+}
+
+export interface Growth {
+  weekly: { week: string; signups: number; sessions: number; active_hosts: number; active_players: number }[];
+  funnel: {
+    accounts: number;
+    onboarded: number;
+    played_ever: number;
+    played_in_7d: number;
+    played_twice: number;
+    hosted_ever: number;
+  };
+  stalled: { id: string; display_name: string; email: string | null; created_at: string; onboarded: boolean }[];
+}
+
+export interface AppSettings {
+  banner_message: string | null;
+  banner_tone: "info" | "warn";
+  banner_until: string | null;
+  signups_paused: boolean;
+  maintenance_message: string | null;
+}
+
+export const getSessionDetail = (sessionId: string) =>
+  call<SessionDetail>("admin_session_detail", { p_session_id: sessionId });
+export const getLiveNow = () => call<LiveSession[]>("admin_live_now");
+export const adminSearch = (query: string) => call<SearchHit[]>("admin_search", { p_query: query });
+export const getGrowth = () => call<Growth>("admin_growth");
+export const getAdminAppSettings = () => call<AppSettings>("get_app_settings");
+
+export const saveAppSettings = (s: {
+  banner_message: string | null;
+  banner_tone: "info" | "warn";
+  banner_until: string | null;
+  signups_paused: boolean;
+  maintenance_message: string | null;
+}) =>
+  call<AppSettings>("admin_set_app_settings", {
+    p_banner_message: s.banner_message,
+    p_banner_tone: s.banner_tone,
+    p_banner_until: s.banner_until,
+    p_signups_paused: s.signups_paused,
+    p_maintenance_message: s.maintenance_message,
+  });
+
+/** Move a stuck session to ended. Does NOT apply ratings — those are computed
+ *  on the client from the final matches — so follow it with Re-run finalize if
+ *  the session should count. */
+export const forceEndSession = (sessionId: string) =>
+  call<{ session_id: string; status: string; changed: boolean }>("admin_force_end_session", {
+    p_session_id: sessionId,
+  });

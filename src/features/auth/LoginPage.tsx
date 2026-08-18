@@ -10,6 +10,7 @@ import {
   emailHasAccount,
 } from "../../lib/supabase/auth";
 import { getMyProfile } from "../../lib/supabase/profileQueries";
+import { useAppSettings } from "../../lib/supabase/appSettings";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
 import { evaluatePassword } from "../../lib/passwordPolicy";
@@ -76,6 +77,10 @@ export default function LoginPage() {
 
   const verdict = useMemo(() => evaluatePassword(password, { email }), [password, email]);
   const isSignup = stage === "signup";
+  // A pause set from the admin console. Enforced HERE, not in the database:
+  // it closes the ordinary front door, and is not a lock. Said plainly in the
+  // admin UI too, so nobody mistakes it for security.
+  const { signupsPaused } = useAppSettings();
   const showPolicy = isSignup && (pwFocused || password.length > 0);
 
   // The confirmation link lands back here with a session already established.
@@ -219,6 +224,10 @@ export default function LoginPage() {
       }
 
       // stage === "signup"
+      if (signupsPaused) {
+        setError("New accounts are paused just now. If you already have one, sign in above — nothing has changed for existing accounts.");
+        return;
+      }
       const out = await signUpAndClassify({ email, password, redirectTo: emailRedirectTo });
       if (out.alreadyRegistered) {
         // The lookup said "new" but Supabase says otherwise — e.g. they signed

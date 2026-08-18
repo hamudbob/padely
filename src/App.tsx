@@ -27,8 +27,10 @@ import MembersPage from "./features/teams/MembersPage";
 import EventPage from "./features/teams/EventPage";
 import PublicProfilePage from "./features/public-profile/PublicProfilePage";
 import NotificationsPage from "./features/notifications/NotificationsPage";
+import AppNotice from "./features/shell/AppNotice";
 import AdminPage from "./features/admin/AdminPage";
 import AdminUserPage from "./features/admin/AdminUserPage";
+import AdminSessionPage from "./features/admin/AdminSessionPage";
 import RequireAdmin from "./features/admin/RequireAdmin";
 
 /**
@@ -74,7 +76,12 @@ function RootRoute() {
 export default function App() {
   useRecoveryRedirect();
   return (
-    <Routes>
+    <>
+      {/* Above the router so one announcement reaches every screen, including
+          the signed-out ones. Renders nothing at all when there's no message,
+          which is its normal state. */}
+      <AppNotice />
+      <Routes>
       <Route path="/" element={<RootRoute />} />
       <Route path="/login" element={<LoginPage />} />
       {/* Public: it has to work as a link pasted into a group chat by someone
@@ -148,6 +155,14 @@ export default function App() {
             </RequireAdmin>
           }
         />
+        <Route
+          path="/admin/s/:sessionId"
+          element={
+            <RequireAdmin>
+              <AdminSessionPage />
+            </RequireAdmin>
+          }
+        />
       </Route>
 
       {/* Places that are ALSO shareable links. Same screens for a member and a
@@ -188,7 +203,8 @@ export default function App() {
       <Route path="/u/:userId" element={<PublicProfilePage />} />
       {/* A mistyped or stale URL lands on "/", which then routes by session
           state — never a blank screen. */}
-      <Route path="*" element={<Navigate to="/" replace />} />
-    </Routes>
+        <Route path="*" element={<Navigate to="/" replace />} />
+      </Routes>
+    </>
   );
 }
