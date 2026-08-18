@@ -55,11 +55,19 @@ function Section({ title, children }: { title: string; children: React.ReactNode
 
 /** Reads the diagnosis numbers and says, in a sentence, what they mean. */
 function verdict(d: AdminUserDetail["diagnosis"], ratingGames: number): { tone: "ok" | "warn"; text: string } {
-  if (ratingGames > 0 && d.history_rows === 0) {
+  // history_live, not history_rows. A row whose session was deleted keeps a
+  // null session_id and is not evidence of anything — reading it as history
+  // is exactly the bug 0042 fixed.
+  if (ratingGames > 0 && d.history_live === 0) {
+    const debris =
+      d.history_orphaned > 0
+        ? ` The ${d.history_orphaned} history row${d.history_orphaned === 1 ? "" : "s"} still here point at deleted sessions; reset clears them too.`
+        : "";
     return {
       tone: "warn",
       text:
-        "This rating has no sessions behind it. Every rated session was deleted and the snapshot survived — the number corresponds to no game that still exists. Reset rating puts it back to a new player’s 1500.",
+        "This rating has no surviving session behind it. Every rated session was deleted and the snapshot outlived them — the number corresponds to no game that still exists. Reset rating puts it back to a new player’s 1500." +
+        debris,
     };
   }
   if (d.linked_player_rows > 0 && d.confirmed_join_requests === 0) {
@@ -72,7 +80,7 @@ function verdict(d: AdminUserDetail["diagnosis"], ratingGames: number): { tone: 
   if (d.history_orphaned > 0) {
     return {
       tone: "warn",
-      text: `${d.history_orphaned} rating-history row${d.history_orphaned === 1 ? "" : "s"} point at a session that no longer exists, so the trend line has a bump nothing explains.`,
+      text: `${d.history_orphaned} rating-history row${d.history_orphaned === 1 ? "" : "s"} point at a session that no longer exists, so the trend line has a bump nothing explains. Reset rating removes them and rebuilds from what's left.`,
     };
   }
   return { tone: "ok", text: "Nothing inconsistent. Rating, history and sessions all agree." };
@@ -106,10 +114,14 @@ export default function AdminUserPage() {
     setNote(null);
     try {
       const result = await resetUserRating(userId);
+      const cleared =
+        result.orphans_removed > 0
+          ? ` Removed ${result.orphans_removed} history row${result.orphans_removed === 1 ? "" : "s"} whose session no longer exists (kept in the admin log).`
+          : "";
       setNote(
-        result.mode === "defaults"
-          ? `Reset to 1500 over 0 games — there was no rated session left to rebuild from.`
-          : `Restored to ${Math.round(result.rating)} over ${result.games} games from the last surviving snapshot.`,
+        (result.mode === "defaults"
+          ? `Reset to 1500 over 0 games — no session with a surviving record left to rebuild from.`
+          : `Restored to ${Math.round(result.rating)} over ${result.games} games from the last snapshot whose session still exists.`) + cleared,
       );
       load();
     } catch (e) {
@@ -181,7 +193,8 @@ export default function AdminUserPage() {
         <Row label="Deviation" value={Math.round(p.rating_deviation)} />
         <Row label="Volatility" value={p.rating_volatility} />
         <Row label="Games counted" value={p.rating_games} />
-        <Row label="History rows" value={data.diagnosis.history_rows} />
+        <Row label="History rows (session still exists)" value={data.diagnosis.history_live} />
+        <Row label="History rows (session deleted)" value={data.diagnosis.history_orphaned} />
         <div className="pt-3">
           <button
             onClick={doReset}

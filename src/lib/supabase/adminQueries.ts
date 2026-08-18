@@ -88,6 +88,10 @@ export interface AdminUserDetail {
     linked_player_rows: number;
     confirmed_join_requests: number;
     history_rows: number;
+    /** Rows whose session still exists. The only ones that mean anything —
+     *  a row with a deleted session (history_orphaned) is debris the FK left
+     *  behind, and treating it as history is what 0042 fixed. */
+    history_live: number;
     history_orphaned: number;
     sessions_hosted: number;
     league_rows: number;
@@ -201,11 +205,14 @@ export const getAdminErrors = (hours = 168, includeResolved = false, limit = 50)
 // change anything without leaving a record of who changed it and from what.
 
 /** Put a rating back: to a new player's numbers if no rated session survives,
- *  otherwise to the most recent snapshot still in their history. */
+ *  otherwise to the most recent snapshot whose session still exists. History
+ *  rows left pointing at a deleted session are removed (copied into the
+ *  admin_actions log first, so the change can be undone by hand). */
 export const resetUserRating = (userId: string) =>
-  call<{ mode: "defaults" | "from_history"; rating: number; games: number }>("admin_reset_user_rating", {
-    p_user_id: userId,
-  });
+  call<{ mode: "defaults" | "from_history"; rating: number; games: number; orphans_removed: number }>(
+    "admin_reset_user_rating",
+    { p_user_id: userId },
+  );
 
 /** Point a session's player row at an account, or at nobody (pass null). */
 export const linkPlayer = (playerId: string, userId: string | null) =>
