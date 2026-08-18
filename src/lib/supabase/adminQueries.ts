@@ -1,0 +1,221 @@
+import { supabase } from "./client";
+
+/**
+ * The admin dashboard's data layer (0041_admin.sql).
+ *
+ * Every function here calls a SECURITY DEFINER RPC that checks `is_admin` on
+ * the server before returning anything. That check is the real gate — the
+ * route guard in the UI is only there so a non-admin sees a sensible page
+ * instead of a wall of errors. Shipping the admin screens in everyone's
+ * bundle is fine precisely because the frontend holds no authority.
+ */
+
+type RpcFn = (fn: string, args: Record<string, unknown>) => Promise<{ data: unknown; error: { message: string } | null }>;
+const rpc = supabase.rpc.bind(supabase) as unknown as RpcFn;
+
+async function call<T>(fn: string, args: Record<string, unknown> = {}): Promise<T> {
+  const { data, error } = await rpc(fn, args);
+  if (error) throw new Error(error.message);
+  return data as T;
+}
+
+// ── Types ────────────────────────────────────────────────────────────────
+export interface AdminOverview {
+  generated_at: string;
+  users: number;
+  users_deleted: number;
+  users_new_7d: number;
+  users_active_30d: number;
+  sessions_total: number;
+  sessions_live: number;
+  sessions_draft: number;
+  sessions_ended: number;
+  sessions_7d: number;
+  matches_final: number;
+  clubs: number;
+  errors_24h: number;
+  errors_open: number;
+  admins: number;
+  formats: { format: string; n: number }[];
+  daily: { day: string; sessions: number }[];
+}
+
+export interface HealthCheck {
+  key: string;
+  label: string;
+  /** Why this matters — written where the check is defined, so the dashboard
+   *  explains itself rather than showing a number with no context. */
+  why: string;
+  count: number;
+  sample: Record<string, unknown>[];
+}
+
+export interface AdminUser {
+  id: string;
+  display_name: string;
+  email: string | null;
+  rating: number;
+  rating_games: number;
+  is_admin: boolean;
+  created_at: string;
+  deleted_at: string | null;
+  sessions_hosted: number;
+  sessions_played: number;
+  rated_sessions: number;
+  clubs: number;
+  errors_7d: number;
+  last_active: string;
+}
+
+export interface AdminUserDetail {
+  profile: {
+    id: string;
+    display_name: string;
+    email: string | null;
+    avatar_url: string | null;
+    bio: string | null;
+    rating: number;
+    rating_deviation: number;
+    rating_volatility: number;
+    rating_games: number;
+    is_admin: boolean;
+    onboarded_at: string | null;
+    deleted_at: string | null;
+    created_at: string;
+    updated_at: string;
+  } | null;
+  diagnosis: {
+    linked_player_rows: number;
+    confirmed_join_requests: number;
+    history_rows: number;
+    history_orphaned: number;
+    sessions_hosted: number;
+    league_rows: number;
+  };
+  rating_history: {
+    id: string;
+    session_id: string | null;
+    session_name: string | null;
+    rating: number;
+    delta: number | null;
+    rating_before: number | null;
+    games_before: number | null;
+    games_after: number | null;
+    created_at: string;
+  }[];
+  sessions: {
+    id: string;
+    name: string;
+    format: string;
+    status: string;
+    created_at: string;
+    ended_at: string | null;
+    hosted: boolean;
+    ratings_applied: boolean;
+    results_applied: boolean;
+  }[];
+  clubs: { id: string; name: string; role: string; joined_at: string }[];
+  errors: { id: number; kind: string; message: string; route: string | null; created_at: string }[];
+  admin_actions: { action: string; detail: Record<string, unknown> | null; created_at: string }[];
+}
+
+export interface AdminSession {
+  id: string;
+  name: string;
+  format: string;
+  scoring_format: string;
+  status: string;
+  created_at: string;
+  started_at: string | null;
+  ended_at: string | null;
+  public_token: string | null;
+  counts_for_league: boolean | null;
+  ratings_applied: boolean;
+  results_applied: boolean;
+  created_by: string | null;
+  host_name: string | null;
+  club_name: string | null;
+  players: number;
+  accounts: number;
+  rounds: number;
+  final_matches: number;
+}
+
+export interface ActivityItem {
+  kind:
+    | "session_created"
+    | "session_ended"
+    | "account_created"
+    | "club_created"
+    | "club_joined"
+    | "score_edited"
+    | "claim"
+    | "error"
+    | "admin_action";
+  at: string;
+  ref: string | null;
+  detail: Record<string, unknown>;
+}
+
+export interface ErrorGroup {
+  fingerprint: string;
+  first_seen: string;
+  last_seen: string;
+  occurrences: number;
+  users: number;
+  open: boolean;
+  message: string;
+  kind: string;
+  route: string | null;
+  stack: string | null;
+  app_version: string | null;
+}
+
+// ── Reads ────────────────────────────────────────────────────────────────
+
+/** Is the signed-in account an admin? The same check the RPCs make. */
+export async function amIAdmin(): Promise<boolean> {
+  try {
+    return (await call<boolean>("is_app_admin")) === true;
+  } catch {
+    // A missing function (migration not applied) or a signed-out caller both
+    // mean "no", and neither should look like a crash.
+    return false;
+  }
+}
+
+export const getAdminOverview = () => call<AdminOverview>("admin_overview");
+export const getAdminHealth = () => call<HealthCheck[]>("admin_health");
+export const getAdminUsers = (query?: string, limit = 50) =>
+  call<AdminUser[]>("admin_users", { p_query: query?.trim() || null, p_limit: limit });
+export const getAdminUserDetail = (userId: string) =>
+  call<AdminUserDetail>("admin_user_detail", { p_user_id: userId });
+export const getAdminSessions = (status?: string, limit = 50) =>
+  call<AdminSession[]>("admin_sessions", { p_status: status ?? null, p_limit: limit });
+export const getAdminActivity = (limit = 80) => call<ActivityItem[]>("admin_activity", { p_limit: limit });
+export const getAdminErrors = (hours = 168, includeResolved = false, limit = 50) =>
+  call<ErrorGroup[]>("admin_errors", { p_hours: hours, p_include_resolved: includeResolved, p_limit: limit });
+
+// ── Repairs ──────────────────────────────────────────────────────────────
+// Each one writes an admin_actions row server-side, so the dashboard can't
+// change anything without leaving a record of who changed it and from what.
+
+/** Put a rating back: to a new player's numbers if no rated session survives,
+ *  otherwise to the most recent snapshot still in their history. */
+export const resetUserRating = (userId: string) =>
+  call<{ mode: "defaults" | "from_history"; rating: number; games: number }>("admin_reset_user_rating", {
+    p_user_id: userId,
+  });
+
+/** Point a session's player row at an account, or at nobody (pass null). */
+export const linkPlayer = (playerId: string, userId: string | null) =>
+  call<{ player_id: string; linked_user_id: string | null }>("admin_link_player", {
+    p_player_id: playerId,
+    p_user_id: userId,
+  });
+
+export const setAdmin = (userId: string, isAdmin: boolean) =>
+  call<{ user_id: string; is_admin: boolean }>("admin_set_admin", { p_user_id: userId, p_is_admin: isAdmin });
+
+export const resolveErrorGroup = (fingerprint: string, resolved = true) =>
+  call<number>("admin_resolve_error", { p_fingerprint: fingerprint, p_resolved: resolved });

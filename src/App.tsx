@@ -27,6 +27,9 @@ import MembersPage from "./features/teams/MembersPage";
 import EventPage from "./features/teams/EventPage";
 import PublicProfilePage from "./features/public-profile/PublicProfilePage";
 import NotificationsPage from "./features/notifications/NotificationsPage";
+import AdminPage from "./features/admin/AdminPage";
+import AdminUserPage from "./features/admin/AdminUserPage";
+import RequireAdmin from "./features/admin/RequireAdmin";
 
 /**
  * Safety net for password recovery. Supabase only redirects to URLs on the
@@ -126,6 +129,25 @@ export default function App() {
         <Route path="/teams/:teamId/members" element={<MembersPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
+        {/* The operator's view. RequireAdmin only decides what to RENDER —
+            every admin RPC re-checks is_admin server-side, so shipping these
+            two screens in everyone's bundle grants nobody anything. */}
+        <Route
+          path="/admin"
+          element={
+            <RequireAdmin>
+              <AdminPage />
+            </RequireAdmin>
+          }
+        />
+        <Route
+          path="/admin/u/:userId"
+          element={
+            <RequireAdmin>
+              <AdminUserPage />
+            </RequireAdmin>
+          }
+        />
       </Route>
 
       {/* Places that are ALSO shareable links. Same screens for a member and a

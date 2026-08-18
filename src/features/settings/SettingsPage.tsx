@@ -9,6 +9,7 @@ import {
   InvalidCredentialsError,
 } from "../../lib/supabase/auth";
 import { useHostSession } from "../../lib/supabase/useHostSession";
+import { amIAdmin } from "../../lib/supabase/adminQueries";
 import { useBackNav } from "../../lib/useBackNav";
 import { evaluatePassword } from "../../lib/passwordPolicy";
 import PasswordField from "../auth/PasswordField";
@@ -36,6 +37,19 @@ const BIO_MAX = 280;
 
 export default function SettingsPage() {
   const navigate = useNavigate();
+  // The only way into /admin from the UI. It appears for admins and for
+  // nobody else — the route itself is guarded server-side either way.
+  const [isAdmin, setIsAdmin] = useState(false);
+  useEffect(() => {
+    let cancelled = false;
+    amIAdmin()
+      .then((ok) => !cancelled && setIsAdmin(ok))
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
   const back = useBackNav("/profile");
   const { user } = useHostSession();
 
@@ -395,6 +409,14 @@ export default function SettingsPage() {
             className="flex items-center justify-between text-[13.5px] font-semibold text-gold-ink py-2 active:opacity-70"
           >
             View your public profile <span aria-hidden>›</span>
+          </Link>
+        )}
+        {isAdmin && (
+          <Link
+            to="/admin"
+            className="flex items-center justify-between text-[13.5px] font-semibold text-gold-ink py-2 active:opacity-70"
+          >
+            Admin dashboard <span aria-hidden>›</span>
           </Link>
         )}
         <button
