@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useState } from "react";
+import ErrorNote from "../shell/ErrorNote";
+import { withFallback } from "../../lib/errors";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getJoinSession, requestJoin, lookupGuest, JoinSessionInfo } from "../../lib/supabase/playerJoinQueries";
 import { getClaimablePlayers, requestPlayerClaim, ClaimTarget } from "../../lib/supabase/claimQueries";
@@ -32,7 +34,7 @@ export default function JoinPage() {
   const [code, setCode] = useState("");
   const [session, setSession] = useState<JoinSessionInfo | null>(null);
   const [checking, setChecking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   const [name, setName] = useState("");
   const [gender, setGender] = useState<"M" | "F">("M");
@@ -149,7 +151,7 @@ export default function JoinPage() {
       setDoneClaim(false);
       setStage("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't join just now — please try again.");
+      setError(withFallback(err, "Couldn't join just now — please try again."));
     }
   }
 
@@ -162,7 +164,7 @@ export default function JoinPage() {
       setDoneClaim(true);
       setStage("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't claim that spot — someone may have just taken it.");
+      setError(withFallback(err, "Couldn't claim that spot — someone may have just taken it."));
       if (session?.publicToken) getClaimablePlayers(session.publicToken).then(setClaimTargets).catch(() => {});
     } finally {
       setClaimBusyId(null);
@@ -209,7 +211,7 @@ export default function JoinPage() {
       setSessionName(result.sessionName);
       setStage("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't send your request — please try again.");
+      setError(withFallback(err, "Couldn't send your request — please try again."));
     } finally {
       setSubmitting(false);
     }
@@ -248,7 +250,7 @@ export default function JoinPage() {
               aria-label="6-digit join code"
               className="w-full rounded-2xl border border-line bg-surface px-4 py-4 text-center font-mono tnum text-[28px] tracking-[0.3em] text-graphite placeholder:text-stone focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
             />
-            {error && <p className="text-[13px] text-loss">{error}</p>}
+            <ErrorNote error={error} where="JoinPage" />
             <button
               type="submit"
               disabled={code.length !== 6 || checking}
@@ -284,7 +286,7 @@ export default function JoinPage() {
             ))}
           </div>
 
-          {error && <p className="text-[13px] text-loss mt-3">{error}</p>}
+          <ErrorNote error={error} where="JoinPage" className="mt-2" />
 
           <button
             onClick={async () => {
@@ -377,7 +379,7 @@ export default function JoinPage() {
               </div>
             )}
 
-            {error && <p className="text-[13px] text-loss">{error}</p>}
+            <ErrorNote error={error} where="JoinPage" />
             <button
               type="submit"
               disabled={!name.trim() || submitting}

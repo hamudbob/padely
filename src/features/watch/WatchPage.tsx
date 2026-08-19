@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useState } from "react";
+import ErrorNote from "../shell/ErrorNote";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import { getJoinSession } from "../../lib/supabase/playerJoinQueries";
 import HelpDot from "../shell/HelpDot";
@@ -15,7 +16,7 @@ export default function WatchPage() {
   const [params] = useSearchParams();
   const [code, setCode] = useState("");
   const [checking, setChecking] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   async function resolve(value: string) {
     setChecking(true);
@@ -81,7 +82,7 @@ export default function WatchPage() {
           aria-label="6-digit code"
           className="w-full rounded-2xl border border-line bg-surface px-4 py-4 text-center font-mono tnum text-[28px] tracking-[0.3em] text-graphite placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
         />
-        {error && <p className="text-[13px] text-loss">{error}</p>}
+        <ErrorNote error={error} where="WatchPage" />
         <button
           type="submit"
           disabled={code.length !== 6 || checking}

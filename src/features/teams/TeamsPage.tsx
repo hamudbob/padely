@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import ErrorNote from "../shell/ErrorNote";
+import { withFallback } from "../../lib/errors";
 import { Link, useNavigate } from "react-router-dom";
 import { getMyTeams, createTeam, MyTeam } from "../../lib/supabase/teamQueries";
 import { searchClubs, requestToJoin, joinByCode, ClubSearchResult } from "../../lib/supabase/clubJoinQueries";
@@ -38,12 +40,12 @@ export default function TeamsPage() {
 
   const [joining, setJoining] = useState(false);
   const [joinMsg, setJoinMsg] = useState<string | null>(null);
-  const [joinError, setJoinError] = useState<string | null>(null);
+  const [joinError, setJoinError] = useState<unknown>(null);
 
   const [showCreate, setShowCreate] = useState(false);
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
-  const [createError, setCreateError] = useState<string | null>(null);
+  const [createError, setCreateError] = useState<unknown>(null);
 
   function loadTeams() {
     getMyTeams().then(setTeams).catch(() => setTeams([]));
@@ -81,7 +83,7 @@ export default function TeamsPage() {
       const { id } = await createTeam(name);
       navigate(`/teams/${id}`);
     } catch (err) {
-      setCreateError(err instanceof Error ? err.message : "Couldn't create the club.");
+      setCreateError(withFallback(err, "Couldn't create the club."));
     } finally {
       setCreating(false);
     }
@@ -93,7 +95,7 @@ export default function TeamsPage() {
       await requestToJoin(clubId);
       setResults((rs) => rs.map((r) => (r.id === clubId ? { ...r, requested: true } : r)));
     } catch (err) {
-      setJoinError(err instanceof Error ? err.message : "Couldn't send the request.");
+      setJoinError(withFallback(err, "Couldn't send the request."));
     } finally {
       setBusyId(null);
     }
@@ -117,7 +119,7 @@ export default function TeamsPage() {
       setQuery("");
       loadTeams();
     } catch (err) {
-      setJoinError(err instanceof Error ? err.message : "No club has that code.");
+      setJoinError(withFallback(err, "No club has that code."));
     } finally {
       setJoining(false);
     }
@@ -184,7 +186,7 @@ export default function TeamsPage() {
         )}
 
         {joinMsg && <p className="text-[12px] text-win mt-2">{joinMsg}</p>}
-        {joinError && <p className="text-[12px] text-loss mt-2">{joinError}</p>}
+        <ErrorNote error={joinError} where="TeamsPage.join" className="mt-2" />
 
         {/* ── Results while searching, your clubs otherwise ──────────────── */}
         <div className="mt-4">
@@ -299,7 +301,7 @@ export default function TeamsPage() {
                   {creating ? "…" : "Create"}
                 </button>
               </div>
-              {createError && <p className="text-[11px] text-loss mt-1.5">{createError}</p>}
+              <ErrorNote error={createError} where="TeamsPage.create" className="mt-2" />
             </form>
           ) : (
             <button

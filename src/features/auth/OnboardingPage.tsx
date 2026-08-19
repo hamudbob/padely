@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useRef, useState } from "react";
+import ErrorNote from "../shell/ErrorNote";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import { getMyProfile, updateMyProfile, uploadAvatar } from "../../lib/supabase/profileQueries";
 import { updateHostPrefs, completeOnboarding } from "../../lib/supabase/auth";
@@ -36,7 +37,7 @@ export default function OnboardingPage() {
   const [avatarPreview, setAvatarPreview] = useState<string | null>(null);
   const [avatarFile, setAvatarFile] = useState<File | null>(null);
   const [saving, setSaving] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const fileRef = useRef<HTMLInputElement | null>(null);
 
   const next = (() => {
@@ -173,7 +174,7 @@ export default function OnboardingPage() {
             maxLength={40}
             required
           />
-          {error && <p className="text-[13px] text-loss mt-2.5">{error}</p>}
+          <ErrorNote error={error} where="OnboardingPage" className="mt-2" />
 
           <div className="mt-auto pt-8">
             <button type="submit" disabled={!name.trim()} className={primaryBtn}>
@@ -267,7 +268,7 @@ export default function OnboardingPage() {
             })}
           </div>
 
-          {error && <p className="text-[13px] text-loss mt-3">{error}</p>}
+          <ErrorNote error={error} where="OnboardingPage" className="mt-2" />
 
           <div className="mt-auto pt-8 space-y-2">
             <button type="button" onClick={finish} disabled={saving} className={primaryBtn}>

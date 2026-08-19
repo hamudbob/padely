@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
+import ErrorNote from "../shell/ErrorNote";
+import { withFallback } from "../../lib/errors";
 import { Link, useNavigate } from "react-router-dom";
 import { supabase } from "../../lib/supabase/client";
 import { updatePassword } from "../../lib/supabase/auth";
@@ -25,7 +27,7 @@ export default function ResetPasswordPage() {
   const [stage, setStage] = useState<Stage>("checking");
   const [password, setPassword] = useState("");
   const [confirm, setConfirm] = useState("");
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [saving, setSaving] = useState(false);
   const [pwFocused, setPwFocused] = useState(false);
   const [email, setEmail] = useState<string | null>(null);
@@ -93,7 +95,7 @@ export default function ResetPasswordPage() {
       await updatePassword(password);
       setStage("done");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't update your password.");
+      setError(withFallback(err, "Couldn't update your password."));
     } finally {
       setSaving(false);
     }
@@ -123,7 +125,7 @@ export default function ResetPasswordPage() {
         <p className="text-[13.5px] text-ink-2 mt-3 leading-relaxed">
           Password links can only be used once, and they time out after a while. Ask for a fresh one and it'll work.
         </p>
-        {error && <p className="text-[12px] text-warm-gray mt-3">{error}</p>}
+        <ErrorNote error={error} where="ResetPasswordPage" className="mt-2" />
         <Link
           to="/login?forgot=1"
           className="flex items-center justify-center mt-7 rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform"
@@ -189,7 +191,7 @@ export default function ResetPasswordPage() {
         {confirm.length > 0 && password !== confirm && (
           <p className="text-[12px] text-warm-gray -mt-1">Those two don't match yet.</p>
         )}
-        {error && <p className="text-[13px] text-loss">{error}</p>}
+        <ErrorNote error={error} where="ResetPasswordPage" />
         <button
           type="submit"
           disabled={saving || !verdict.valid || password !== confirm}

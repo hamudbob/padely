@@ -1,3 +1,5 @@
+import { codeFor } from "./errors";
+
 /**
  * Client-side error capture.
  *
@@ -119,8 +121,12 @@ export function reportError(
     const message = err.message || String(error);
     if (!shouldSend(message)) return;
     sent += 1;
+    // Derived, not assigned: the same failure produces the same code on every
+    // device, so a user quoting one lands you on this exact group.
+    const code = codeFor(error, typeof context?.where === "string" ? context.where : "");
     post({
       p_kind: kind,
+      p_code: code,
       p_message: message,
       p_stack: err.stack ?? null,
       p_route: typeof location !== "undefined" ? location.pathname + location.search : null,

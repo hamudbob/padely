@@ -1,4 +1,6 @@
 import { useEffect, useRef, useState, ChangeEvent } from "react";
+import ErrorNote from "../shell/ErrorNote";
+import { withFallback } from "../../lib/errors";
 import { Link, useNavigate } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import TabHeader from "../shell/TabHeader";
@@ -59,7 +61,7 @@ export default function ProfilePage() {
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deletingSessions, setDeletingSessions] = useState(false);
-  const [deleteError, setDeleteError] = useState<string | null>(null);
+  const [deleteError, setDeleteError] = useState<unknown>(null);
   const [playerSessions, setPlayerSessions] = useState<PlayerSession[] | null>(null);
   const [tab, setTab] = useState<RoleTab>("host");
 
@@ -67,7 +69,7 @@ export default function ProfilePage() {
   const [editingName, setEditingName] = useState(false);
   const [nameDraft, setNameDraft] = useState("");
   const [savingName, setSavingName] = useState(false);
-  const [nameError, setNameError] = useState<string | null>(null);
+  const [nameError, setNameError] = useState<unknown>(null);
 
 
   // Phase 1: profile (avatar + global rating), insights, and rating trend.
@@ -75,7 +77,7 @@ export default function ProfilePage() {
   const [insights, setInsights] = useState<PlayerInsights | null>(null);
   const [history, setHistory] = useState<RatingPoint[]>([]);
   const [avatarBusy, setAvatarBusy] = useState(false);
-  const [avatarError, setAvatarError] = useState<string | null>(null);
+  const [avatarError, setAvatarError] = useState<unknown>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   const metadataName = (user?.user_metadata?.name as string | undefined)?.trim() || "";
@@ -204,7 +206,7 @@ export default function ProfilePage() {
       setDisplayName(updated.displayName);
       setEditingName(false);
     } catch (err) {
-      setNameError(err instanceof Error ? err.message : "Could not save your name.");
+      setNameError(withFallback(err, "Could not save your name."));
     } finally {
       setSavingName(false);
     }
@@ -220,7 +222,7 @@ export default function ProfilePage() {
       const url = await uploadAvatar(file);
       setProfile((p) => (p ? { ...p, avatarUrl: url } : p));
     } catch (err) {
-      setAvatarError(err instanceof Error ? err.message : "Couldn't upload that photo.");
+      setAvatarError(withFallback(err, "Couldn't upload that photo."));
     } finally {
       setAvatarBusy(false);
     }
@@ -308,7 +310,7 @@ export default function ProfilePage() {
                   Cancel
                 </button>
               </div>
-              {nameError && <p className="text-[11px] text-loss mt-1">{nameError}</p>}
+              <ErrorNote error={nameError} where="ProfilePage.name" className="mt-2" />
             </div>
           ) : (
             <button
@@ -342,7 +344,7 @@ export default function ProfilePage() {
         </div>
       </div>
 
-      {avatarError && <p className="text-[11px] text-loss -mt-3 mb-3">{avatarError}</p>}
+      <ErrorNote error={avatarError} where="ProfilePage.avatar" className="mt-2" />
 
       {/* Bio + join date. The bio is what you choose to say; the join date is
           passive credibility. They do different jobs, so both stay — one
@@ -500,7 +502,7 @@ export default function ProfilePage() {
                   <button onClick={() => setSelectMode(true)} className="text-[12px] font-semibold text-gold-ink active:opacity-70">Select</button>
                 )}
               </div>
-              {deleteError && <p className="text-[11px] text-loss mb-2 leading-snug">{deleteError}</p>}
+              <ErrorNote error={deleteError} where="ProfilePage.delete" />
               <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
                 {[...hostedSessions].map((s) => {
                   const selected = selectedIds.has(s.id);

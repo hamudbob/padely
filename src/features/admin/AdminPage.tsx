@@ -28,6 +28,7 @@ import {
 import { applySessionRatings } from "../../lib/supabase/ratingActions";
 import { applySessionResults } from "../../lib/supabase/resultActions";
 import { invalidateAppSettings } from "../../lib/supabase/appSettings";
+import { describe as describeCode, isAutomatic } from "../../lib/errors";
 
 /**
  * The operator's view of Padelier.
@@ -528,11 +529,24 @@ function ErrorsTab() {
                 <span className="font-mono tnum text-[14px] font-semibold text-loss shrink-0">{g.occurrences}</span>
               </div>
               <p className="text-[11.5px] text-warm-gray mt-1">
+                {g.code && (
+                  <span className={`font-mono ${isAutomatic(g.code) ? "text-warm-gray" : "text-gold-ink"}`}>
+                    {g.code}{" · "}
+                  </span>
+                )}
                 {g.kind} · {g.route ?? "no route"} · {g.users} user{g.users === 1 ? "" : "s"} ·{" "}
                 {relativeTime(g.last_seen)}
                 {g.app_version ? ` · ${g.app_version}` : ""}
+                {g.reported > 0 ? ` · ${g.reported} reported by hand` : ""}
                 {!g.open ? " · resolved" : ""}
               </p>
+              {/* What the code means, straight from the catalogue the app
+                  itself uses — so the console and the user see one story. */}
+              {g.code && describeCode(g.code) && (
+                <p className="text-[12px] text-ink-2 mt-1 leading-relaxed">
+                  <b className="font-semibold">{describeCode(g.code)!.title}.</b> {describeCode(g.code)!.action}
+                </p>
+              )}
             </button>
 
             {openGroup === g.fingerprint && (

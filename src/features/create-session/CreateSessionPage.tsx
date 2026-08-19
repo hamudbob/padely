@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import ErrorNote from "../shell/ErrorNote";
+import { withFallback } from "../../lib/errors";
 import PageHeader from "../shell/PageHeader";
 import { useNavigate, useSearchParams } from "react-router-dom";
 import type { Database } from "../../lib/supabase/database.types";
@@ -185,7 +187,7 @@ export default function CreateSessionPage() {
   const [scoringFormat, setScoringFormat] = useState<ScoringFormat>("fixed_21");
   const [rankingBasis, setRankingBasis] = useState<RankingBasis>("points_first");
   const [starting, setStarting] = useState(false);
-  const [startError, setStartError] = useState<string | null>(null);
+  const [startError, setStartError] = useState<unknown>(null);
   const [schedulingSeed] = useState(() => Math.floor(Math.random() * 1_000_000_000));
 
   // Lobby: the Players step mints a draft session so its join code is live and
@@ -784,7 +786,7 @@ export default function CreateSessionPage() {
       if (eventId) void linkEventSession(eventId, sid).catch(() => {}); // best-effort event↔session link
       navigate(`/session/${sid}/host`);
     } catch (err) {
-      setStartError(err instanceof Error ? err.message : "Could not start the session.");
+      setStartError(withFallback(err, "Could not start the session."));
     } finally {
       setStarting(false);
     }
@@ -1680,7 +1682,7 @@ function ReviewStep({
   onReduceCourts: () => void;
   onStart: () => void;
   starting: boolean;
-  startError: string | null;
+  startError: unknown;
 }) {
   const formatLabel =
     (FORMAT_OPTIONS.find((f) => f.value === format)?.label ?? format) + (isFixedPartner ? " · Fixed Partner" : "");
@@ -1748,7 +1750,7 @@ function ReviewStep({
         )}
       </div>
 
-      {startError && <p className="text-[13px] text-loss">{startError}</p>}
+      <ErrorNote error={startError} where="CreateSessionPage" />
 
       <button
         onClick={onStart}

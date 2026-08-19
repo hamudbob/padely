@@ -1,4 +1,6 @@
 import { ChangeEvent, FormEvent, ReactNode, useEffect, useRef, useState } from "react";
+import ErrorNote from "../shell/ErrorNote";
+import { withFallback } from "../../lib/errors";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { getTeam, getTeamMembers, leaveTeam, uploadClubLogo, getClubStats, Team, TeamMember, TeamRole, ClubStats } from "../../lib/supabase/teamQueries";
@@ -29,7 +31,7 @@ export default function TeamDetailPage() {
   const [stats, setStats] = useState<ClubStats | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [busyReq, setBusyReq] = useState<string | null>(null);
 
   const [requesting, setRequesting] = useState(false);
@@ -156,7 +158,7 @@ export default function TeamDetailPage() {
       setRequests((rs) => rs.filter((r) => r.id !== requestId));
       if (accept) loadMembers();
     } catch (err) {
-      setError(err instanceof Error ? err.message : "That didn't work.");
+      setError(withFallback(err, "That didn't work."));
     } finally {
       setBusyReq(null);
     }
@@ -172,7 +174,7 @@ export default function TeamDetailPage() {
       const url = await uploadClubLogo(teamId, file);
       setTeam((t) => (t ? { ...t, logoUrl: url } : t));
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't upload the logo.");
+      setError(withFallback(err, "Couldn't upload the logo."));
     } finally {
       setLogoBusy(false);
     }
@@ -185,7 +187,7 @@ export default function TeamDetailPage() {
       await leaveTeam(teamId);
       navigate("/teams");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't leave the team.");
+      setError(withFallback(err, "Couldn't leave the team."));
     }
   }
 
@@ -275,7 +277,7 @@ export default function TeamDetailPage() {
         </button>
       </div>
 
-      {error && <p className="text-[12px] text-loss mt-4 text-center">{error}</p>}
+      <ErrorNote error={error} where="TeamDetailPage" className="mt-2" />
 
       {/* Stats strip */}
       <div className="mt-6 flex rounded-2xl bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">

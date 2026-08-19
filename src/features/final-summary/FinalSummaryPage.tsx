@@ -1,4 +1,6 @@
 import PageHeader from "../shell/PageHeader";
+import ErrorNote from "../shell/ErrorNote";
+import { withFallback } from "../../lib/errors";
 import Sheet from "../shell/Sheet";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
@@ -50,7 +52,7 @@ export default function FinalSummaryPage() {
   const navigate = useNavigate();
   const [data, setData] = useState<PublicSessionData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
 
   // Shareable recap card. The image is rendered first and previewed, so the
   // actual share tap is a fresh user gesture — iOS refuses navigator.share()
@@ -58,7 +60,7 @@ export default function FinalSummaryPage() {
   const [recapBusy, setRecapBusy] = useState(false);
   const [recapUrl, setRecapUrl] = useState<string | null>(null);
   const [recapBlob, setRecapBlob] = useState<Blob | null>(null);
-  const [recapError, setRecapError] = useState<string | null>(null);
+  const [recapError, setRecapError] = useState<unknown>(null);
 
   useEffect(() => () => { if (recapUrl) URL.revokeObjectURL(recapUrl); }, [recapUrl]);
 
@@ -74,7 +76,7 @@ export default function FinalSummaryPage() {
         }
         setData(d);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Couldn't load the results. Check your connection and try again."))
+      .catch((err) => setError(withFallback(err, "Couldn't load the results. Check your connection and try again.")))
       .finally(() => setLoading(false));
   }, [sessionId]);
 
@@ -118,7 +120,7 @@ export default function FinalSummaryPage() {
       setRecapBlob(blob);
       setRecapUrl(URL.createObjectURL(blob));
     } catch (err) {
-      setRecapError(err instanceof Error ? err.message : "Couldn't create the recap image.");
+      setRecapError(withFallback(err, "Couldn't create the recap image."));
     } finally {
       setRecapBusy(false);
     }
@@ -164,7 +166,7 @@ export default function FinalSummaryPage() {
   if (error) {
     return (
       <div className={shell}>
-        <p className="text-[13px] text-loss mt-16">{error}</p>
+        <ErrorNote error={error} where="FinalSummaryPage" className="mt-2" />
         <Link to="/" className="inline-block mt-6 text-[13px] font-semibold text-ink-2 underline">
           Back to sessions
         </Link>
@@ -293,7 +295,7 @@ export default function FinalSummaryPage() {
       >
         {recapBusy ? "Making the recap…" : "Share recap"}
       </button>
-      {recapError && <p className="text-[12px] text-loss mt-2">{recapError}</p>}
+      <ErrorNote error={recapError} where="FinalSummaryPage.recap" className="mt-2" />
       <button
         onClick={handleShare}
         className="w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-line text-ink-2 bg-surface active:scale-[0.99] transition-transform"

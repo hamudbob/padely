@@ -1,4 +1,6 @@
 import { useCallback, useEffect, useRef, useState } from "react";
+import { withFallback } from "../../lib/errors";
+import ErrorNote from "../shell/ErrorNote";
 import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { getPublicSession, PublicSessionData } from "../../lib/supabase/publicSessionQueries";
 import { subscribeLiveUpdates } from "../../lib/supabase/liveChannel";
@@ -43,7 +45,7 @@ export default function PublicLivePage() {
   const joinCode = params.get("j");
   const [data, setData] = useState<PublicSessionData | null>(null);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [notFound, setNotFound] = useState(false);
   const [viewedSeq, setViewedSeq] = useState<number | null>(null); // which earlier round to show
   const [justUpdated, setJustUpdated] = useState(false); // brief "updated" flash
@@ -77,7 +79,7 @@ export default function PublicLivePage() {
           }
         }
       } catch (err) {
-        if (!silent) setError(err instanceof Error ? err.message : "Couldn't load this session.");
+        if (!silent) setError(withFallback(err, "Couldn't load this session."));
       } finally {
         if (!silent) setLoading(false);
       }
@@ -158,7 +160,12 @@ export default function PublicLivePage() {
     return (
       <div className={shell}>
         {topBar}
-        <p className="text-[13px] text-loss mt-16 text-center">Couldn't load this session.</p>
+        {/* A spectator link is the one screen a total stranger lands on, so
+            the code matters more here than anywhere: they have no account and
+            no other way to tell you what they saw. */}
+        <div className="mt-16">
+          <ErrorNote error={error} where="PublicLivePage" fallback="Couldn't load this session." />
+        </div>
       </div>
     );
   }

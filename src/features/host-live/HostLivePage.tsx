@@ -1,4 +1,6 @@
 import PageHeader from "../shell/PageHeader";
+import ErrorNote from "../shell/ErrorNote";
+import { withFallback } from "../../lib/errors";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { getHostLiveSnapshot, HostLiveSnapshot } from "../../lib/supabase/sessionQueries";
@@ -158,14 +160,14 @@ export default function HostLivePage() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<Tab>("round");
   const [snapshot, setSnapshot] = useState<HostLiveSnapshot | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [pickerMatchId, setPickerMatchId] = useState<string | null>(null);
   const [pickerSide, setPickerSide] = useState<"A" | "B" | null>(null);
   const [pendingA, setPendingA] = useState<number | null>(null);
   const [saving, setSaving] = useState(false);
-  const [saveError, setSaveError] = useState<string | null>(null);
+  const [saveError, setSaveError] = useState<unknown>(null);
   const [generatingRound, setGeneratingRound] = useState(false);
-  const [roundError, setRoundError] = useState<string | null>(null);
+  const [roundError, setRoundError] = useState<unknown>(null);
 
   // Round-actions dropdown (Refresh / Randomize / Delete) on the live round.
   const [showRoundMenu, setShowRoundMenu] = useState(false);
@@ -175,11 +177,11 @@ export default function HostLivePage() {
 
   const [showEndConfirm, setShowEndConfirm] = useState(false);
   const [endingSession, setEndingSession] = useState(false);
-  const [endSessionError, setEndSessionError] = useState<string | null>(null);
+  const [endSessionError, setEndSessionError] = useState<unknown>(null);
 
   const [showManage, setShowManage] = useState(false);
   const [showMenu, setShowMenu] = useState(false); // header overflow (⋯) dropdown → Manage / End
-  const [manageError, setManageError] = useState<string | null>(null);
+  const [manageError, setManageError] = useState<unknown>(null);
   const [manageSaving, setManageSaving] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
   const [newPlayerGender, setNewPlayerGender] = useState<"M" | "F">("M");
@@ -194,13 +196,13 @@ export default function HostLivePage() {
   const [copiedLink, setCopiedLink] = useState(false);
 
   const [standings, setStandings] = useState<SessionStandings | null>(null);
-  const [standingsError, setStandingsError] = useState<string | null>(null);
+  const [standingsError, setStandingsError] = useState<unknown>(null);
   const [standingsLoading, setStandingsLoading] = useState(false);
   const [sortBy, setSortBy] = useState<SortBy | null>(null); // null = follow session's ranking_basis until the host picks
   const [showSortMenu, setShowSortMenu] = useState(false);
 
   const [roundHistory, setRoundHistory] = useState<RoundHistoryEntry[] | null>(null);
-  const [roundHistoryError, setRoundHistoryError] = useState<string | null>(null);
+  const [roundHistoryError, setRoundHistoryError] = useState<unknown>(null);
   // roundHistory is sorted most-recent-first (see getRoundHistory), so index
   // 0 = the live/current round for Mexicano. < moves to an OLDER round
   // (index+1), > moves back toward index 0 (index-1). Americano is
@@ -240,7 +242,7 @@ export default function HostLivePage() {
         }
         setSnapshot(snap);
       })
-      .catch((err) => setError(err instanceof Error ? err.message : "Could not load this session."));
+      .catch((err) => setError(withFallback(err, "Could not load this session.")));
   }
 
   function loadStandings() {
@@ -249,7 +251,7 @@ export default function HostLivePage() {
     setStandingsError(null);
     getSessionStandings(sessionId)
       .then(setStandings)
-      .catch((err) => setStandingsError(err instanceof Error ? err.message : "Could not load standings."))
+      .catch((err) => setStandingsError(withFallback(err, "Could not load standings.")))
       .finally(() => setStandingsLoading(false));
   }
 
@@ -260,7 +262,7 @@ export default function HostLivePage() {
       // Overlay any locally-queued scores so an unsynced entry never visually
       // disappears when the server round history reloads.
       .then((rounds) => setRoundHistory(overlayPendingScores(rounds, sessionId)))
-      .catch((err) => setRoundHistoryError(err instanceof Error ? err.message : "Could not load rounds."));
+      .catch((err) => setRoundHistoryError(withFallback(err, "Could not load rounds.")));
   }
 
   useEffect(load, [sessionId]);
@@ -348,7 +350,7 @@ export default function HostLivePage() {
   if (error) {
     return (
       <div className="mx-auto max-w-sm min-h-screen bg-ivory px-4 py-8">
-        <p className="text-sm text-loss">{error}</p>
+        <ErrorNote error={error} where="HostLivePage.load" />
       </div>
     );
   }
@@ -458,7 +460,7 @@ export default function HostLivePage() {
       loadRoundHistory();
       if (sessionId) notifyLiveUpdate(sessionId);
     } catch (e) {
-      setSaveError(e instanceof Error ? e.message : "Couldn't swap those players.");
+      setSaveError(withFallback(e, "Couldn't swap those players."));
     } finally {
       setSwapBusy(false);
     }
@@ -648,7 +650,7 @@ export default function HostLivePage() {
       if (tab === "standings" || isTeamSparring) loadStandings();
       notifyLiveUpdate(sessionId); // push the new round to spectators
     } catch (err) {
-      setRoundError(err instanceof Error ? err.message : "Could not generate the next round.");
+      setRoundError(withFallback(err, "Could not generate the next round."));
     } finally {
       setGeneratingRound(false);
     }
@@ -677,7 +679,7 @@ export default function HostLivePage() {
       loadStandings();
       notifyLiveUpdate(sessionId); // push the redrawn/deleted round to spectators
     } catch (err) {
-      setRoundError(err instanceof Error ? err.message : "Could not update the round.");
+      setRoundError(withFallback(err, "Could not update the round."));
     } finally {
       setRoundActionBusy(false);
     }
@@ -709,7 +711,7 @@ export default function HostLivePage() {
       load(); // roster now includes the new player
       notifyLiveUpdate(sessionId); // spectators see the new player on the board
     } catch (err) {
-      setManageError(err instanceof Error ? err.message : "Could not add that player.");
+      setManageError(withFallback(err, "Could not add that player."));
     } finally {
       setJoinBusyId(null);
     }
@@ -722,7 +724,7 @@ export default function HostLivePage() {
       await rejectJoinRequest(requestId);
       loadJoinRequests();
     } catch (err) {
-      setManageError(err instanceof Error ? err.message : "Could not decline that request.");
+      setManageError(withFallback(err, "Could not decline that request."));
     } finally {
       setJoinBusyId(null);
     }
@@ -773,7 +775,7 @@ export default function HostLivePage() {
       await setRankingBasis(sessionId, basis);
       load();
     } catch (err) {
-      setManageError(err instanceof Error ? err.message : "Could not change the ranking basis.");
+      setManageError(withFallback(err, "Could not change the ranking basis."));
     } finally {
       setRankingBasisSaving(false);
     }
@@ -785,7 +787,7 @@ export default function HostLivePage() {
       await renameCourt(courtId, name);
       load();
     } catch (err) {
-      setManageError(err instanceof Error ? err.message : "Could not rename court.");
+      setManageError(withFallback(err, "Could not rename court."));
     }
   }
 
@@ -795,7 +797,7 @@ export default function HostLivePage() {
       await setCourtAvailability(courtId, available);
       load();
     } catch (err) {
-      setManageError(err instanceof Error ? err.message : "Could not update court.");
+      setManageError(withFallback(err, "Could not update court."));
     }
   }
 
@@ -813,7 +815,7 @@ export default function HostLivePage() {
       setNewPlayerName("");
       load();
     } catch (err) {
-      setManageError(err instanceof Error ? err.message : "Could not add player.");
+      setManageError(withFallback(err, "Could not add player."));
     } finally {
       setManageSaving(false);
     }
@@ -825,7 +827,7 @@ export default function HostLivePage() {
       await markPlayerLeft(playerId);
       load();
     } catch (err) {
-      setManageError(err instanceof Error ? err.message : "Could not update player.");
+      setManageError(withFallback(err, "Could not update player."));
     }
   }
 
@@ -835,7 +837,7 @@ export default function HostLivePage() {
       await restorePlayer(playerId);
       load();
     } catch (err) {
-      setManageError(err instanceof Error ? err.message : "Could not update player.");
+      setManageError(withFallback(err, "Could not update player."));
     }
   }
 
@@ -849,7 +851,7 @@ export default function HostLivePage() {
       setShowEndConfirm(false);
       navigate(`/session/${sessionId}/final`); // straight to the podium; rounds/standings stay reachable from there
     } catch (err) {
-      setEndSessionError(err instanceof Error ? err.message : "Could not end this session.");
+      setEndSessionError(withFallback(err, "Could not end this session."));
     } finally {
       setEndingSession(false);
     }
@@ -1000,7 +1002,7 @@ export default function HostLivePage() {
 
       {tab === "round" && (
         <>
-          {roundHistoryError && <p className="text-sm text-loss mb-3">{roundHistoryError}</p>}
+          <ErrorNote error={roundHistoryError} where="HostLivePage.rounds" />
 
           {!roundHistory && !roundHistoryError && (
             <div className="space-y-3">
@@ -1191,7 +1193,7 @@ export default function HostLivePage() {
                   Finish scoring every match this round to unlock the next round.
                 </p>
               )}
-              {roundError && <p className="text-xs text-loss mt-2 text-center">{roundError}</p>}
+              <ErrorNote error={roundError} where="HostLivePage.nextRound" className="mt-2" />
 
               {sessionEnded && (fullyPreGenerated || isViewingCurrent) && (
                 <p className="text-xs text-warm-gray text-center mt-5">This session has ended. Scores are locked.</p>
@@ -1246,7 +1248,7 @@ export default function HostLivePage() {
               ))}
             </div>
           )}
-          {standingsError && <p className="text-sm text-loss">{standingsError}</p>}
+          <ErrorNote error={standingsError} where="HostLivePage.standings" />
 
           {standings && (
             <div className="rounded-2xl border border-line bg-surface overflow-hidden">
@@ -1354,7 +1356,7 @@ export default function HostLivePage() {
                 </button>
               ))}
             </div>
-            {saveError && <p className="text-xs text-loss mt-2">{saveError}</p>}
+            <ErrorNote error={saveError} where="HostLivePage.score" className="mt-2" />
             {saving && <p className="text-xs text-warm-gray mt-2">Saving…</p>}
           </div>
         </div>
@@ -1369,7 +1371,7 @@ export default function HostLivePage() {
               generate another round. You can still reopen this session anytime from the home page to see the
               results.
             </p>
-            {endSessionError && <p className="text-xs text-loss mt-2">{endSessionError}</p>}
+            <ErrorNote error={endSessionError} where="HostLivePage.end" className="mt-2" />
             <div className="flex gap-2 mt-4">
               <button
                 onClick={() => setShowEndConfirm(false)}
@@ -1441,7 +1443,7 @@ export default function HostLivePage() {
               </button>
             </div>
 
-            {manageError && <p className="text-xs text-loss mb-2">{manageError}</p>}
+            <ErrorNote error={manageError} where="HostLivePage.manage" />
 
             {/* Invite players — share the code, review who's asking to join */}
             <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-1.5">Invite players</p>

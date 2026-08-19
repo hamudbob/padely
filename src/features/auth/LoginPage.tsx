@@ -1,4 +1,6 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import ErrorNote from "../shell/ErrorNote";
+import { withFallback } from "../../lib/errors";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   signInHost,
@@ -55,9 +57,9 @@ export default function LoginPage() {
   );
   const [email, setEmail] = useState("");
   const [password, setPassword] = useState("");
-  const [emailError, setEmailError] = useState<string | null>(null);
+  const [emailError, setEmailError] = useState<unknown>(null);
   const [suggestion, setSuggestion] = useState<string | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [info, setInfo] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [pwFocused, setPwFocused] = useState(false);
@@ -240,7 +242,7 @@ export default function LoginPage() {
       if (out.needsConfirmation) setStage("sent");
       else navigate(next);
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Something went wrong.");
+      setError(withFallback(err, "Something went wrong."));
     } finally {
       setLoading(false);
     }
@@ -256,7 +258,7 @@ export default function LoginPage() {
       // Surfaced rather than swallowed — a silent reset to "Resend email" looks
       // like the button is broken when it's really just a rate limit.
       setResend("idle");
-      setError(err instanceof Error ? err.message : "Couldn't resend just now — give it a minute.");
+      setError(withFallback(err, "Couldn't resend just now — give it a minute."));
     }
   }
 
@@ -274,7 +276,7 @@ export default function LoginPage() {
       await sendPasswordReset(shape.normalised, `${window.location.origin}/reset-password`);
       setResetState("sent");
     } catch (err) {
-      setError(err instanceof Error ? err.message : "Couldn't send the email just now.");
+      setError(withFallback(err, "Couldn't send the email just now."));
       setResetState("idle");
     }
   }
@@ -388,8 +390,8 @@ export default function LoginPage() {
                 }}
                 required
               />
-              {emailError && <p className="text-[13px] text-loss">{emailError}</p>}
-              {error && <p className="text-[13px] text-loss">{error}</p>}
+              <ErrorNote error={emailError} where="LoginPage.email" />
+              <ErrorNote error={error} where="LoginPage" />
               <button type="submit" disabled={resetState === "sending" || !email.trim()} className={primaryBtn}>
                 {resetState === "sending" ? "Sending…" : "Send reset link"}
               </button>
@@ -434,7 +436,7 @@ export default function LoginPage() {
           Can't find it? Give it a minute, and <span className="font-semibold text-ink-2">check your spam / junk folder</span> —
           these sometimes land there.
         </p>
-        {error && <p className="text-[13px] text-loss mt-3">{error}</p>}
+        <ErrorNote error={error} where="LoginPage" className="mt-2" />
 
         <div className="mt-auto pt-8 space-y-2.5">
           <button type="button" onClick={handleResend} disabled={resend !== "idle"} className={quietBtn}>
@@ -494,7 +496,7 @@ export default function LoginPage() {
             }}
             required
           />
-          {emailError && <p className="text-[13px] text-loss">{emailError}</p>}
+          <ErrorNote error={emailError} where="LoginPage.email" />
 
           {suggestion && (
             <div className="rounded-2xl border border-gold/40 bg-gold-soft/50 px-3.5 py-3 anim-fade">
@@ -561,7 +563,7 @@ export default function LoginPage() {
           )}
 
           {info && <p className="text-[13px] text-win">{info}</p>}
-          {error && <p className="text-[13px] text-loss">{error}</p>}
+          <ErrorNote error={error} where="LoginPage" />
 
           <button
             type="submit"

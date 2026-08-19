@@ -1,4 +1,6 @@
 import { useEffect, useState } from "react";
+import ErrorNote from "../shell/ErrorNote";
+import { withFallback } from "../../lib/errors";
 import { Link } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { getHostHomeSummary, HostHomeSession } from "../../lib/supabase/hostHomeQueries";
@@ -70,7 +72,7 @@ function eventWhen(iso: string): string {
 export default function PlayPage() {
   const { user } = useHostSession();
   const [sessions, setSessions] = useState<HostHomeSession[] | null>(null);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [loading, setLoading] = useState(false);
   const [drafts, setDrafts] = useState<ResumableLobby[]>([]);
   const [upcoming, setUpcoming] = useState<UpcomingEvent[]>([]);
@@ -87,7 +89,7 @@ export default function PlayPage() {
         // sees when their home screen is broken, and until now it left no
         // trace anywhere.
         reportHandledError(e, "PlayPage.getHostHomeSummary");
-        setError(e instanceof Error ? e.message : "Could not load your sessions.");
+        setError(withFallback(e, "Could not load your sessions."));
       })
       .finally(() => setLoading(false));
     sweepStaleDrafts(10)
@@ -107,7 +109,7 @@ export default function PlayPage() {
       await deleteSession(l.sessionId);
       setDrafts((prev) => prev.filter((d) => d.sessionId !== l.sessionId));
     } catch (e) {
-      setError(e instanceof Error ? e.message : "Couldn't discard that setup.");
+      setError(withFallback(e, "Couldn't discard that setup."));
     } finally {
       setDiscarding(null);
     }
@@ -178,7 +180,7 @@ export default function PlayPage() {
             <div className="h-[56px] rounded-full skeleton" />
           </div>
         )}
-        {error && <p className="text-sm text-loss px-6 pt-4">{error}</p>}
+        <ErrorNote error={error} where="PlayPage.getHostHomeSummary" />
 
         {/* ── The live session ────────────────────────────────────────
             No court graphic — it was decoration on a screen whose whole job is

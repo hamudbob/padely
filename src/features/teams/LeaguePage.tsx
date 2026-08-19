@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from "react";
+import ErrorNote from "../shell/ErrorNote";
+import { withFallback } from "../../lib/errors";
 import { Link, useParams } from "react-router-dom";
 import { useBackNav } from "../../lib/useBackNav";
 import { useHostSession } from "../../lib/supabase/useHostSession";
@@ -41,7 +43,7 @@ export default function LeaguePage() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [loading, setLoading] = useState(true);
   const [boardLoading, setBoardLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
   const [sortKey, setSortKey] = useState<SortKey>("pointsPerSession");
   const [periodOffset, setPeriodOffset] = useState(0);
   const [showSort, setShowSort] = useState(false);
@@ -56,7 +58,7 @@ export default function LeaguePage() {
         if (t) setSortKey((SORTS.some((s) => s.key === t.defaultSort) ? t.defaultSort : "pointsPerSession") as SortKey);
         setIsAdmin(members.some((m) => m.userId === user?.id && (m.role === "owner" || m.role === "admin")));
       })
-      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load the league."))
+      .catch((e) => setError(withFallback(e, "Couldn't load the league.")))
       .finally(() => setLoading(false));
   }, [teamId, user?.id]);
 
@@ -66,7 +68,7 @@ export default function LeaguePage() {
     const reference = shiftPeriodReference(team.leaguePeriod as LeaguePeriod, new Date(), periodOffset);
     getClubLeague(teamId, reference)
       .then(setBoard)
-      .catch((e) => setError(e instanceof Error ? e.message : "Couldn't load the league."))
+      .catch((e) => setError(withFallback(e, "Couldn't load the league.")))
       .finally(() => setBoardLoading(false));
   }, [teamId, team, periodOffset]);
 
@@ -102,7 +104,7 @@ export default function LeaguePage() {
   );
 
   if (loading) return <div className={shell}>{backBar}<p className="text-[13px] text-warm-gray mt-16 text-center">Loading league…</p></div>;
-  if (error) return <div className={shell}>{backBar}<p className="text-[13px] text-loss mt-16 text-center">{error}</p></div>;
+  if (error) return <div className={shell}>{backBar}<ErrorNote error={error} where="LeaguePage" className="mt-2" /></div>;
 
   return (
     <div className={shell}>
