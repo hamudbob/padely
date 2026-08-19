@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { codeFor, describe, messageOf } from "../../lib/errors";
 import { reportHandledError } from "../../lib/errorReporter";
 
@@ -97,12 +98,20 @@ export default function ErrorNote({
         >
           {copied ? "copied ✓" : code}
         </button>
-        <button
-          onClick={report}
-          className="text-[11.5px] font-semibold text-ink-2 border border-line rounded-full px-3 py-1.5 bg-ivory active:opacity-70"
-        >
-          Report this
-        </button>
+        <span className="flex items-center gap-2 shrink-0">
+          {/* The code explains itself for anyone who wants to know what it is
+              — /about is public, so this works even for a spectator with no
+              account who hit an error on a shared link. */}
+          <Link to="/about#error-codes" className="text-[11.5px] text-warm-gray underline underline-offset-2 active:opacity-70">
+            What's this?
+          </Link>
+          <button
+            onClick={report}
+            className="text-[11.5px] font-semibold text-ink-2 border border-line rounded-full px-3 py-1.5 bg-ivory active:opacity-70"
+          >
+            Report this
+          </button>
+        </span>
       </div>
     </div>
   );

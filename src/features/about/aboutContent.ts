@@ -417,6 +417,51 @@ export const GROUPS: Group[] = [
       },
     ],
   },
+
+  // ────────────────────────────────────────── When something goes wrong ──
+  // Public on purpose, like the rest of this page: the person who most needs
+  // to read "what does this code mean" is the one looking at an error, and
+  // they may not even be signed in when they see it.
+  {
+    key: "trouble",
+    title: { en: "When something goes wrong", id: "Kalau ada yang tidak beres" },
+    blurb: {
+      en: "What the codes mean, and what happens to your scores when the signal drops.",
+      id: "Arti kode error, dan apa yang terjadi pada skormu saat sinyal hilang.",
+    },
+    entries: [
+      {
+        key: "error-codes",
+        q: { en: "The app showed a code like PLR-2002. What is that?", id: "Aplikasi menampilkan kode seperti PLR-2002. Itu apa?" },
+        a: {
+          en: [
+            "It's a reference number for exactly what went wrong. Every error the app can show carries one, and the same problem always produces the same code — so quoting it tells us more in five characters than a paragraph describing the screen.",
+            "Tap the code to copy it, or press \u201cReport this\u201d and the app will put the code, the screen and the time on your clipboard and start a message to us. You don't have to explain anything technical: the code does that.",
+            "Codes beginning PLR-1 are about signing in, PLR-2 your own data, PLR-3 a live session, PLR-4 clubs and the league, PLR-5 joining a session, PLR-6 something on your phone, and PLR-9 the connection or the server. A code with a U in it \u2014 PLR-U-7A0F \u2014 simply means it's a fault we haven't catalogued yet; it's still exact, and still worth sending.",
+          ],
+          id: [
+            "Itu nomor rujukan untuk persis apa yang salah. Setiap error yang bisa muncul punya satu, dan masalah yang sama selalu menghasilkan kode yang sama \u2014 jadi menyebut kodenya memberi kami lebih banyak informasi dalam lima karakter dibanding satu paragraf penjelasan.",
+            "Ketuk kodenya untuk menyalin, atau tekan \u201cReport this\u201d dan aplikasi akan menyalin kode, layar, dan waktunya lalu menyiapkan pesan untuk kami. Kamu tidak perlu menjelaskan hal teknis apa pun: kodenya sudah menjelaskan.",
+            "Kode berawalan PLR-1 soal masuk akun, PLR-2 datamu sendiri, PLR-3 sesi yang sedang berjalan, PLR-4 klub dan liga, PLR-5 bergabung ke sesi, PLR-6 sesuatu di ponselmu, dan PLR-9 koneksi atau server. Kode dengan huruf U \u2014 PLR-U-7A0F \u2014 berarti kesalahan yang belum kami katalogkan; tetap spesifik, dan tetap layak dikirim.",
+          ],
+        },
+      },
+      {
+        key: "offline",
+        q: { en: "What happens to scores if the signal drops mid-session?", id: "Apa yang terjadi pada skor kalau sinyal hilang di tengah sesi?" },
+        a: {
+          en: [
+            "Nothing is lost. A score you enter is saved on the phone first and shown immediately, then sent up on its own as soon as there's signal \u2014 including after you close the app and come back.",
+            "Formats that draw every round at the start \u2014 Americano, Fixed Position, Fixed Partner and Mix Americano \u2014 can be played through from beginning to end with no connection at all. The Mexicano formats need a moment of signal between rounds, because the next pairing is worked out from the scores just played.",
+          ],
+          id: [
+            "Tidak ada yang hilang. Skor yang kamu masukkan disimpan dulu di ponsel dan langsung tampil, lalu dikirim sendiri begitu ada sinyal \u2014 termasuk setelah aplikasi ditutup dan dibuka lagi.",
+            "Format yang menyusun semua ronde di awal \u2014 Americano, Fixed Position, Fixed Partner, dan Mix Americano \u2014 bisa dimainkan dari awal sampai akhir tanpa koneksi sama sekali. Format Mexicano butuh sinyal sebentar di antara ronde, karena pasangan berikutnya dihitung dari skor yang baru saja dimainkan.",
+          ],
+        },
+      },
+    ],
+  },
 ];
 
 export const UI: Record<Lang, Record<string, string>> = {

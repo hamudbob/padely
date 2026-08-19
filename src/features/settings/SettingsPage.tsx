@@ -227,6 +227,12 @@ export default function SettingsPage() {
   }
 
   const initial = (name.trim()[0] ?? "?").toUpperCase();
+  // One row open at a time. The old page laid every editor out flat, so the
+  // three things people came for — a name, a side, a password — were buried
+  // under two thousand pixels of forms they weren't using.
+  const [openRow, setOpenRow] = useState<string | null>(null);
+  const toggle = (key: string) => setOpenRow((current) => (current === key ? null : key));
+
   const card = "rounded-2xl border border-line bg-surface px-4 py-4";
   const label = "text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray";
   const input =
@@ -250,267 +256,354 @@ export default function SettingsPage() {
         <div className="w-9" />
       </div>
 
-      <h1 className="font-serif text-[26px] font-medium tracking-tight text-graphite mb-5">Settings</h1>
-
-      {/* ── Photo ──────────────────────────────────────────────────────── */}
-      <div className={`${card} mb-3`}>
+      {/* ── Who you are ────────────────────────────────────────────────
+          Identity first, as a single object rather than three cards. The
+          photo, the name and the email describe one thing, and seeing them
+          together is how you know you're in the right account. */}
+      <div className="flex items-center gap-3.5 mb-6">
         <button
           type="button"
           onClick={() => fileRef.current?.click()}
           disabled={uploading}
-          className="flex items-center gap-3.5 w-full text-left active:opacity-70 transition-opacity disabled:opacity-50"
+          aria-label={avatarPreview ? "Change photo" : "Add a photo"}
+          className="relative w-[62px] h-[62px] rounded-full bg-gold-soft border border-line flex items-center justify-center overflow-hidden shrink-0 active:opacity-70 transition-opacity disabled:opacity-50"
         >
-          <span className="relative w-[58px] h-[58px] rounded-full bg-gold-soft border border-line flex items-center justify-center overflow-hidden shrink-0">
-            {avatarPreview ? (
-              <img src={avatarPreview} alt="" className="w-full h-full object-cover" />
-            ) : (
-              <span className="font-serif text-[22px] text-gold-ink">{initial}</span>
-            )}
-          </span>
-          <span>
-            <span className="block text-[14px] font-semibold text-graphite">
-              {uploading ? "Uploading…" : avatarPreview ? "Change photo" : "Add a photo"}
-            </span>
-            <span className="block text-[12px] text-warm-gray mt-0.5">Square images look best</span>
+          {avatarPreview ? (
+            <img src={avatarPreview} alt="" className="w-full h-full object-cover" />
+          ) : (
+            <span className="font-serif text-[24px] text-gold-ink">{initial}</span>
+          )}
+          <span className="absolute inset-x-0 bottom-0 bg-graphite/70 text-ivory text-[9px] font-semibold py-[3px] text-center leading-none">
+            {uploading ? "…" : "EDIT"}
           </span>
         </button>
+        <span className="min-w-0">
+          <h1 className="font-serif text-[24px] font-medium tracking-tight text-graphite truncate leading-tight">
+            {name.trim() || "Your name"}
+          </h1>
+          <span className="block text-[12.5px] text-warm-gray truncate">{user?.email}</span>
+        </span>
         <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={(e) => pickAvatar(e.target.files?.[0])} />
       </div>
 
-      {/* ── Name + bio ─────────────────────────────────────────────────── */}
-      <form onSubmit={saveProfile} className={`${card} mb-3`}>
-        <p className={`${label} mb-2`}>About you</p>
-        <input className={`${input} mb-2.5`} placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} />
-        <textarea
-          className={`${input} resize-none leading-relaxed`}
-          placeholder="A line about you — how long you've played, your favourite shot, anything."
-          value={bio}
-          onChange={(e) => setBio(e.target.value.slice(0, BIO_MAX))}
-          rows={3}
-          maxLength={BIO_MAX}
-        />
-        <div className="flex items-center justify-between mt-1.5 mb-3">
-          <span className="text-[11.5px] text-warm-gray">Shown on your public profile</span>
-          <span className={`text-[11px] tnum font-mono ${bio.length > BIO_MAX - 30 ? "text-gold-ink" : "text-warm-gray"}`}>
-            {bio.length}/{BIO_MAX}
+      {/* ── You ────────────────────────────────────────────────────────── */}
+      <p className={`${label} mb-2 px-1`}>You</p>
+      <div className="rounded-2xl border border-line bg-surface overflow-hidden mb-5">
+        <button
+          type="button"
+          onClick={() => toggle("profile")}
+          aria-expanded={openRow === "profile"}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left active:bg-surface-2 transition-colors"
+        >
+          <span className="text-[14px] font-semibold text-graphite">Name and bio</span>
+          <span className="flex items-center gap-2 min-w-0">
+            <span className="text-[12.5px] text-warm-gray truncate max-w-[150px]">
+              {bio.trim() ? bio.trim() : "No bio yet"}
+            </span>
+            <span className={`text-stone text-[15px] shrink-0 transition-transform ${openRow === "profile" ? "rotate-90" : ""}`} aria-hidden>›</span>
           </span>
-        </div>
-        {profileErr && <p className="text-[13px] text-loss mb-2">{profileErr}</p>}
-        {profileMsg && <p className="text-[13px] text-win mb-2">{profileMsg}</p>}
-        <button type="submit" disabled={savingProfile || !name.trim()} className={primaryBtn}>
-          {savingProfile ? "Saving…" : "Save"}
         </button>
-      </form>
 
-      {/* ── Playing preferences ────────────────────────────────────────── */}
-      <div className={`${card} mb-3`}>
-        <div className="flex items-center justify-between mb-2">
-          <p className={label}>Preferred side</p>
-          {savingPrefs && <span className="text-[11px] text-warm-gray">Saving…</span>}
-          {!savingPrefs && prefsMsg && <span className="text-[11px] text-win">{prefsMsg}</span>}
-        </div>
-        <div className="grid grid-cols-2 gap-2 mb-4">
-          {SIDES.map((s) => {
-            const on = side === s.key;
-            return (
-              <button
-                key={s.key}
-                type="button"
-                onClick={() => savePrefs(gender, on ? null : s.key)}
-                aria-pressed={on}
-                className={`rounded-2xl border px-3 py-2.5 text-left transition-colors ${
-                  on ? "border-graphite bg-graphite text-ivory" : "border-line bg-surface text-graphite"
-                }`}
-              >
-                <span className="block text-[13.5px] font-semibold">{s.label}</span>
-                <span className={`block text-[11px] mt-0.5 ${on ? "text-ivory/70" : "text-warm-gray"}`}>{s.hint}</span>
-              </button>
-            );
-          })}
-        </div>
-        <p className={`${label} mb-2`}>Gender</p>
-        <p className="text-[11.5px] text-warm-gray mb-2 -mt-1">Used only to build mixed-format rounds.</p>
-        <div className="grid grid-cols-2 gap-2">
-          {(["M", "F"] as const).map((g) => {
-            const on = gender === g;
-            return (
-              <button
-                key={g}
-                type="button"
-                onClick={() => savePrefs(on ? null : g, side)}
-                aria-pressed={on}
-                className={`rounded-2xl border px-3 py-2.5 text-[13.5px] font-semibold transition-colors ${
-                  on ? "border-graphite bg-graphite text-ivory" : "border-line bg-surface text-graphite"
-                }`}
-              >
-                {g === "M" ? "Male" : "Female"}
-              </button>
-            );
-          })}
-        </div>
+        {openRow === "profile" && (
+          <form onSubmit={saveProfile} className="px-4 pb-4 pt-1 border-t border-line anim-fade">
+            <input className={`${input} mb-2.5`} placeholder="Your name" value={name} onChange={(e) => setName(e.target.value)} maxLength={40} />
+            <textarea
+              className={`${input} resize-none leading-relaxed`}
+              placeholder="A line about you — how long you've played, your favourite shot, anything."
+              value={bio}
+              onChange={(e) => setBio(e.target.value.slice(0, BIO_MAX))}
+              rows={3}
+              maxLength={BIO_MAX}
+            />
+            <div className="flex items-center justify-between mt-1.5 mb-3">
+              <span className="text-[11.5px] text-warm-gray">Shown on your public profile</span>
+              <span className={`text-[11px] tnum font-mono ${bio.length > BIO_MAX - 30 ? "text-gold-ink" : "text-warm-gray"}`}>
+                {bio.length}/{BIO_MAX}
+              </span>
+            </div>
+            {profileErr && <p className="text-[13px] text-loss mb-2">{profileErr}</p>}
+            {profileMsg && <p className="text-[13px] text-win mb-2">{profileMsg}</p>}
+            <button type="submit" disabled={savingProfile || !name.trim()} className={primaryBtn}>
+              {savingProfile ? "Saving…" : "Save"}
+            </button>
+          </form>
+        )}
+
+        <div className="h-px bg-line" />
+
+        <button
+          type="button"
+          onClick={() => toggle("playing")}
+          aria-expanded={openRow === "playing"}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left active:bg-surface-2 transition-colors"
+        >
+          <span className="text-[14px] font-semibold text-graphite">Playing preferences</span>
+          <span className="flex items-center gap-2">
+            {/* The summary is the point of a collapsed row: your side and
+                gender are readable without opening anything. */}
+            <span className="text-[12.5px] text-warm-gray">
+              {[SIDES.find((s) => s.key === side)?.label, gender === "M" ? "Male" : gender === "F" ? "Female" : null]
+                .filter(Boolean)
+                .join(" · ") || "Not set"}
+            </span>
+            <span className={`text-stone text-[15px] shrink-0 transition-transform ${openRow === "playing" ? "rotate-90" : ""}`} aria-hidden>›</span>
+          </span>
+        </button>
+
+        {openRow === "playing" && (
+          <div className="px-4 pb-4 pt-1 border-t border-line anim-fade">
+            <div className="flex items-center justify-between mb-2">
+              <p className={label}>Preferred side</p>
+              {savingPrefs && <span className="text-[11px] text-warm-gray">Saving…</span>}
+              {!savingPrefs && prefsMsg && <span className="text-[11px] text-win">{prefsMsg}</span>}
+            </div>
+            <div className="grid grid-cols-2 gap-2 mb-4">
+              {SIDES.map((s) => {
+                const on = side === s.key;
+                return (
+                  <button
+                    key={s.key}
+                    type="button"
+                    onClick={() => savePrefs(gender, on ? null : s.key)}
+                    aria-pressed={on}
+                    className={`rounded-2xl border px-3 py-2.5 text-left transition-colors ${
+                      on ? "border-graphite bg-graphite text-ivory" : "border-line bg-surface text-graphite"
+                    }`}
+                  >
+                    <span className="block text-[13.5px] font-semibold">{s.label}</span>
+                    <span className={`block text-[11px] mt-0.5 ${on ? "text-ivory/70" : "text-warm-gray"}`}>{s.hint}</span>
+                  </button>
+                );
+              })}
+            </div>
+            <p className={`${label} mb-1`}>Gender</p>
+            <p className="text-[11.5px] text-warm-gray mb-2">Used only to build mixed-format rounds.</p>
+            <div className="grid grid-cols-2 gap-2">
+              {(["M", "F"] as const).map((g) => {
+                const on = gender === g;
+                return (
+                  <button
+                    key={g}
+                    type="button"
+                    onClick={() => savePrefs(on ? null : g, side)}
+                    aria-pressed={on}
+                    className={`rounded-2xl border px-3 py-2.5 text-[13.5px] font-semibold transition-colors ${
+                      on ? "border-graphite bg-graphite text-ivory" : "border-line bg-surface text-graphite"
+                    }`}
+                  >
+                    {g === "M" ? "Male" : "Female"}
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* ── Password ───────────────────────────────────────────────────── */}
-      <form onSubmit={submitPassword} className={`${card} mb-3`}>
-        <p className={`${label} mb-2`}>Change password</p>
-        <div className="space-y-2.5">
-          <PasswordField
-            value={currentPw}
-            onChange={setCurrentPw}
-            placeholder="Current password"
-            autoComplete="current-password"
-            required
-          />
-          <PasswordField
-            value={newPw}
-            onChange={setNewPw}
-            placeholder="New password"
-            autoComplete="new-password"
-            minLength={8}
-            required
-            onFocus={() => setPwFocused(true)}
-            onBlur={() => setPwFocused(false)}
-            describedBy="settings-password-policy"
-          />
-          <div id="settings-password-policy" aria-live="polite">
-            <PasswordStrength verdict={verdict} show={pwFocused || newPw.length > 0} />
-          </div>
-        </div>
-        {pwErr && <p className="text-[13px] text-loss mt-2">{pwErr}</p>}
-        {pwMsg && <p className="text-[13px] text-win mt-2">{pwMsg}</p>}
-        <button
-          type="submit"
-          disabled={savingPw || !currentPw || !newPw || !verdict.valid}
-          className={`${primaryBtn} mt-3`}
-        >
-          {savingPw ? "Changing…" : "Change password"}
-        </button>
-        <p className="text-[11.5px] text-warm-gray mt-2 leading-relaxed">
-          We ask for your current password so a borrowed phone can't be used to lock you out.
-        </p>
-      </form>
-
-      {/* ── Help ───────────────────────────────────────────────────────── */}
-      <Link to="/about" className={`${card} mb-3 flex items-center justify-between active:bg-surface-2 transition-colors`}>
-        <span>
-          <span className="block text-[14px] font-semibold text-graphite">How Padelier works</span>
-          <span className="block text-[12px] text-warm-gray mt-0.5">Formats, scoring, clubs and your rating</span>
-        </span>
-        <span className="text-stone text-[16px] shrink-0" aria-hidden>›</span>
-      </Link>
+      {/* ── Help ───────────────────────────────────────────────────────
+          Both answers people arrive with: how the thing works, and what the
+          code on that red message meant. */}
+      <p className={`${label} mb-2 px-1`}>Help</p>
+      <div className="rounded-2xl border border-line bg-surface overflow-hidden mb-5">
+        <Link to="/about" className="flex items-center justify-between gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">
+          <span>
+            <span className="block text-[14px] font-semibold text-graphite">How Padelier works</span>
+            <span className="block text-[12px] text-warm-gray mt-0.5">Formats, scoring, clubs and your rating</span>
+          </span>
+          <span className="text-stone text-[15px] shrink-0" aria-hidden>›</span>
+        </Link>
+        <div className="h-px bg-line" />
+        <Link to="/about#error-codes" className="flex items-center justify-between gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">
+          <span>
+            <span className="block text-[14px] font-semibold text-graphite">Error codes</span>
+            <span className="block text-[12px] text-warm-gray mt-0.5">What a code like PLR-2002 means, and how to send it</span>
+          </span>
+          <span className="text-stone text-[15px] shrink-0" aria-hidden>›</span>
+        </Link>
+        <div className="h-px bg-line" />
+        <Link to="/about#offline" className="flex items-center justify-between gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">
+          <span>
+            <span className="block text-[14px] font-semibold text-graphite">Playing without signal</span>
+            <span className="block text-[12px] text-warm-gray mt-0.5">What happens to scores on a court with no bars</span>
+          </span>
+          <span className="text-stone text-[15px] shrink-0" aria-hidden>›</span>
+        </Link>
+      </div>
 
       {/* ── Account ────────────────────────────────────────────────────── */}
-      <div className={`${card} mb-3`}>
-        <p className={`${label} mb-2.5`}>Account</p>
-        <p className="text-[13px] text-ink-2 mb-3 truncate">{user?.email}</p>
+      <p className={`${label} mb-2 px-1`}>Account</p>
+      <div className="rounded-2xl border border-line bg-surface overflow-hidden mb-5">
         {profile && (
-          <Link
-            to={`/u/${profile.id}`}
-            className="flex items-center justify-between text-[13.5px] font-semibold text-gold-ink py-2 active:opacity-70"
-          >
-            View your public profile <span aria-hidden>›</span>
-          </Link>
+          <>
+            <Link to={`/u/${profile.id}`} className="flex items-center justify-between gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">
+              <span className="text-[14px] font-semibold text-graphite">Your public profile</span>
+              <span className="text-stone text-[15px] shrink-0" aria-hidden>›</span>
+            </Link>
+            <div className="h-px bg-line" />
+          </>
         )}
+
         {isAdmin && (
-          <Link
-            to="/admin"
-            className="flex items-center justify-between text-[13.5px] font-semibold text-gold-ink py-2 active:opacity-70"
-          >
-            Admin dashboard <span aria-hidden>›</span>
-          </Link>
+          <>
+            <Link to="/admin" className="flex items-center justify-between gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">
+              <span className="text-[14px] font-semibold text-gold-ink">Admin dashboard</span>
+              <span className="text-stone text-[15px] shrink-0" aria-hidden>›</span>
+            </Link>
+            <div className="h-px bg-line" />
+          </>
         )}
+
+        <button
+          type="button"
+          onClick={() => toggle("password")}
+          aria-expanded={openRow === "password"}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left active:bg-surface-2 transition-colors"
+        >
+          <span className="text-[14px] font-semibold text-graphite">Change password</span>
+          <span className={`text-stone text-[15px] shrink-0 transition-transform ${openRow === "password" ? "rotate-90" : ""}`} aria-hidden>›</span>
+        </button>
+
+        {openRow === "password" && (
+          <form onSubmit={submitPassword} className="px-4 pb-4 pt-1 border-t border-line anim-fade">
+            <div className="space-y-2.5">
+              <PasswordField
+                value={currentPw}
+                onChange={setCurrentPw}
+                placeholder="Current password"
+                autoComplete="current-password"
+                required
+              />
+              <PasswordField
+                value={newPw}
+                onChange={setNewPw}
+                placeholder="New password"
+                autoComplete="new-password"
+                minLength={8}
+                required
+                onFocus={() => setPwFocused(true)}
+                onBlur={() => setPwFocused(false)}
+                describedBy="settings-password-policy"
+              />
+              <div id="settings-password-policy" aria-live="polite">
+                <PasswordStrength verdict={verdict} show={pwFocused || newPw.length > 0} />
+              </div>
+            </div>
+            {pwErr && <p className="text-[13px] text-loss mt-2">{pwErr}</p>}
+            {pwMsg && <p className="text-[13px] text-win mt-2">{pwMsg}</p>}
+            <button
+              type="submit"
+              disabled={savingPw || !currentPw || !newPw || !verdict.valid}
+              className={`${primaryBtn} mt-3`}
+            >
+              {savingPw ? "Changing…" : "Change password"}
+            </button>
+            <p className="text-[11.5px] text-warm-gray mt-2 leading-relaxed">
+              We ask for your current password so a borrowed phone can't be used to lock you out.
+            </p>
+          </form>
+        )}
+
+        <div className="h-px bg-line" />
         <button
           onClick={handleSignOut}
-          className="w-full rounded-full border-[1.5px] border-line text-ink-2 bg-surface px-4 py-3 font-semibold text-[13.5px] mt-2 active:scale-[0.99] transition-transform"
+          className="w-full text-left px-4 py-3.5 text-[14px] font-semibold text-ink-2 active:bg-surface-2 transition-colors"
         >
           Sign out
         </button>
       </div>
 
-      {/* ── The documents ──────────────────────────────────────────────
+      {/* ── Legal ──────────────────────────────────────────────────────
           Reachable from inside the app, not only from the logged-out home.
           Someone deciding whether to delete their account is exactly the
           person who wants to read what happens to their data. */}
-      <div className={`${card} mb-3`}>
-        <p className={`${label} mb-2.5`}>Legal</p>
-        <Link
-          to="/privacy"
-          className="flex items-center justify-between text-[13.5px] text-ink-2 py-2 active:opacity-70"
-        >
-          Privacy policy <span className="text-stone" aria-hidden>›</span>
+      <p className={`${label} mb-2 px-1`}>Legal</p>
+      <div className="rounded-2xl border border-line bg-surface overflow-hidden mb-5">
+        <Link to="/privacy" className="flex items-center justify-between gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">
+          <span className="text-[14px] text-ink-2">Privacy policy</span>
+          <span className="text-stone text-[15px] shrink-0" aria-hidden>›</span>
         </Link>
         <div className="h-px bg-line" />
-        <Link
-          to="/terms"
-          className="flex items-center justify-between text-[13.5px] text-ink-2 py-2 active:opacity-70"
-        >
-          Terms of use <span className="text-stone" aria-hidden>›</span>
+        <Link to="/terms" className="flex items-center justify-between gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">
+          <span className="text-[14px] text-ink-2">Terms of use</span>
+          <span className="text-stone text-[15px] shrink-0" aria-hidden>›</span>
         </Link>
       </div>
 
       {/* ── Deleting the account ───────────────────────────────────────
-          Last on the page, plain rather than alarming, and honest about the
-          one thing people actually want to know: what survives. Hiding this
-          behind an email request would be the easy build and the wrong one —
-          erasure is a right, and a right you have to ask a stranger for by
-          email isn't much of one. */}
-      <div className="rounded-2xl border border-line bg-surface px-4 py-4 mb-3">
-        <p className={`${label} mb-2.5`}>Delete account</p>
-        <p className="text-[12.5px] text-ink-2 leading-relaxed">
-          Your name, email, password, photo and bio are erased straight away, and you're signed out
-          everywhere. Matches you played stay as anonymous records — other people were in them, and
-          their history is built from the same scores.
-        </p>
-        <p className="text-[12px] text-warm-gray leading-relaxed mt-2">
-          This can't be undone, and the same email can be used to start again from scratch.
-        </p>
+          Last, quiet, and collapsed — but still here rather than behind an
+          email request. Erasure is a right, and a right you have to ask a
+          stranger for by email isn't much of one. The consequences are shown
+          before the button, not after it. */}
+      <div className="rounded-2xl border border-line bg-surface overflow-hidden mb-3">
+        <button
+          type="button"
+          onClick={() => toggle("delete")}
+          aria-expanded={openRow === "delete"}
+          className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left active:bg-surface-2 transition-colors"
+        >
+          <span className="text-[14px] font-semibold text-loss">Delete account</span>
+          <span className={`text-stone text-[15px] shrink-0 transition-transform ${openRow === "delete" ? "rotate-90" : ""}`} aria-hidden>›</span>
+        </button>
 
-        {!confirmingDelete ? (
-          <button
-            onClick={() => setConfirmingDelete(true)}
-            className="w-full rounded-full border-[1.5px] border-loss/35 text-loss bg-surface px-4 py-3 font-semibold text-[13.5px] mt-3 active:scale-[0.99] transition-transform"
-          >
-            Delete my account
-          </button>
-        ) : (
-          <div className="mt-3 anim-fade">
-            <label htmlFor="confirm-delete" className="block text-[12.5px] text-ink-2 mb-2">
-              Type <span className="font-mono font-semibold text-graphite">DELETE</span> to confirm.
-            </label>
-            <input
-              id="confirm-delete"
-              value={confirmText}
-              onChange={(e) => {
-                setConfirmText(e.target.value);
-                setDelErr(null);
-              }}
-              autoComplete="off"
-              autoCapitalize="characters"
-              spellCheck={false}
-              className={input}
-              placeholder="DELETE"
-            />
-            {delErr && <p className="text-[13px] text-loss mt-2">{delErr}</p>}
-            <div className="flex gap-2 mt-3">
+        {openRow === "delete" && (
+          <div className="px-4 pb-4 pt-3 border-t border-line anim-fade">
+            <p className="text-[12.5px] text-ink-2 leading-relaxed">
+              Your name, email, password, photo and bio are erased straight away, and you're signed out
+              everywhere. Matches you played stay as anonymous records — other people were in them, and
+              their history is built from the same scores.
+            </p>
+            <p className="text-[12px] text-warm-gray leading-relaxed mt-2">
+              This can't be undone, and the same email can be used to start again from scratch.
+            </p>
+
+            {!confirmingDelete ? (
               <button
-                onClick={() => {
-                  setConfirmingDelete(false);
-                  setConfirmText("");
-                  setDelErr(null);
-                }}
-                disabled={deleting}
-                className="flex-1 rounded-full border-[1.5px] border-line text-ink-2 bg-surface px-4 py-3 font-semibold text-[13.5px] active:scale-[0.99] transition-transform disabled:opacity-40"
+                onClick={() => setConfirmingDelete(true)}
+                className="w-full rounded-full border-[1.5px] border-loss/35 text-loss bg-surface px-4 py-3 font-semibold text-[13.5px] mt-3 active:scale-[0.99] transition-transform"
               >
-                Keep it
+                Delete my account
               </button>
-              <button
-                onClick={handleDelete}
-                disabled={deleting || confirmText.trim().toUpperCase() !== "DELETE"}
-                className="flex-1 rounded-full bg-loss text-ivory px-4 py-3 font-semibold text-[13.5px] active:scale-[0.99] transition-transform disabled:opacity-40 disabled:active:scale-100"
-              >
-                {deleting ? "Deleting…" : "Delete"}
-              </button>
-            </div>
+            ) : (
+              <div className="mt-3 anim-fade">
+                <label htmlFor="confirm-delete" className="block text-[12.5px] text-ink-2 mb-2">
+                  Type <span className="font-mono font-semibold text-graphite">DELETE</span> to confirm.
+                </label>
+                <input
+                  id="confirm-delete"
+                  value={confirmText}
+                  onChange={(e) => {
+                    setConfirmText(e.target.value);
+                    setDelErr(null);
+                  }}
+                  autoComplete="off"
+                  autoCapitalize="characters"
+                  spellCheck={false}
+                  className={input}
+                  placeholder="DELETE"
+                />
+                {delErr && <p className="text-[13px] text-loss mt-2">{delErr}</p>}
+                <div className="flex gap-2 mt-3">
+                  <button
+                    onClick={() => {
+                      setConfirmingDelete(false);
+                      setConfirmText("");
+                      setDelErr(null);
+                    }}
+                    disabled={deleting}
+                    className="flex-1 rounded-full border-[1.5px] border-line text-ink-2 bg-surface px-4 py-3 font-semibold text-[13.5px] active:scale-[0.99] transition-transform disabled:opacity-40"
+                  >
+                    Keep it
+                  </button>
+                  <button
+                    onClick={handleDelete}
+                    disabled={deleting || confirmText.trim().toUpperCase() !== "DELETE"}
+                    className="flex-1 rounded-full bg-loss text-ivory px-4 py-3 font-semibold text-[13.5px] active:scale-[0.99] transition-transform disabled:opacity-40 disabled:active:scale-100"
+                  >
+                    {deleting ? "Deleting…" : "Delete"}
+                  </button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </div>
