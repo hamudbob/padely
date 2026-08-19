@@ -102,7 +102,7 @@ export default function ErrorNote({
           {/* The code explains itself for anyone who wants to know what it is
               — /about is public, so this works even for a spectator with no
               account who hit an error on a shared link. */}
-          <Link to="/about#error-codes" className="text-[11.5px] text-warm-gray underline underline-offset-2 active:opacity-70">
+          <Link to={`/codes#${code}`} className="text-[11.5px] text-warm-gray underline underline-offset-2 active:opacity-70">
             What's this?
           </Link>
           <button

@@ -413,10 +413,10 @@ export default function SettingsPage() {
           <span className="text-stone text-[15px] shrink-0" aria-hidden>›</span>
         </Link>
         <div className="h-px bg-line" />
-        <Link to="/about#error-codes" className="flex items-center justify-between gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">
+        <Link to="/codes" className="flex items-center justify-between gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">
           <span>
             <span className="block text-[14px] font-semibold text-graphite">Error codes</span>
-            <span className="block text-[12px] text-warm-gray mt-0.5">What a code like PLR-2002 means, and how to send it</span>
+            <span className="block text-[12px] text-warm-gray mt-0.5">Look up any code the app has shown you</span>
           </span>
           <span className="text-stone text-[15px] shrink-0" aria-hidden>›</span>
         </Link>

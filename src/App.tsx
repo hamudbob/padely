@@ -8,6 +8,7 @@ import AppShell from "./features/shell/AppShell";
 import PlayPage from "./features/play/PlayPage";
 import SubShell from "./features/shell/SubShell";
 import AboutPage from "./features/about/AboutPage";
+import ErrorCodesPage from "./features/help/ErrorCodesPage";
 import LegalPage from "./features/legal/LegalPage";
 import { PRIVACY, TERMS } from "./features/legal/legalContent";
 import SettingsPage from "./features/settings/SettingsPage";
@@ -87,6 +88,9 @@ export default function App() {
       {/* Public: it has to work as a link pasted into a group chat by someone
           who hasn't signed up yet. */}
       <Route path="/about" element={<AboutPage />} />
+      {/* Public on purpose: someone who hit an error on a shared live link has
+          no account and still needs to look the code up. */}
+      <Route path="/codes" element={<ErrorCodesPage />} />
       {/* Public for the same reason, and for one more: a privacy notice that
           only a signed-in person can read is no notice at all — it has to be
           readable *before* someone hands over an email address. */}
