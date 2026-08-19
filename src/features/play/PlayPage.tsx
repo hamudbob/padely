@@ -5,6 +5,7 @@ import { getHostHomeSummary, HostHomeSession } from "../../lib/supabase/hostHome
 import { getResumableLobbies, sweepStaleDrafts, deleteSession, ResumableLobby } from "../../lib/supabase/sessionActions";
 import { getMyUpcomingEvents, UpcomingEvent } from "../../lib/supabase/upcomingQueries";
 import TabHeader from "../shell/TabHeader";
+import { reportHandledError } from "../../lib/errorReporter";
 
 /**
  * Play — "what do I do now?", in one screen and in priority order.
@@ -81,7 +82,13 @@ export default function PlayPage() {
     setError(null);
     getHostHomeSummary()
       .then((s) => setSessions(s.sessions))
-      .catch((e) => setError(e instanceof Error ? e.message : "Could not load your sessions."))
+      .catch((e) => {
+        // Report it as well as showing it. This exact branch is what a user
+        // sees when their home screen is broken, and until now it left no
+        // trace anywhere.
+        reportHandledError(e, "PlayPage.getHostHomeSummary");
+        setError(e instanceof Error ? e.message : "Could not load your sessions.");
+      })
       .finally(() => setLoading(false));
     sweepStaleDrafts(10)
       .catch(() => 0)
