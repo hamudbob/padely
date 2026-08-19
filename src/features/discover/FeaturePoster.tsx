@@ -32,7 +32,9 @@ export type PosterKind =
   | "screen"     // watch live
   | "cloud"      // works with no signal
   | "tools"      // host controls
-  | "target";    // scoring / ranking basis
+  | "claim"      // an empty place being taken
+  | "scale"      // how the board is ordered — points vs wins
+  | "target";    // scoring formats
 
 const COURT_LINE = "#D6D3CE";
 const INK = "#0D0D0D";
@@ -250,7 +252,13 @@ export default function FeaturePoster({ kind, slug }: { kind: PosterKind; slug?:
           </svg>
         )}
 
-        {(kind === "code" || kind === "screen" || kind === "cloud" || kind === "calendar" || kind === "target") && (
+        {(kind === "code" ||
+          kind === "screen" ||
+          kind === "cloud" ||
+          kind === "calendar" ||
+          kind === "target" ||
+          kind === "claim" ||
+          kind === "scale") && (
           <svg viewBox="0 0 320 200" className="w-full h-full" role="img" aria-hidden>
             {kind === "code" &&
               [0, 1, 2, 3, 4, 5].map((i) => (
@@ -289,6 +297,24 @@ export default function FeaturePoster({ kind, slug }: { kind: PosterKind; slug?:
                 {[0, 1, 2, 3, 4, 5].map((i) => (
                   <circle key={i} cx={110 + (i % 3) * 50} cy={104 + Math.floor(i / 3) * 34} r="9" fill={i === 1 ? GOLD : INK} opacity={i === 1 ? 1 : 0.12} />
                 ))}
+              </>
+            )}
+            {kind === "claim" && (
+              <>
+                <circle cx="146" cy="100" r="42" fill="none" stroke={COURT_LINE} strokeWidth="2.5" strokeDasharray="7 7" />
+                <circle cx="146" cy="100" r="15" fill={INK} opacity="0.12" />
+                <path d="M170 116 l16 18 l30 -44" fill="none" stroke={GOLD} strokeWidth="9" strokeLinecap="round" strokeLinejoin="round" />
+              </>
+            )}
+            {kind === "scale" && (
+              <>
+                <line x1="70" y1="72" x2="250" y2="72" stroke={GOLD} strokeWidth="6" strokeLinecap="round" />
+                <line x1="160" y1="72" x2="160" y2="150" stroke={INK} strokeWidth="4" strokeLinecap="round" />
+                <rect x="128" y="150" width="64" height="7" rx="3.5" fill={INK} />
+                <path d="M74 76 L100 118 H48 Z" fill="none" stroke={INK} strokeWidth="2.5" strokeLinejoin="round" />
+                <path d="M246 76 L272 118 H220 Z" fill="none" stroke={INK} strokeWidth="2.5" strokeLinejoin="round" />
+                <circle cx="74" cy="102" r="9" fill={INK} />
+                <rect x="237" y="93" width="18" height="18" rx="3" fill={INK} />
               </>
             )}
             {kind === "target" && (

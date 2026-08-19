@@ -83,8 +83,8 @@ export default function FeaturesIndexPage() {
 
       <p className="text-[12px] text-warm-gray text-center mt-8 leading-relaxed">
         {lang === "en"
-          ? "More pages are on the way — one for each format, the league, the rating and the rest."
-          : "Halaman lain sedang disiapkan — satu untuk setiap format, liga, rating, dan lainnya."}
+          ? "That's all of it. Every page ends with the button that starts the thing it describes."
+          : "Itu semuanya. Setiap halaman diakhiri tombol untuk langsung memulai apa yang dijelaskannya."}
       </p>
     </div>
   );
