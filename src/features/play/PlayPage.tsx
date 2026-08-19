@@ -234,6 +234,14 @@ export default function PlayPage() {
           </div>
         )}
 
+        {/* On a quiet screen the slideshow leads, above the buttons: with
+            nothing live and nothing played, "what can this thing do" is the
+            actual question, and the answer should be the first thing on the
+            page rather than a footnote under two controls. On a screen with a
+            live session it stays down by Recent — there, the buttons are the
+            question. */}
+        {sessions && quiet && <FeatureCarousel />}
+
         {/* ── One action, following from the state ────────────────────── */}
         {sessions && (
           <div className="px-5 pt-4">
@@ -259,8 +267,6 @@ export default function PlayPage() {
             </div>
           </div>
         )}
-
-        {sessions && quiet && <FeatureCarousel />}
 
         {/* ── Everything else, sideways instead of downwards ──────────── */}
         {cards.length > 0 && (

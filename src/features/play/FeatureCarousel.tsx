@@ -208,7 +208,7 @@ export default function FeatureCarousel() {
   }, []);
 
   return (
-    <section className="pt-7" aria-label="What Padelier can do">
+    <section className="pt-5" aria-label="What Padelier can do">
       <div
         ref={trackRef}
         onScroll={onScroll}
