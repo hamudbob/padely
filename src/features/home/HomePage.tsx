@@ -1,4 +1,5 @@
 import { Link } from "react-router-dom";
+import FeatureCarousel from "../discover/FeatureCarousel";
 
 /**
  * The public landing page — and *only* that, as of v2.
@@ -48,6 +49,13 @@ export default function HomePage() {
             Fair rounds, one-tap scores, a live leaderboard — from the first serve to the final table.
           </p>
         </div>
+
+        {/* Straight after the promise, because this is the page where the
+            promise has to be cashed. A visitor arriving from a shared link has
+            no session to look at and no reason to trust the sentence above —
+            five posters they can swipe, each opening a page that ends in the
+            thing itself, is the evidence. Every slide is public. */}
+        <FeatureCarousel />
 
         {/* The one thing a visitor may need before they have an account. */}
         <div className="px-5 pt-7">
@@ -99,6 +107,8 @@ export default function HomePage() {
           <Link to="/login" className="font-semibold text-gold-ink">Log in or sign up</Link>.
         </p>
         <p className="text-[12px] leading-[1.5] text-warm-gray text-center px-6 pb-2">
+          <Link to="/features" className="font-semibold text-gold-ink">Everything Padelier does</Link>
+          <span className="px-2 text-stone">·</span>
           <Link to="/about" className="font-semibold text-gold-ink">How it all works</Link>
         </p>
         <p className="text-[11.5px] leading-[1.5] text-warm-gray text-center px-6 pb-7">

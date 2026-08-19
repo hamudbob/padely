@@ -2,12 +2,16 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { Link } from "react-router-dom";
 
 /**
- * The slideshow on Play — five posters that lead into the feature pages.
+ * The slideshow — five posters that lead into the feature pages.
  *
- * Why it exists: with nothing running, Play was a date, two buttons and a lot
- * of ivory. The app can do twenty-one things and the home screen advertised
- * none of them. This is the way in — each slide opens /f/<slug>, which ends in
- * the button that starts the thing it just described.
+ * It runs on both home screens: Play, under the date, and the public landing
+ * page, straight after the promise in the headline. The app can do twenty-one
+ * things and neither screen advertised any of them. Each slide opens
+ * /f/<slug>, which ends in the button that starts the thing it just described.
+ *
+ * Every slide is a public page, which is what makes it usable signed out: a
+ * visitor who arrived from a shared link can read the whole of Mexicano before
+ * deciding whether to sign up.
  *
  * Five, not twenty-one. A carousel you can reach the end of is a carousel
  * people finish; the last slide's "See everything" goes to the full index for

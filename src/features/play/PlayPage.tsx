@@ -7,7 +7,7 @@ import { getHostHomeSummary, HostHomeSession } from "../../lib/supabase/hostHome
 import { getResumableLobbies, sweepStaleDrafts, deleteSession, ResumableLobby } from "../../lib/supabase/sessionActions";
 import { getMyUpcomingEvents, UpcomingEvent } from "../../lib/supabase/upcomingQueries";
 import TabHeader from "../shell/TabHeader";
-import FeatureCarousel from "./FeatureCarousel";
+import FeatureCarousel from "../discover/FeatureCarousel";
 import { reportHandledError } from "../../lib/errorReporter";
 
 /**
