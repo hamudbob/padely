@@ -9,6 +9,8 @@ import PlayPage from "./features/play/PlayPage";
 import SubShell from "./features/shell/SubShell";
 import AboutPage from "./features/about/AboutPage";
 import ErrorCodesPage from "./features/help/ErrorCodesPage";
+import FeaturePage from "./features/discover/FeaturePage";
+import FeaturesIndexPage from "./features/discover/FeaturesIndexPage";
 import LegalPage from "./features/legal/LegalPage";
 import { PRIVACY, TERMS } from "./features/legal/legalContent";
 import SettingsPage from "./features/settings/SettingsPage";
@@ -91,6 +93,11 @@ export default function App() {
       {/* Public on purpose: someone who hit an error on a shared live link has
           no account and still needs to look the code up. */}
       <Route path="/codes" element={<ErrorCodesPage />} />
+      {/* Feature pages. Public and shareable: a host pastes /f/mexicano into a
+          group chat to explain the format, and the CTA at the bottom is then
+          the way in for whoever hasn't got an account yet. */}
+      <Route path="/features" element={<FeaturesIndexPage />} />
+      <Route path="/f/:slug" element={<FeaturePage />} />
       {/* Public for the same reason, and for one more: a privacy notice that
           only a signed-in person can read is no notice at all — it has to be
           readable *before* someone hands over an email address. */}

@@ -148,7 +148,15 @@ export default function CreateSessionPage() {
   // If this create flow was launched from a scheduled event, its id — used to
   // link the event to the started session and seed the roster from RSVPs.
   const eventId = searchParams.get("event");
-  const [format, setFormat] = useState<SessionFormat>("americano");
+  // Prefilled from a feature page's CTA: /create?format=mexicano&fp=1.
+  // Validated against the options this wizard actually offers rather than
+  // trusted — a URL is user input, and an unknown format would otherwise
+  // reach the schema's check constraint and fail at the last step.
+  const [format, setFormat] = useState<SessionFormat>(() => {
+    const wanted = searchParams.get("format");
+    const known = FORMAT_OPTIONS.find((o) => o.value === wanted && o.enabled);
+    return known ? known.value : "americano";
+  });
   const [players, setPlayers] = useState<DraftPlayer[]>([]);
   const [courtCount, setCourtCount] = useState(1);
   // Courts auto-follow the player count (4–7→1, 8–12→2, 13–18→3, 19–24→4, …)
@@ -179,7 +187,12 @@ export default function CreateSessionPage() {
   // recomputed live from the roster (see resolvedPairs below) rather than
   // stored directly, so they always reflect the current player list without
   // going stale.
-  const [fixedPartnerEnabled, setFixedPartnerEnabled] = useState(false);
+  const [fixedPartnerEnabled, setFixedPartnerEnabled] = useState(
+    // ?fp=1 arrives from the Fixed Partner feature page. The effect below
+    // still switches it off if the chosen format can't carry it, so a stale
+    // link can't produce an impossible session.
+    () => searchParams.get("fp") === "1",
+  );
   const [pairingMode, setPairingMode] = useState<"manual" | "auto_random" | "auto_position">("auto_random");
   const [manualPairs, setManualPairs] = useState<Pair[]>([]);
   const [manualPairPending, setManualPairPending] = useState<string | null>(null);

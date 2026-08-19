@@ -42,7 +42,9 @@ export default function TeamsPage() {
   const [joinMsg, setJoinMsg] = useState<string | null>(null);
   const [joinError, setJoinError] = useState<unknown>(null);
 
-  const [showCreate, setShowCreate] = useState(false);
+  // /teams?new=1 — the Clubs feature page's CTA lands with the form already
+  // open, so "Create your club" takes one tap rather than three.
+  const [showCreate, setShowCreate] = useState(() => new URLSearchParams(window.location.search).get("new") === "1");
   const [newName, setNewName] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<unknown>(null);
