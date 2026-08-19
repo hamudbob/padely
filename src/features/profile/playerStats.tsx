@@ -1,5 +1,7 @@
 import { ReactNode } from "react";
+import { Link } from "react-router-dom";
 import HelpDot from "../shell/HelpDot";
+import { PeerStat } from "../../lib/supabase/insightsQueries";
 
 /**
  * The shared visual language for a player's record.
@@ -148,6 +150,11 @@ export function RatingStrip({
  * The record card: win rate, W·L·D, a proportional bar, and recent form.
  * `emptyLabel` differs by screen — "you" versus "they" — so the copy stays
  * natural without forking the component.
+ *
+ * `onOpen` makes the whole card a button into the detail sheet. It's optional
+ * because only your own profile has the detail: the public one is built from
+ * get_public_profile, which deliberately doesn't return anyone's points,
+ * streaks or full history.
  */
 export function RecordCard({
   wins,
@@ -155,18 +162,20 @@ export function RecordCard({
   draws,
   form,
   emptyLabel,
+  onOpen,
 }: {
   wins: number;
   losses: number;
   draws: number;
   form: FormResult[];
   emptyLabel: string;
+  onOpen?: () => void;
 }) {
   const matches = wins + losses + draws;
   const winRate = matches > 0 ? wins / matches : 0;
   const pct = (n: number) => (n / (matches || 1)) * 100;
 
-  return (
+  const card = (
     <StatCard>
       {matches === 0 ? (
         <p className="text-[12.5px] text-warm-gray text-center py-1.5">{emptyLabel}</p>
@@ -209,9 +218,29 @@ export function RecordCard({
               </div>
             </div>
           )}
+          {onOpen && (
+            <p className="text-[12px] font-semibold text-gold-ink mt-3.5 pt-3.5 border-t border-line">
+              Points, streaks and the last 30 days ›
+            </p>
+          )}
         </>
       )}
     </StatCard>
+  );
+
+  // A card that does nothing shouldn't look like a button, and a card that
+  // does something shouldn't rely on the reader guessing — hence the line
+  // above, and a real <button> so the keyboard and screen readers get it too.
+  if (!onOpen || matches === 0) return card;
+  return (
+    <button
+      type="button"
+      onClick={onOpen}
+      aria-label="Open your full record"
+      className="w-full text-left active:scale-[0.99] transition-transform"
+    >
+      {card}
+    </button>
   );
 }
 
@@ -255,47 +284,68 @@ export function TrendCard({ rating, points, lastDelta }: { rating: number; point
   );
 }
 
-/**
- * Best partner / toughest rival. YOU TAB ONLY — see the privacy note at the top
- * of this file. These name a third party and reveal their head-to-head record.
- */
-export function InsightRow({
-  kind,
-  label,
-  who,
-  detail,
-}: {
-  kind: "partner" | "rival";
-  label: string;
-  who: string;
-  detail: string;
-}) {
+
+
+/** Their photo, or the first letter of their name. */
+function PeerFace({ peer }: { peer: PeerStat }) {
+  if (peer.avatarUrl) {
+    return (
+      <img
+        src={peer.avatarUrl}
+        alt=""
+        className="w-[34px] h-[34px] rounded-full object-cover border border-line shrink-0"
+      />
+    );
+  }
   return (
-    <div className="flex items-center gap-2.5">
-      <span
-        className={`w-[26px] h-[26px] rounded-lg flex items-center justify-center shrink-0 ${
-          kind === "partner" ? "bg-gold-soft text-gold-ink" : "bg-loss/10 text-loss"
-        }`}
-        aria-hidden
-      >
-        {kind === "partner" ? (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M17 21v-2a4 4 0 0 0-4-4H5a4 4 0 0 0-4 4v2" />
-            <circle cx="9" cy="7" r="4" />
-            <path d="M23 21v-2a4 4 0 0 0-3-3.87" />
-          </svg>
-        ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-            <path d="M13 2 3 14h9l-1 8 10-12h-9z" />
-          </svg>
-        )}
+    <span className="w-[34px] h-[34px] rounded-full bg-gold-soft text-gold-ink flex items-center justify-center text-[13px] font-semibold shrink-0">
+      {peer.label.charAt(0).toUpperCase()}
+    </span>
+  );
+}
+
+/**
+ * One partner or rival.
+ *
+ * The head-to-head reads from YOUR side either way — "7–3 together" is your
+ * wins and losses alongside them, "2–6 against" is your wins and losses facing
+ * them. Same number, same direction, so the two lists can be read at a glance
+ * without working out whose record you're looking at.
+ *
+ * It becomes a link when that person has an account. Most players in a session
+ * never signed up — the host typed their name — so a row that always looked
+ * tappable would be wrong most of the time.
+ */
+export function PeerRow({ peer, kind }: { peer: PeerStat; kind: "partner" | "rival" }) {
+  const record = `${peer.wins}–${peer.losses}${peer.draws > 0 ? `–${peer.draws}` : ""}`;
+  const body = (
+    <>
+      <PeerFace peer={peer} />
+      <span className="flex-1 min-w-0">
+        <span className="block text-[14px] font-semibold text-graphite truncate">{peer.label}</span>
+        <span className="block text-[11.5px] text-warm-gray mt-0.5">
+          {peer.matches} {peer.matches === 1 ? "game" : "games"} {kind === "partner" ? "together" : "against"}
+        </span>
       </span>
-      <div className="flex-1 min-w-0">
-        <p className="text-[9px] font-bold uppercase tracking-[0.08em] text-warm-gray leading-none">{label}</p>
-        <p className="text-[13px] font-semibold text-graphite truncate mt-0.5">
-          {who} <span className="font-normal text-warm-gray text-[11px]">· {detail}</span>
-        </p>
-      </div>
-    </div>
+      <span className="text-right shrink-0">
+        <span className="block font-mono tnum text-[14px] font-semibold text-graphite">{record}</span>
+        <span className="block text-[10.5px] text-warm-gray mt-0.5">
+          {Math.round(peer.winRate * 100)}% won
+        </span>
+      </span>
+      {peer.userId && (
+        <span className="text-stone text-[15px] shrink-0" aria-hidden>
+          ›
+        </span>
+      )}
+    </>
+  );
+
+  const className = "flex items-center gap-3 px-4 py-3 border-t border-line first:border-t-0";
+  if (!peer.userId) return <div className={className}>{body}</div>;
+  return (
+    <Link to={`/u/${peer.userId}`} className={`${className} active:bg-surface-2 transition-colors`}>
+      {body}
+    </Link>
   );
 }

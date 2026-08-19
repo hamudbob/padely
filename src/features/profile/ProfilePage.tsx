@@ -7,10 +7,10 @@ import TabHeader from "../shell/TabHeader";
 import {
   RatingStrip,
   RecordCard,
+  PeerRow,
   TrendCard,
   SectionHeading,
   StatCard,
-  InsightRow,
   FormResult,
 } from "./playerStats";
 import { listHostSessions, HostSessionSummary } from "../../lib/supabase/hostSessionsQueries";
@@ -18,6 +18,7 @@ import { deleteSession } from "../../lib/supabase/sessionActions";
 import { getMyPlayerSessions, PlayerSession } from "../../lib/supabase/playerJoinQueries";
 import { getMyProfile, updateMyProfile, uploadAvatar, Profile } from "../../lib/supabase/profileQueries";
 import { getPlayerInsights, getRatingHistory, PlayerInsights, RatingPoint } from "../../lib/supabase/insightsQueries";
+import RecordSheet from "./RecordSheet";
 
 const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
@@ -64,6 +65,7 @@ export default function ProfilePage() {
   const [deleteError, setDeleteError] = useState<unknown>(null);
   const [playerSessions, setPlayerSessions] = useState<PlayerSession[] | null>(null);
   const [tab, setTab] = useState<RoleTab>("host");
+  const [recordOpen, setRecordOpen] = useState(false);
 
   const [displayName, setDisplayName] = useState("");
   const [editingName, setEditingName] = useState(false);
@@ -394,36 +396,72 @@ export default function ProfilePage() {
         draws={insights?.draws ?? 0}
         form={(insights?.form ?? []) as FormResult[]}
         emptyLabel="Play a session and your record shows up here."
+        onOpen={insights ? () => setRecordOpen(true) : undefined}
       />
+      {recordOpen && insights && <RecordSheet insights={insights} onClose={() => setRecordOpen(false)} />}
 
       {/* ── Partners & rivals — YOUR page only ──────────────────────────
           These name another player and reveal their head-to-head record.
           Fair to show you about your own games; not something a stranger
           should read off a shared link about someone who never agreed to
-          it. get_public_profile deliberately doesn't return this data. */}
-      {insights && (insights.bestPartner || insights.nemesis) && (
+          it. get_public_profile deliberately doesn't return this data.
+
+          Three each rather than one, because one name is a verdict and three
+          is a picture — and because the old single "best partner" was often
+          just whoever you had played twice. Ranked now by a Wilson lower
+          bound with a four-game minimum, so a long good run outranks a short
+          perfect one. */}
+      {insights && (insights.topPartners.length > 0 || insights.topRivals.length > 0 || insights.mostPlayedWith) && (
         <>
           <SectionHeading>Partners &amp; rivals</SectionHeading>
-          <StatCard>
-            <div className="space-y-3">
-              {insights.bestPartner && (
-                <InsightRow
-                  kind="partner"
-                  label="Best partner"
-                  who={insights.bestPartner.label}
-                  detail={`${Math.round(insights.bestPartner.winRate * 100)}% together · ${insights.bestPartner.matches} games`}
-                />
-              )}
-              {insights.nemesis && (
-                <InsightRow
-                  kind="rival"
-                  label="Toughest rival"
-                  who={insights.nemesis.label}
-                  detail={`won ${Math.round(insights.nemesis.winRate * 100)}% vs · ${insights.nemesis.matches} games`}
-                />
-              )}
+
+          {insights.topPartners.length > 0 && (
+            <>
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray px-1 mb-1.5">
+                You win most with
+              </p>
+              <div className="rounded-2xl bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+                {insights.topPartners.map((p) => (
+                  <PeerRow key={p.key} peer={p} kind="partner" />
+                ))}
+              </div>
+            </>
+          )}
+
+          {insights.topRivals.length > 0 && (
+            <>
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray px-1 mt-4 mb-1.5">
+                You struggle most against
+              </p>
+              <div className="rounded-2xl bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+                {insights.topRivals.map((p) => (
+                  <PeerRow key={p.key} peer={p} kind="rival" />
+                ))}
+              </div>
+            </>
+          )}
+
+          {/* Frequency, which is a different fact from chemistry — and on a
+              quiet profile it is the only one of the three that can be
+              answered yet. */}
+          {insights.mostPlayedWith && (
+            <div className="rounded-2xl bg-surface px-4 py-3.5 mt-4 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray">Most played with</p>
+              <p className="text-[14px] text-ink-2 mt-1.5">
+                <span className="font-semibold text-graphite">{insights.mostPlayedWith.fullName}</span>
+                {" — "}
+                <span className="font-mono tnum">{insights.mostPlayedWith.matches}</span>{" "}
+                {insights.mostPlayedWith.matches === 1 ? "game" : "games"} on the same court
+              </p>
             </div>
-          </StatCard>
+          )}
+
+          {insights.topPartners.length === 0 && insights.topRivals.length === 0 && (
+            <p className="text-[12px] text-warm-gray px-1 mt-3 leading-relaxed">
+              Play four games with the same person and they will start showing up here as a partner or a rival. Fewer
+              than that and the numbers say more about luck than about either of you.
+            </p>
+          )}
         </>
       )}
 
