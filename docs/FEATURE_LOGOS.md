@@ -11,9 +11,10 @@ one at a time and see each appear as you go.
 
 ## What they have to survive
 
-- **Two sizes.** Roughly 150px tall on a feature page, and 64px on a card. Anything finer than a
-  2px stroke at 1024px disappears at the small size — so no thin outlines, no small text, no detail
-  that only reads when large.
+- **Size — corrected.** An earlier version of this brief said 64px. That was wrong: measured in the
+  app, the art box is about **250 x 154px** on both the feature page and the index card. So you have
+  room. A 2-3px court line at 1024px survives fine, and fine interior detail is affordable. Don't
+  over-thicken strokes on the assumption they'll be tiny.
 - **A warm background.** They sit on the ivory→gold gradient poster, not on white. Transparent
   background, and avoid pure white as a fill because it will look like a hole.
 - **Being a set.** Consistency matters more than any individual icon being clever. Same stroke
@@ -32,7 +33,7 @@ ivory      #F7F5F2   the background they'll sit on (don't paint it)
 ## The style sentence — paste this at the start of every prompt
 
 > Flat vector icon, minimal geometric line-and-solid style, single centred subject, charcoal #0D0D0D
-> with exactly one accent element in warm gold #BFA36A, consistent 8px stroke weight at 1024px,
+> with exactly one accent element in warm gold #BFA36A, consistent 6px stroke weight at 1024px,
 > rounded line caps, generous padding around the subject, transparent background, no text, no
 > letters, no numbers, no gradients, no shadows, no 3D, flat like a premium sports-club wordmark
 > mark, 1024×1024 square.
@@ -188,6 +189,17 @@ nothing else in frame".
 > simplest form.
 
 ---
+
+## What the first one taught us
+
+The Americano mark came back with a heavy rounded-square frame around it, four dots and two arrows.
+It works, and it's the reference for the rest. Two notes from seeing it at real size:
+
+- **A heavy outer frame makes the icon read as an app icon rather than a diagram**, and it sits
+  inside the poster card's own rounded border — a box inside a box. Either drop the frame and let
+  the mark breathe on the gradient, or keep it on ALL 21 so the set is deliberate. Don't mix.
+- **Keep the accent to one colour.** Two arrows in two different colours read as two separate marks;
+  the same gold at full and ~45% opacity reads as one movement with a direction.
 
 ## When you have them
 
