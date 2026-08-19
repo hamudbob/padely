@@ -72,7 +72,7 @@ export default function FeaturesIndexPage() {
           <div className="space-y-3">
             {FEATURES.filter((f) => f.family === family).map((f) => (
               <Link key={f.slug} to={`/f/${f.slug}`} className="block active:opacity-70 transition-opacity">
-                <FeaturePoster kind={f.poster} />
+                <FeaturePoster kind={f.poster} slug={f.slug} />
                 <p className="font-serif text-[19px] font-medium text-graphite mt-2 leading-tight">{f.name[lang]}</p>
                 <p className="text-[12.5px] text-warm-gray leading-relaxed mt-0.5">{f.promise[lang]}</p>
               </Link>

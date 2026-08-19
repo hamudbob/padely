@@ -1,3 +1,5 @@
+import { useState } from "react";
+
 /**
  * The posters.
  *
@@ -81,10 +83,25 @@ function Arrow({ from, to }: { from: [number, number]; to: [number, number] }) {
   );
 }
 
-export default function FeaturePoster({ kind }: { kind: PosterKind }) {
+export default function FeaturePoster({ kind, slug }: { kind: PosterKind; slug?: string }) {
+  // A logo dropped into public/features/<slug>.svg (or .png) replaces the drawn
+  // poster with no code change. Try svg, then png, then fall back to the
+  // drawing — so a half-finished set never leaves a blank card, and each new
+  // file simply appears.
+  const [artStep, setArtStep] = useState<0 | 1 | 2>(0);
+  const artSrc = slug && artStep < 2 ? `/features/${slug}.${artStep === 0 ? "svg" : "png"}` : null;
+
   return (
     <div className="w-full aspect-[16/10] rounded-[20px] bg-gradient-to-br from-gold-soft to-ivory border border-line overflow-hidden relative">
-      <div className="absolute inset-0 p-2">
+      {artSrc && (
+        <img
+          src={artSrc}
+          alt=""
+          onError={() => setArtStep((step) => (step === 0 ? 1 : 2))}
+          className="absolute inset-0 w-full h-full object-contain p-5"
+        />
+      )}
+      <div className={`absolute inset-0 p-2 ${artSrc ? "invisible" : ""}`}>
         {kind === "rotation" && (
           <Court>
             <Player x={70} y={70} />

@@ -60,7 +60,7 @@ export default function FeaturePage() {
         }
       />
 
-      <FeaturePoster kind={feature.poster} />
+      <FeaturePoster kind={feature.poster} slug={feature.slug} />
 
       <h1 className="font-serif text-[30px] font-medium tracking-tight text-graphite mt-5 leading-tight">
         {feature.name[lang]}
