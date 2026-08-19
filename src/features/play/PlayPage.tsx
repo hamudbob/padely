@@ -7,6 +7,7 @@ import { getHostHomeSummary, HostHomeSession } from "../../lib/supabase/hostHome
 import { getResumableLobbies, sweepStaleDrafts, deleteSession, ResumableLobby } from "../../lib/supabase/sessionActions";
 import { getMyUpcomingEvents, UpcomingEvent } from "../../lib/supabase/upcomingQueries";
 import TabHeader from "../shell/TabHeader";
+import FeatureCarousel from "./FeatureCarousel";
 import { reportHandledError } from "../../lib/errorReporter";
 
 /**
@@ -164,6 +165,13 @@ export default function PlayPage() {
     label: past.length > 0 || live.length > 0 ? "Start a session" : "Create your first session",
   };
 
+  // Where the slideshow goes depends on whether there's anything real to show.
+  // On a quiet screen it sits straight under the buttons — that emptiness is
+  // what it's for. On a screen with a live session and a history it drops below
+  // Recent, because an advert above someone's own sessions is the wrong way
+  // round.
+  const quiet = live.length === 0 && past.length === 0;
+
   return (
     <>
       <TabHeader />
@@ -251,6 +259,8 @@ export default function PlayPage() {
             </div>
           </div>
         )}
+
+        {sessions && quiet && <FeatureCarousel />}
 
         {/* ── Everything else, sideways instead of downwards ──────────── */}
         {cards.length > 0 && (
@@ -359,6 +369,8 @@ export default function PlayPage() {
             </div>
           </div>
         )}
+
+        {sessions && !quiet && <FeatureCarousel />}
 
         <div className="flex-1 min-h-[16px]" />
 
