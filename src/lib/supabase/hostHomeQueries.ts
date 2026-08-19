@@ -54,12 +54,19 @@ export async function getHostHomeSummary(): Promise<HostHomeSummary> {
   const user = userData.user;
   if (!user) return EMPTY;
 
-  const { data: teamRow, error: teamError } = await supabase
+  // limit(1), not maybeSingle(): maybeSingle ERRORS when a second row exists,
+  // and for one account it did — two teams rows left by a check-then-insert
+  // race, which broke this screen permanently on every device. 0044 dedupes
+  // and adds the unique index; this reads the oldest row either way, so the
+  // screen survives data it didn't expect.
+  const { data: teamRows, error: teamError } = await supabase
     .from("teams")
     .select("id")
     .eq("owner_id", user.id)
-    .maybeSingle();
+    .order("created_at", { ascending: true })
+    .limit(1);
   if (teamError) throw teamError;
+  const teamRow = (teamRows ?? [])[0];
   if (!teamRow) return EMPTY;
 
   const { data: sessionRows, error: sessionsError } = await supabase

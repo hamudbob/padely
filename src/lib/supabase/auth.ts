@@ -148,7 +148,12 @@ async function ensureHostTeam(ownerId: string, name: string) {
     owner_id: ownerId,
     name: `${name}'s Team`,
   });
-  if (insertError) throw insertError;
+  // 23505 = the unique index added in 0044 rejecting a second team for this
+  // owner. That is not a failure: it means another call — the other half of
+  // the sign-in/onboarding race — created the team a moment ago, which is all
+  // this function ever wanted. Before 0044 both inserts succeeded and the
+  // account was left with two teams, which broke every screen that reads one.
+  if (insertError && (insertError as { code?: string }).code !== "23505") throw insertError;
 }
 
 /**
