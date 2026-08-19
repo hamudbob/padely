@@ -4,10 +4,20 @@
 
 ## Where the files go
 
-Save each as **`public/features/<slug>.svg`** (or `.png` — the code tries `.svg` first, then `.png`).
-The slug is in the table below and must match exactly. Nothing else to do: `FeaturePoster` looks for
-the file, uses it if it's there, and falls back to the drawn poster if it isn't. So you can do these
-one at a time and see each appear as you go.
+**All 21 are done and installed** — the set Hamud drew is in `public/features/`, and every
+feature page and card is using it. What follows is kept as the brief the set was drawn from, so a
+replacement icon can be made to match.
+
+To replace one: drop the new export into the source folder under its existing filename and run
+
+```
+python3 scripts/install_feature_logos.py "path/to/asset for padelier"
+```
+
+Don't save a PNG into `public/features/` by hand. The script trims each export's margins, scales it
+to the same bounding-box **area** as the others, centres it on a 1120x700 canvas matching the
+poster's 16:10 card, and quantises it — an icon that skips that step renders at a visibly different
+size from the other twenty. The filename-to-slug map lives at the top of the script.
 
 ## What they have to survive
 
@@ -208,3 +218,30 @@ size to judge it at — open `/features` on your phone rather than looking at th
 
 If you'd rather I match a logo you already like, send me one and I'll rewrite the other twenty
 prompts to sit beside it.
+
+---
+
+## What the finished set taught us
+
+Written after installing all 21, so the next set starts from this rather than rediscovering it.
+
+**The exports arrive uneven, and that matters more than any single icon.** They came out between
+374px and 599px tall, in a dozen aspect ratios, with different amounts of empty margin baked in.
+Dropped in raw, `object-contain` sized each one by whichever edge happened to be longest: the wide
+marks (`rating`, `scoring-formats`, `join-by-code`) filled the card while the square framed ones sat
+small in the middle of it. Equalising **bounding-box area** — not height, not "fit the box" — is what
+made twenty-one different shapes read as one size. That's now `scripts/install_feature_logos.py`.
+
+**The court frame settled itself.** The six formats that are literally drawn on a court
+(`americano`, `mexicano`, the two mix formats, `fixed-position`, `fixed-partner`) carry the rounded
+frame; nothing else does. That reads as a deliberate sub-family rather than an inconsistency, so the
+question from the first icon — frame on all of them, or none — turned out to have a third answer.
+
+**Two pairs are hard to tell apart at card size**, and both are inside that framed sub-family:
+`fixed-position` against `fixed-partner`, and `mexicano` against `mix-mexicano`. All four are four
+dots on a court, differing only in which dots are gold. Gold placement alone is too fine a signal at
+150px. If they're ever revised, give each a small second element — a dashed centre line for the
+sides, a link between the two dots for the pair — rather than relying on colour position.
+
+**64 colours is free.** These are two-colour flat marks, so quantising to a 64-colour palette is
+visually identical at any size and about five times smaller: 507KB of exports became 169KB shipped.
