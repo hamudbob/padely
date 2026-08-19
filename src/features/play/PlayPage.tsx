@@ -373,6 +373,8 @@ export default function PlayPage() {
             questions go away — most of them (rating, clubs, compensation)
             only start once you're in. */}
         <p className="text-[12px] leading-[1.5] text-warm-gray text-center px-6 pt-7 pb-2">
+          <Link to="/features" className="font-semibold text-gold-ink">Everything Padelier does</Link>
+          <span className="px-2 text-stone">·</span>
           <Link to="/about" className="font-semibold text-gold-ink">How it all works</Link>
         </p>
       </div>

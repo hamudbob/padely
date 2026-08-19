@@ -405,6 +405,16 @@ export default function SettingsPage() {
           code on that red message meant. */}
       <p className={`${label} mb-2 px-1`}>Help</p>
       <div className="rounded-2xl border border-line bg-surface overflow-hidden mb-5">
+        {/* First, because it's the one people go looking for and the only other
+            way in is swiping the Play slideshow to its last card. */}
+        <Link to="/features" className="flex items-center justify-between gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">
+          <span>
+            <span className="block text-[14px] font-semibold text-graphite">Everything Padelier does</span>
+            <span className="block text-[12px] text-warm-gray mt-0.5">All 21 features, one page each</span>
+          </span>
+          <span className="text-stone text-[15px] shrink-0" aria-hidden>›</span>
+        </Link>
+        <div className="h-px bg-line" />
         <Link to="/about" className="flex items-center justify-between gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">
           <span>
             <span className="block text-[14px] font-semibold text-graphite">How Padelier works</span>
