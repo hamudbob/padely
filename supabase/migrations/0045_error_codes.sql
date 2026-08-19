@@ -2,7 +2,7 @@
 -- 0045_error_codes.sql
 --
 -- Every failure the app can show now carries a code the person can quote:
--- PDL-2002 for a known condition, PDL-U-7F3A for anything not yet
+-- PLR-2002 for a known condition, PLR-U-7F3A for anything not yet
 -- catalogued. This stores it, groups by it, and — the part that makes it
 -- worth having — lets you paste a code a user sent you straight into the
 -- admin console's search box and land on that exact error.
@@ -18,7 +18,7 @@ alter table client_errors add column if not exists code text;
 create index if not exists client_errors_code_idx on client_errors (code, created_at desc);
 
 comment on column client_errors.code is
-  'The PDL-… code shown to the user for this failure. Curated codes are documented in docs/ERRORS.md; PDL-U-… is derived from the error itself and is stable across devices.';
+  'The PLR-… code shown to the user for this failure. Curated codes are documented in docs/ERRORS.md; PLR-U-… is derived from the error itself and is stable across devices.';
 
 -- report_client_error gains the code. Same clamping, same flood guard: only
 -- the payload is wider.
@@ -139,7 +139,9 @@ begin
 
   -- A code is unambiguous and is what a user will have sent you, so it
   -- answers on its own rather than being mixed in with name matches.
-  if upper(q) like 'PDL-%' then
+  -- Also accepts the old PDL- prefix: a code a user screenshotted before the
+  -- rename should not become a dead reference.
+  if upper(q) like 'PLR-%' or upper(q) like 'PDL-%' then
     select coalesce(jsonb_agg(to_jsonb(x) order by x.last_seen desc), '[]'::jsonb) into v
     from (
       select 'error' as type,

@@ -163,7 +163,7 @@ export interface ActivityItem {
 
 export interface ErrorGroup {
   fingerprint: string;
-  /** The PDL-… code the user was shown. Null for anything logged before 0045. */
+  /** The PLR-… code the user was shown. Null for anything logged before 0045. */
   code: string | null;
   /** How many of these someone pressed "Report this" on — the difference
    *  between an error that HAPPENED and one that was NOTICED. */

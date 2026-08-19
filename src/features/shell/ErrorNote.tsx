@@ -9,7 +9,7 @@ import { reportHandledError } from "../../lib/errorReporter";
  *
  *   1. what went wrong, in words
  *   2. a code they can quote — the whole point. "Could not load your
- *      sessions" cost two hours and a database audit; "PDL-2002" would have
+ *      sessions" cost two hours and a database audit; "PLR-2002" would have
  *      cost one message.
  *   3. a Report button that puts the code, the screen, the time and the
  *      browser on their clipboard and opens a message to support, so what
