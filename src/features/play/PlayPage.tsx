@@ -165,13 +165,6 @@ export default function PlayPage() {
     label: past.length > 0 || live.length > 0 ? "Start a session" : "Create your first session",
   };
 
-  // Where the slideshow goes depends on whether there's anything real to show.
-  // On a quiet screen it sits straight under the buttons — that emptiness is
-  // what it's for. On a screen with a live session and a history it drops below
-  // Recent, because an advert above someone's own sessions is the wrong way
-  // round.
-  const quiet = live.length === 0 && past.length === 0;
-
   return (
     <>
       <TabHeader />
@@ -181,6 +174,12 @@ export default function PlayPage() {
         <div className="px-5 pt-2 pb-1">
           <p className="text-[10.5px] font-bold uppercase tracking-[0.2em] text-gold-ink">{dateKicker(now)}</p>
         </div>
+
+        {/* Under the date, always — Hamud's call, and it holds up: this is the
+            one thing on the screen that doesn't depend on data, so it renders
+            immediately and the page is never blank while the sessions load.
+            Note it therefore sits ABOVE a live session card on a busy night. */}
+        <FeatureCarousel />
 
         {loading && !sessions && (
           <div className="px-5 pt-5 flex flex-col gap-2.5">
@@ -233,14 +232,6 @@ export default function PlayPage() {
             ))}
           </div>
         )}
-
-        {/* On a quiet screen the slideshow leads, above the buttons: with
-            nothing live and nothing played, "what can this thing do" is the
-            actual question, and the answer should be the first thing on the
-            page rather than a footnote under two controls. On a screen with a
-            live session it stays down by Recent — there, the buttons are the
-            question. */}
-        {sessions && quiet && <FeatureCarousel />}
 
         {/* ── One action, following from the state ────────────────────── */}
         {sessions && (
@@ -375,8 +366,6 @@ export default function PlayPage() {
             </div>
           </div>
         )}
-
-        {sessions && !quiet && <FeatureCarousel />}
 
         <div className="flex-1 min-h-[16px]" />
 
