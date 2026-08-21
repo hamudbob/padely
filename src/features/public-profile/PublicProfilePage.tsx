@@ -5,6 +5,7 @@ import { getMyTeams, setMemberRole, kickMember, MyTeam } from "../../lib/supabas
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
 import { RatingStrip, RecordCard, TrendCard, SectionHeading, memberSince } from "../profile/playerStats";
+import AvatarLightbox from "../shell/AvatarLightbox";
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -16,6 +17,7 @@ export default function PublicProfilePage() {
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
+  const [photoOpen, setPhotoOpen] = useState(false);
   const [viewerTeams, setViewerTeams] = useState<MyTeam[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
 
@@ -108,9 +110,29 @@ export default function PublicProfilePage() {
 
       {/* Identity */}
       <div className="flex flex-col items-center text-center pt-6">
-        <div className="w-[88px] h-[88px] rounded-full bg-gold-soft text-gold-ink flex items-center justify-center text-[34px] font-serif font-semibold overflow-hidden">
-          {profile.avatarUrl ? <img src={profile.avatarUrl} alt="" className="w-full h-full object-cover" /> : profile.displayName.charAt(0).toUpperCase()}
-        </div>
+        {/* Tappable only when there's a photo — an initial has nothing to
+            enlarge, and a control that does nothing is worse than no control. */}
+        {profile.avatarUrl ? (
+          <button
+            type="button"
+            onClick={() => setPhotoOpen(true)}
+            aria-label={`See ${profile.displayName}'s photo`}
+            className="w-[88px] h-[88px] rounded-full overflow-hidden bg-gold-soft active:scale-95 transition-transform"
+          >
+            <img src={profile.avatarUrl} alt="" className="w-full h-full object-cover" />
+          </button>
+        ) : (
+          <div className="w-[88px] h-[88px] rounded-full bg-gold-soft text-gold-ink flex items-center justify-center text-[34px] font-serif font-semibold overflow-hidden">
+            {profile.displayName.charAt(0).toUpperCase()}
+          </div>
+        )}
+        {photoOpen && profile.avatarUrl && (
+          <AvatarLightbox
+            src={profile.avatarUrl}
+            alt={`${profile.displayName}'s photo`}
+            onClose={() => setPhotoOpen(false)}
+          />
+        )}
         <h1 className="font-serif text-[27px] font-semibold text-graphite tracking-tight mt-3.5">{profile.displayName}</h1>
         <p className="text-[12.5px] text-warm-gray mt-1">Playing since {memberSince(profile.memberSince)}</p>
         {/* Centred to match the rest of this header. Rendered as plain text —
