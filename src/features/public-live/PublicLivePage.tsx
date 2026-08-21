@@ -196,6 +196,11 @@ export default function PublicLivePage() {
     comp: s.restCompensation,
   }));
 
+  // Draws only happen when a format's target is even — today that is fixed 4
+  // games, where 2–2 is a real result. So the column is per-session, not a
+  // permanent third number that reads as 0 for everyone else.
+  const anyDraws = board.some((r) => r.draws > 0);
+
   // Court scores grouped by round.
   const roundSeqs = [...new Set(matches.map((m) => m.roundSequence))].sort((a, b) => a - b);
   const latestSeq = roundSeqs[roundSeqs.length - 1] ?? 0;
@@ -333,7 +338,11 @@ export default function PublicLivePage() {
           <div className="flex items-center gap-3 px-4 pt-2.5 pb-1.5 text-[9px] font-bold uppercase tracking-[0.14em] text-warm-gray">
             <span className="w-5 text-center">#</span>
             <span className="flex-1">Player</span>
-            <span className="w-14 text-right">W–L</span>
+            {/* The header has to match what the rows actually print. Fixed 4
+                games can end 2–2, so those sessions have a third number and
+                the label said W–L anyway — which read as "4 wins, 1 loss" with
+                a mystery digit after it. */}
+            <span className="w-14 text-right">{anyDraws ? "W–L–D" : "W–L"}</span>
             <span className="w-12 text-right">Pts</span>
           </div>
           <div className="divide-y divide-line">
@@ -353,7 +362,19 @@ export default function PublicLivePage() {
                   <span className={`w-5 text-center font-mono tnum text-[13px] font-bold ${top ? "text-gold-ink" : "text-warm-gray"}`}>{row.rank}</span>
                   <span className={`flex-1 min-w-0 truncate text-[13.5px] ${top ? "text-graphite font-semibold" : "text-ink"}`}>{row.name}</span>
                   <span className="w-14 text-right font-mono tnum text-[11.5px] text-warm-gray">
-                    {row.wins}<span className="text-stone">–</span>{row.losses}{row.draws > 0 ? <span className="text-stone">–{row.draws}</span> : null}
+                    {row.wins}
+                    <span className="text-stone">–</span>
+                    {row.losses}
+                    {/* Once ANY row has a draw the column is W–L–D for
+                        everybody, including the rows with none: a ragged
+                        column of two- and three-part records is unreadable,
+                        and a bare 0 is clearer than a gap. */}
+                    {anyDraws && (
+                      <>
+                        <span className="text-stone">–</span>
+                        {row.draws}
+                      </>
+                    )}
                   </span>
                   <span className="w-12 text-right font-mono tnum text-[15px] font-semibold text-gold-ink whitespace-nowrap">
                     {row.points}

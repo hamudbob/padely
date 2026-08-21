@@ -58,7 +58,21 @@ export function assembleStandings(input: StandingsInput): SessionStandings {
 
   const isFixedPartner = session.fixed_partner_style !== null || session.format === "fixed_partner";
 
-  const activePlayerIds = players.map((p) => p.id);
+  // Someone who was marked "not here yet" and never made it onto a court is
+  // not a result — they're an absence. Left in, they'd be ranked on rest
+  // compensation alone (which is credited to everyone short of the busiest
+  // player), so a no-show could finish mid-table on points they were given for
+  // rounds they weren't at. That was harmless while the roster was typed in by
+  // hand on the night; it stops being harmless now that RSVPs seed the roster
+  // in advance and the host marks the absentees.
+  //
+  // A player who played even one game and then left is a different case
+  // entirely: they took part, they keep their points, and they are still
+  // compensated for what they missed.
+  const everPlayed = new Set(participants.map((pt) => pt.player_id));
+  const activePlayerIds = players
+    .filter((p) => p.status !== "left" || everPlayed.has(p.id))
+    .map((p) => p.id);
   const nameById = new Map(players.map((p) => [p.id, p.display_name]));
   const teamSideById = new Map(players.map((p) => [p.id, p.team_side]));
 

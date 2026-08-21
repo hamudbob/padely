@@ -44,22 +44,47 @@ export type FormResult = "W" | "L" | "D";
  * It's also where most of the club will sit — that's the joke working, not a
  * bug.
  *
- * Known and accepted: in a ~16-player club nobody reaches "ahmad" (1850). The
- * strongest player in simulation finished on 1849. It's a myth tier by choice;
- * 1800 would make it attainable if that ever changes.
+ * The top three bands were widened downward in Aug 2026 (1575/1700/1800,
+ * from 1575/1725/1850). "ahmad" at 1850 was unreachable — the strongest player
+ * in a 200-player simulation settled on 1849 — which made the best tier a
+ * rumour nobody could ever verify. At 1800 it's rare but real.
  */
+
+export interface Tier {
+  /** Lowest rating in the band. */
+  from: number;
+  /** Highest rating in the band, or null for the open-ended top. */
+  to: number | null;
+  name: string;
+  /** Hidden on the ladder — you only learn the name by getting there. */
+  secret?: boolean;
+}
+
+/**
+ * The ladder, bottom to top. The first and last names are deliberately not
+ * shown on the tier sheet: the bottom one because being told you're at the
+ * bottom of a named ladder is worse than not knowing, and the top one because
+ * an unnamed prize is a better prize. Both still show on the person's own
+ * strip once they're in it — the secret is what the band is CALLED before you
+ * get there, not where you are.
+ */
+export const TIERS: Tier[] = [
+  { from: 0, to: 1299, name: "fuad", secret: true },
+  { from: 1300, to: 1424, name: "cacing" },
+  { from: 1425, to: 1574, name: "cacing sr" },
+  { from: 1575, to: 1699, name: "lumayan" },
+  { from: 1700, to: 1799, name: "jago" },
+  { from: 1800, to: null, name: "ahmad", secret: true },
+];
+
 export function tierFor(rating: number, provisional: boolean): string {
   // Not a skill judgement and not the bottom rung: the rating deviation is
   // still too wide to trust the number at all. Takes about three sessions to
   // clear, win or lose — hence an instruction ("play more") rather than a rank,
   // which is the one label that can't be misread as a verdict on a new player.
   if (provisional) return "main lagi";
-  if (rating < 1300) return "fuad";
-  if (rating < 1425) return "cacing";
-  if (rating < 1575) return "cacing sr";
-  if (rating < 1725) return "lumayan";
-  if (rating < 1850) return "jago";
-  return "ahmad";
+  const band = TIERS.find((t) => rating >= t.from && (t.to === null || rating <= t.to));
+  return band?.name ?? TIERS[TIERS.length - 1].name;
 }
 
 export function memberSince(iso: string): string {
@@ -90,10 +115,13 @@ export function RatingStrip({
   rating,
   provisional,
   games,
+  onOpenTier,
 }: {
   rating: number;
   provisional: boolean;
   games: number;
+  /** Opens the tier ladder. Optional so the public profile can stay static. */
+  onOpenTier?: () => void;
 }) {
   return (
     <>
@@ -123,16 +151,35 @@ export function RatingStrip({
           <p className="font-mono tnum text-[24px] font-semibold text-graphite leading-none mt-1.5">{Math.round(rating)}</p>
         </div>
         <div className="w-px bg-line" />
-        <div className="flex-1 py-3.5 text-center">
-          <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray">Tier</p>
-          {/* Uppercased in CSS, not in the strings — tierFor returns data, this
-              decides how it looks. Set a size down from 14.5px because caps
-              read optically larger at the same point size, and given positive
-              tracking, which uppercase needs to stop it looking cramped. */}
-          <p className="text-[13px] font-bold uppercase tracking-[0.09em] text-gold-ink leading-none mt-[11px]">
-            {tierFor(rating, provisional)}
-          </p>
-        </div>
+        {/* The tier is the one column that begs a question — "what are the
+            others?" — so it's the one that opens something. */}
+        {(() => {
+          const cell = (
+            <>
+              <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray">Tier</p>
+              {/* Uppercased in CSS, not in the strings — tierFor returns data,
+                  this decides how it looks. Set a size down from 14.5px because
+                  caps read optically larger at the same point size, and given
+                  positive tracking, which uppercase needs to stop it looking
+                  cramped. */}
+              <p className="text-[13px] font-bold uppercase tracking-[0.09em] text-gold-ink leading-none mt-[11px]">
+                {tierFor(rating, provisional)}
+              </p>
+            </>
+          );
+          return onOpenTier ? (
+            <button
+              type="button"
+              onClick={onOpenTier}
+              aria-label="See every tier"
+              className="flex-1 py-3.5 text-center active:bg-surface-2 transition-colors"
+            >
+              {cell}
+            </button>
+          ) : (
+            <div className="flex-1 py-3.5 text-center">{cell}</div>
+          );
+        })()}
         <div className="w-px bg-line" />
         <div className="flex-1 py-3.5 text-center">
           <p className="text-[10px] font-bold uppercase tracking-[0.12em] text-warm-gray">Games</p>

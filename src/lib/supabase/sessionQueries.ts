@@ -23,6 +23,10 @@ export interface HostLiveRosterEntry {
   teamSide: "A" | "B" | null;
   /** Fixed Partner only — "FirstName & FirstName" of this player's locked partner. Null otherwise. */
   pairLabel: string | null;
+  /** Games this player has actually been on court for. Distinguishes someone
+   *  who hasn't arrived from someone who played and went home — the same
+   *  `left` status covers both, and the host needs to see which. */
+  matchesPlayed: number;
 }
 
 export interface HostLiveCourt {
@@ -81,7 +85,7 @@ export async function getHostLiveSnapshot(sessionId: string): Promise<HostLiveSn
       .eq("id", sessionId)
       .single(),
     supabase.from("courts").select("id, display_name, available").eq("session_id", sessionId).order("ordinal", { ascending: true }),
-    supabase.from("players").select("id, display_name, gender, status, team_side").eq("session_id", sessionId),
+    supabase.from("players").select("id, display_name, gender, status, team_side, matches_played").eq("session_id", sessionId),
     supabase.from("rounds").select("id, sequence").eq("session_id", sessionId).order("sequence", { ascending: false }).limit(1),
   ]);
   if (sessionError) throw sessionError;
@@ -122,6 +126,7 @@ export async function getHostLiveSnapshot(sessionId: string): Promise<HostLiveSn
     status: p.status,
     teamSide: p.team_side,
     pairLabel: pairLabelByPlayerId.get(p.id) ?? null,
+    matchesPlayed: p.matches_played ?? 0,
   }));
 
   const courtList: HostLiveCourt[] = (courts ?? []).map((c) => ({ id: c.id, name: c.display_name, available: c.available }));

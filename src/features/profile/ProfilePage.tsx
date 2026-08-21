@@ -19,6 +19,7 @@ import { getMyPlayerSessions, PlayerSession } from "../../lib/supabase/playerJoi
 import { getMyProfile, updateMyProfile, uploadAvatar, Profile } from "../../lib/supabase/profileQueries";
 import { getPlayerInsights, getRatingHistory, PlayerInsights, RatingPoint } from "../../lib/supabase/insightsQueries";
 import RecordSheet from "./RecordSheet";
+import TierSheet from "./TierSheet";
 
 const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
@@ -66,6 +67,7 @@ export default function ProfilePage() {
   const [playerSessions, setPlayerSessions] = useState<PlayerSession[] | null>(null);
   const [tab, setTab] = useState<RoleTab>("host");
   const [recordOpen, setRecordOpen] = useState(false);
+  const [tierOpen, setTierOpen] = useState(false);
 
   const [displayName, setDisplayName] = useState("");
   const [editingName, setEditingName] = useState(false);
@@ -376,7 +378,15 @@ export default function ProfilePage() {
         rating={profile?.rating ?? 1500}
         provisional={!!profile && (profile.ratingDeviation > 110 || profile.ratingGames < 5)}
         games={profile?.ratingGames ?? 0}
+        onOpenTier={() => setTierOpen(true)}
       />
+      {tierOpen && (
+        <TierSheet
+          rating={profile?.rating ?? 1500}
+          provisional={!!profile && (profile.ratingDeviation > 110 || profile.ratingGames < 5)}
+          onClose={() => setTierOpen(false)}
+        />
+      )}
 
       {history.length >= 2 && (
         <>

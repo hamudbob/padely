@@ -1611,30 +1611,44 @@ export default function HostLivePage() {
               </div>
             )}
 
+            {/* One action, two meanings. Someone who has played and gone home
+                has "left"; someone the RSVP list added who hasn't walked in yet
+                has not left anything. Both are the same row in the database —
+                out of the draw, restorable — but calling the second one "left"
+                made hosts hesitate to use it on the person they were waiting
+                for, which is exactly the case it's best at. So the label
+                follows whether they have actually been on court. */}
             <div className="space-y-2">
-              {snapshot.roster.map((p) => (
-                <div key={p.id} className="flex items-center justify-between gap-2 rounded-2xl border border-line bg-surface px-3 py-2">
-                  <span className="text-sm font-semibold text-ink truncate">
-                    {p.name}
-                    {p.status === "left" && (
-                      <span className="ml-1.5 text-[10px] font-semibold rounded-full px-1.5 py-0.5 bg-surface-2 text-warm-gray border border-line">LEFT</span>
+              {snapshot.roster.map((p) => {
+                const neverPlayed = p.matchesPlayed === 0;
+                return (
+                  <div key={p.id} className="flex items-center justify-between gap-2 rounded-2xl border border-line bg-surface px-3 py-2">
+                    <span className="text-sm font-semibold text-ink truncate">
+                      {p.name}
+                      {p.status === "left" && (
+                        <span className="ml-1.5 text-[10px] font-semibold rounded-full px-1.5 py-0.5 bg-surface-2 text-warm-gray border border-line">
+                          {neverPlayed ? "NOT HERE" : "LEFT"}
+                        </span>
+                      )}
+                    </span>
+                    {p.status === "left" ? (
+                      <button onClick={() => handleRestorePlayer(p.id)} className="shrink-0 text-[11px] font-semibold text-ink-2">
+                        {neverPlayed ? "They're here" : "Restore"}
+                      </button>
+                    ) : (
+                      <button onClick={() => handleMarkLeft(p.id)} className="shrink-0 text-[11px] font-semibold text-loss">
+                        {neverPlayed ? "Not here yet" : "Mark as left"}
+                      </button>
                     )}
-                  </span>
-                  {p.status === "left" ? (
-                    <button onClick={() => handleRestorePlayer(p.id)} className="shrink-0 text-[11px] font-semibold text-ink-2">
-                      Restore
-                    </button>
-                  ) : (
-                    <button onClick={() => handleMarkLeft(p.id)} className="shrink-0 text-[11px] font-semibold text-loss">
-                      Mark as left
-                    </button>
-                  )}
-                </div>
-              ))}
+                  </div>
+                );
+              })}
             </div>
 
             <p className="text-[11px] text-warm-gray mt-4">
-              Player changes take effect starting with the next generated round — scores and rounds already played stay exactly as they are.
+              Player changes take effect starting with the next generated round — scores and rounds already played stay
+              exactly as they are. Anyone marked "not here yet" is left out of the draw until you say they've arrived,
+              and keeps their place and their points meanwhile.
             </p>
           </div>
         </div>
