@@ -354,6 +354,13 @@ export interface Database {
           rating: number;
           delta: number;
           created_at: string;
+          // Added by 0021/0040 (the audit trail behind a rating move) and
+          // missing from this file until 0047 needed to read them back.
+          rating_before: number | null;
+          rd_before: number | null;
+          vol_before: number | null;
+          games_before: number | null;
+          games_after: number | null;
         };
         Insert: {
           id?: string;
@@ -361,6 +368,11 @@ export interface Database {
           session_id?: string | null;
           rating: number;
           delta?: number;
+          rating_before?: number | null;
+          rd_before?: number | null;
+          vol_before?: number | null;
+          games_before?: number | null;
+          games_after?: number | null;
         };
         Update: Partial<Database["public"]["Tables"]["rating_history"]["Insert"]>;
         Relationships: [];

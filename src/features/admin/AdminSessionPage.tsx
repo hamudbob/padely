@@ -1,7 +1,16 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import PageHeader from "../shell/PageHeader";
-import { SessionDetail, forceEndSession, getSessionDetail, linkPlayer } from "../../lib/supabase/adminQueries";
+import {
+  SessionDetail,
+  SearchHit,
+  adminSearch,
+  creditSessionRating,
+  forceEndSession,
+  getSessionDetail,
+  linkPlayer,
+} from "../../lib/supabase/adminQueries";
+import { previewSessionCredit } from "../../lib/supabase/adminRatingRepair";
 import { applySessionRatings } from "../../lib/supabase/ratingActions";
 import { applySessionResults } from "../../lib/supabase/resultActions";
 
@@ -91,6 +100,71 @@ export default function AdminSessionPage() {
     try {
       const r = await forceEndSession(sessionId);
       setNote(r.changed ? "Ended. Re-run finalize if it should count." : "It was already ended.");
+      load();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "That didn’t work.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  // ── Claiming a spot after the session ended ──────────────────────────
+  // Someone played all night under a name the host typed in and only realised
+  // afterwards that they never claimed it. Reopening the session is the
+  // obvious fix and the wrong one — see migration 0047. Instead: link the row
+  // to the account here, then credit that one account for that one session.
+  const [linkFor, setLinkFor] = useState<{ id: string; name: string } | null>(null);
+  const [query, setQuery] = useState("");
+  const [hits, setHits] = useState<SearchHit[] | null>(null);
+  const [searching, setSearching] = useState(false);
+
+  async function runSearch() {
+    if (query.trim().length < 2) return;
+    setSearching(true);
+    try {
+      const found = await adminSearch(query.trim());
+      setHits(found.filter((h) => h.type === "user"));
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "Search failed.");
+    } finally {
+      setSearching(false);
+    }
+  }
+
+  async function link(playerId: string, userId: string, who: string) {
+    setBusy(true);
+    setNote(null);
+    try {
+      await linkPlayer(playerId, userId);
+      setLinkFor(null);
+      setQuery("");
+      setHits(null);
+      setNote(`Linked to ${who}. If the session is already rated, credit their rating below.`);
+      load();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "That didn’t work.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function credit(userId: string, name: string) {
+    setBusy(true);
+    setNote(null);
+    try {
+      const preview = await previewSessionCredit(sessionId!, userId);
+      const move = `${preview.delta >= 0 ? "+" : ""}${preview.delta.toFixed(1)}`;
+      const ok = window.confirm(
+        `Credit ${name} for this session?\n\n` +
+          `${preview.gamesInSession} game${preview.gamesInSession === 1 ? "" : "s"}: ` +
+          `${Math.round(preview.ratingBefore)} → ${Math.round(preview.rating)} (${move})\n\n` +
+          `Their opponents are valued at what they were worth on the night. ` +
+          `The move applies to their rating as it stands today — it is not back-dated, ` +
+          `and nobody else's rating changes.`,
+      );
+      if (!ok) return;
+      const r = await creditSessionRating(sessionId!, userId, preview);
+      setNote(`${name}: ${Math.round(r.rating_before)} → ${Math.round(r.rating_after)}.`);
       load();
     } catch (e) {
       setNote(e instanceof Error ? e.message : "That didn’t work.");
@@ -249,11 +323,24 @@ export default function AdminSessionPage() {
                   <span className="text-warm-gray">guest{p.email ? ` · ${p.email}` : ""}</span>
                 )}
               </span>
-              {p.linked_user_id && (
+              {p.linked_user_id ? (
                 <span className="flex items-center gap-2 shrink-0">
                   <Link to={`/admin/u/${p.linked_user_id}`} className="text-[11.5px] font-semibold text-gold-ink">
                     account ›
                   </Link>
+                  {/* Only worth offering once the session is over and its
+                      ratings have run — before that, ending it normally rates
+                      everyone including this person. The RPC refuses a second
+                      credit, so a double tap is safe. */}
+                  {ended && s.ratings_applied && (
+                    <button
+                      onClick={() => credit(p.linked_user_id!, p.display_name)}
+                      disabled={busy}
+                      className="text-[11.5px] font-semibold text-gold-ink border border-gold/40 rounded-full px-2.5 py-1 bg-gold-soft active:opacity-70 disabled:opacity-40"
+                    >
+                      Credit rating
+                    </button>
+                  )}
                   <button
                     onClick={() => unlink(p.id, p.display_name)}
                     disabled={busy}
@@ -262,6 +349,64 @@ export default function AdminSessionPage() {
                     Unlink
                   </button>
                 </span>
+              ) : (
+                <button
+                  onClick={() => {
+                    setLinkFor({ id: p.id, name: p.display_name });
+                    setQuery(p.display_name);
+                    setHits(null);
+                  }}
+                  disabled={busy}
+                  className="shrink-0 text-[11.5px] font-semibold text-ink-2 border border-line rounded-full px-2.5 py-1 bg-ivory active:opacity-70 disabled:opacity-40"
+                >
+                  Link to account
+                </button>
+              )}
+              {linkFor?.id === p.id && (
+                <div className="mt-2 rounded-xl border border-line bg-ivory p-2.5">
+                  <p className="text-[11px] text-warm-gray mb-1.5">
+                    Who is <b className="text-ink-2">{p.display_name}</b>? Search by name or email.
+                  </p>
+                  <div className="flex gap-1.5">
+                    <input
+                      value={query}
+                      onChange={(e) => setQuery(e.target.value)}
+                      onKeyDown={(e) => e.key === "Enter" && runSearch()}
+                      className="flex-1 min-w-0 rounded-full border border-line bg-surface px-3 py-1.5 text-[12.5px]"
+                      placeholder="name or email"
+                    />
+                    <button
+                      onClick={runSearch}
+                      disabled={searching || query.trim().length < 2}
+                      className="text-[11.5px] font-semibold text-ivory bg-graphite rounded-full px-3 disabled:opacity-40"
+                    >
+                      {searching ? "…" : "Find"}
+                    </button>
+                    <button
+                      onClick={() => {
+                        setLinkFor(null);
+                        setHits(null);
+                      }}
+                      className="text-[11.5px] font-semibold text-warm-gray px-2"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                  {hits && hits.length === 0 && (
+                    <p className="text-[11.5px] text-warm-gray mt-2">No account matches that.</p>
+                  )}
+                  {hits?.map((h) => (
+                    <button
+                      key={h.id}
+                      onClick={() => link(p.id, h.id, h.label)}
+                      disabled={busy}
+                      className="w-full text-left mt-1.5 rounded-lg px-2.5 py-1.5 bg-surface border border-line active:bg-surface-2 disabled:opacity-40"
+                    >
+                      <span className="block text-[12.5px] font-semibold text-graphite">{h.label}</span>
+                      {h.sublabel && <span className="block text-[11px] text-warm-gray">{h.sublabel}</span>}
+                    </button>
+                  ))}
+                </div>
               )}
             </div>
           </div>

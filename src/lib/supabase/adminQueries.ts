@@ -403,6 +403,24 @@ export const getSessionDetail = (sessionId: string) =>
   call<SessionDetail>("admin_session_detail", { p_session_id: sessionId });
 export const getLiveNow = () => call<LiveSession[]>("admin_live_now");
 export const adminSearch = (query: string) => call<SearchHit[]>("admin_search", { p_query: query });
+
+/** Credit one account for one ended session — the repair for a spot claimed
+ *  too late. Refuses if that pair already has a rating_history row, so it can
+ *  be retried safely. See migration 0047 and adminRatingRepair.ts. */
+export const creditSessionRating = (
+  sessionId: string,
+  userId: string,
+  c: { rating: number; rd: number; vol: number; games: number; delta: number },
+) =>
+  call<{ rating_before: number; rating_after: number; delta: number }>("admin_credit_session_rating", {
+    p_session_id: sessionId,
+    p_user_id: userId,
+    p_rating: c.rating,
+    p_rd: c.rd,
+    p_vol: c.vol,
+    p_games: c.games,
+    p_delta: c.delta,
+  });
 export const getGrowth = () => call<Growth>("admin_growth");
 export const getAdminAppSettings = () => call<AppSettings>("get_app_settings");
 
