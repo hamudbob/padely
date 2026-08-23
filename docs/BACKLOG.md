@@ -70,13 +70,17 @@ same court whatever the database thinks. A block is invisible to everyone except
 the blocker, including the host.
 
 ### A public /delete-account page
-Play requires a web route for deletion requests *in addition* to the in-app one,
-for people who've uninstalled. Most of the text already exists in the retention
+NOT more deletion logic — `delete_my_account` has shipped since 0037 and the
+in-app route works. What's missing is a **public web page**: Play requires a URL
+someone can reach *after uninstalling*, where they can request deletion and read
+what gets erased, and the listing has to link to it. Apple doesn't require the
+page, only the in-app route. Most of the text already exists in the retention
 section of the privacy policy.
 
-### The going list is public
-A signed-out visitor to `/e/<id>` sees eight members' names and photos. Proposal:
-signed-out sees counts and first names only; members see faces.
+### ~~The going list is public~~ — decided, leaving it
+A signed-out visitor to `/e/<id>` sees members' names and photos. Hamud's call,
+26 Aug: no different from any club page on any booking site where you can open a
+session and see who's playing. Not changing it.
 
 ---
 
@@ -120,6 +124,24 @@ run — the same night on 3 courts gives a bigger top-up per missed game than on
 sum to 26, not 22).
 
 ---
+
+### Sign in with Google (and then, necessarily, Apple)
+Both are supported by Supabase Auth. Google is the cheap one: OAuth credentials
+in Google Cloud, the provider switched on in Supabase, one `signInWithOAuth`
+call. Apple costs the developer account, a Services ID, a key and domain
+verification — and it is **not optional once Google exists on iOS**: guideline
+4.8 requires an equivalent private login wherever a third-party one is offered.
+
+The thing to design before either: identity. Padelier keys everything to the
+auth user id, so someone who signed up with a password and later taps "Sign in
+with Google" on the same address must land in the SAME account, or they get a
+second one with no rating, no history and no clubs. Supabase links identities by
+verified email, but this needs proving on a scratch project before it goes near
+real players — a duplicate account is the same class of bug as the duplicate
+teams row that broke a friend's home screen for a week.
+
+Both need the domain working: OAuth redirect URIs and Apple's domain
+verification both point at padelier.id.
 
 ## Smaller
 
