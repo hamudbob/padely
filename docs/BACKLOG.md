@@ -127,15 +127,20 @@ handle_new_user() to read `full_name` and the provider photo. The consent screen
 carries the Padelier mark, so the app is published to production and the domain
 is verified in Search Console.
 
-**Still unproven: identity linking.** What has been tested is a fresh Google
-account signing up, signing out and signing back in. What has NOT been tested is
-the case that actually costs a player their history — someone who signed up with
-a password and later taps Sign in with Google on the SAME address. Supabase links
-identities by verified email, but if it ever doesn't, they get a second account
-with no rating, no clubs and no sessions, and the first sign-in that proves it
-will be a member's rather than ours. The check is one look at the Supabase Users
-table: one row for that address with BOTH Email and Google in the Providers
-column. Do it with an account whose loss wouldn't matter.
+**Identity linking: proven.** Signed up with a password, signed out, signed in
+with a password, signed out, signed in with Google — same account, same uploaded
+avatar, same name. Supabase Users shows a single row for that address with both
+Email and Google under Providers. The duplicate-account failure mode (a second
+account with no rating, no clubs, no history) does not occur.
+
+**Open, and the mirror of the above:** someone who signs up with GOOGLE first and
+later types their email on the login screen is asked for a password they never
+set, and told "that password didn't work" — true, and useless. It is recoverable
+through Forgot password (setting one adds an email identity alongside Google),
+but the wording points away from the fix. Cheapest remedy: show Continue with
+Google on the password step too, so the door they need is visible. This will be
+most Google users eventually, since nobody remembers which button they used the
+first time.
 
 Apple is the other half and is **not optional once Google exists on iOS**:
 guideline 4.8 requires an equivalent private login wherever a third-party one is
