@@ -3,7 +3,7 @@ import ErrorNote from "../shell/ErrorNote";
 import { withFallback } from "../../lib/errors";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
-import { getTeam, getTeamMembers, leaveTeam, uploadClubLogo, getClubStats, Team, TeamMember, TeamRole, ClubStats } from "../../lib/supabase/teamQueries";
+import { getTeam, getTeamMembers, getTeamSessions, leaveTeam, uploadClubLogo, getClubStats, Team, TeamMember, TeamSession, TeamRole, ClubStats } from "../../lib/supabase/teamQueries";
 import { getClubJoinRequests, respondJoinRequest, inviteByEmail, requestToJoin, JoinRequestItem } from "../../lib/supabase/clubJoinQueries";
 import {
   getClubEvents,
@@ -35,6 +35,8 @@ export default function TeamDetailPage() {
 
   const [team, setTeam] = useState<Team | null>(null);
   const [members, setMembers] = useState<TeamMember[]>([]);
+  const [past, setPast] = useState<TeamSession[]>([]);
+  const [showAllPast, setShowAllPast] = useState(false);
   const [membersLoaded, setMembersLoaded] = useState(false);
   const [requests, setRequests] = useState<JoinRequestItem[]>([]);
   const [stats, setStats] = useState<ClubStats | null>(null);
@@ -61,6 +63,16 @@ export default function TeamDetailPage() {
   const myRole = members.find((m) => m.userId === user?.id)?.role;
   const isOwner = myRole === "owner";
   const isAdmin = myRole === "owner" || myRole === "admin";
+
+  // The club's own history. Ended sessions only — a live one is already on the
+  // Play tab and at the top of Upcoming, and showing it twice invites a tap
+  // that goes to the wrong place.
+  useEffect(() => {
+    if (!teamId) return;
+    getTeamSessions(teamId)
+      .then((all) => setPast(all.filter((x) => x.status === "ended")))
+      .catch(() => setPast([]));
+  }, [teamId]);
 
   function loadMembers() {
     if (!teamId) return;
@@ -333,6 +345,46 @@ export default function TeamDetailPage() {
           <span className="text-stone text-[16px]">›</span>
         </Link>
       </Section>
+
+      {/* Past sessions — the club's memory, in the place people look for it.
+          /session/<id>/final is public for any non-draft session, so every row
+          opens the real podium and standings rather than a summary. */}
+      {past.length > 0 && (
+        <div className="mt-7">
+          <div className="flex items-center justify-between mb-2 px-0.5">
+            <h3 className="text-[13px] font-semibold text-ink-2">Past sessions</h3>
+            <span className="font-mono tnum text-[12px] text-warm-gray">{past.length}</span>
+          </div>
+          <div className="rounded-2xl bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+            {(showAllPast ? past : past.slice(0, 5)).map((sn) => (
+              <Link
+                key={sn.id}
+                to={`/session/${sn.id}/final`}
+                className="flex items-center gap-3 px-4 py-3 border-t border-line first:border-t-0 active:bg-surface-2 transition-colors"
+              >
+                <span className="flex-1 min-w-0">
+                  <b className="block text-[14px] font-semibold text-graphite truncate">{sn.name}</b>
+                  <span className="block text-[11.5px] text-warm-gray truncate">
+                    {shortSessionDate(sn.endedAt ?? sn.createdAt)}
+                    {" · "}
+                    {FORMAT_LABELS[sn.format] ?? sn.format}
+                    {sn.winnerName ? ` · 🥇 ${sn.winnerName}` : ""}
+                  </span>
+                </span>
+                <span className="text-stone text-[16px] shrink-0">›</span>
+              </Link>
+            ))}
+          </div>
+          {past.length > 5 && (
+            <button
+              onClick={() => setShowAllPast((v) => !v)}
+              className="w-full text-center text-[12.5px] font-semibold text-gold-ink mt-2 py-1 active:opacity-70"
+            >
+              {showAllPast ? "Show fewer" : `Show all ${past.length}`}
+            </button>
+          )}
+        </div>
+      )}
 
       {/* Members */}
       <div className="mt-7">
@@ -921,6 +973,23 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
       )}
     </div>
   );
+}
+
+const FORMAT_LABELS: Record<string, string> = {
+  americano: "Americano",
+  mexicano: "Mexicano",
+  mix_americano: "Mix Americano",
+  side_americano: "Fixed Position",
+  mix_mexicano: "Mix Mexicano",
+  fixed_partner: "Fixed Partner",
+  team_sparring: "Team Sparring",
+};
+
+/** "22 Aug" — enough to place a past session, short enough for one line. */
+function shortSessionDate(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
 }
 
 /** The date ticket's four pieces: AUG / 24 / Monday / 09:00 PM. */

@@ -109,10 +109,18 @@ export default function ChampionsPage() {
               <div className="flex flex-col gap-2.5">
                 {recent.map((s) => (
                   <div key={s.sessionId} className="rounded-2xl border border-line bg-surface px-4 py-3.5 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-                    <div className="flex items-baseline justify-between gap-2">
-                      <b className="text-[13.5px] font-semibold text-graphite truncate">{s.sessionName}</b>
+                    {/* The session name is a door. /session/<id>/final is public
+                        for any non-draft session, so a member can open the
+                        podium and full standings of a night they played — which
+                        is what someone reading a champions list is actually
+                        curious about. */}
+                    <Link to={`/session/${s.sessionId}/final`} className="flex items-baseline justify-between gap-2 active:opacity-70">
+                      <b className="text-[13.5px] font-semibold text-graphite truncate">
+                        {s.sessionName}
+                        <span className="text-stone font-normal"> ›</span>
+                      </b>
                       <span className="text-[11px] text-warm-gray shrink-0">{shortDate(s.sessionDate)}</span>
-                    </div>
+                    </Link>
                     <Link to={`/u/${s.champion.userId}`} className="flex items-center gap-2.5 mt-2.5 active:opacity-70">
                       <span className="w-[36px] h-[36px] rounded-full bg-gold-soft text-gold-ink border border-gold/30 flex items-center justify-center text-[14px] font-semibold overflow-hidden shrink-0">
                         {s.champion.avatarUrl ? <img src={s.champion.avatarUrl} alt="" className="w-full h-full object-cover" /> : initialsOf(s.champion.name)}

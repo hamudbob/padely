@@ -332,7 +332,15 @@ export default function AdminSessionPage() {
                       ratings have run — before that, ending it normally rates
                       everyone including this person. The RPC refuses a second
                       credit, so a double tap is safe. */}
-                  {ended && s.ratings_applied && (
+                  {/* Only for someone this session HASN'T counted for. Ending a
+                      session rates everyone in it, so before 0049 this button
+                      appeared on nearly every row and could only fail — the
+                      database was doing the thinking the interface should have
+                      done. */}
+                  {ended && s.ratings_applied && p.rated_for_session && (
+                    <span className="text-[11px] text-warm-gray">rating counted ✓</span>
+                  )}
+                  {ended && s.ratings_applied && !p.rated_for_session && (
                     <button
                       onClick={() => credit(p.linked_user_id!, p.display_name)}
                       disabled={busy}

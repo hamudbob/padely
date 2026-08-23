@@ -248,10 +248,14 @@ export interface SessionPlayer {
   linked_user_id: string | null;
   account_name: string | null;
   account_email: string | null;
-  /** False on a linked player means their Player tab can't see this session —
-   *  get_player_sessions matches on a confirmed join request's email, and a
-   *  claimed spot never files one. */
+  /** False on a linked player used to mean their Player tab couldn't see this
+   *  session. Fixed in 0049 — get_player_sessions now also matches a linked
+   *  player row — so this is diagnostic history rather than a live problem. */
   has_join_request: boolean;
+  /** True when this session has already moved that account's rating, i.e. a
+   *  rating_history row exists for the pair. The Credit rating button is only
+   *  offered when this is false. */
+  rated_for_session: boolean;
 }
 
 export interface SessionMatch {

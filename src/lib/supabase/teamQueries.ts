@@ -180,6 +180,11 @@ export interface TeamSession {
   endedAt: string | null;
   publicToken: string;
   createdBy: string | null;
+  /** Who finished first, where results were recorded. Null for a session that
+   *  was never ended properly, or one still live. */
+  winnerName: string | null;
+  /** How many players have a recorded result — 0 until the session ends. */
+  fieldSize: number;
 }
 
 /** Sessions attached to a team (0018) — newest first, drafts excluded. Read
@@ -199,6 +204,8 @@ export async function getTeamSessions(teamId: string): Promise<TeamSession[]> {
     ended_at: string | null;
     public_token: string;
     created_by: string | null;
+    winner_name: string | null;
+    field_size: number | null;
   }[];
   return rows.map((s) => ({
     id: s.id,
@@ -210,6 +217,8 @@ export async function getTeamSessions(teamId: string): Promise<TeamSession[]> {
     endedAt: s.ended_at,
     publicToken: s.public_token,
     createdBy: s.created_by,
+    winnerName: s.winner_name ?? null,
+    fieldSize: s.field_size ?? 0,
   }));
 }
 
