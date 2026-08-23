@@ -354,13 +354,29 @@ export async function setMemberRsvp(
   return data as { in_count: number; promoted_user_id: string | null };
 }
 
-/** Admin edit of the planning numbers on a scheduled session. */
+/**
+ * Admin edit of a scheduled session.
+ *
+ * Title, time and location are "leave it alone if null"; the four numbers are
+ * set outright, so passing null genuinely clears one — "actually there's no
+ * cap tonight" has to be expressible.
+ */
 export async function updateEventDetails(
   eventId: string,
-  d: { courtCount?: number | null; durationHours?: number | null; maxPlayers?: number | null; cost?: string | null; location?: string | null },
+  d: {
+    title?: string | null;
+    scheduledAt?: string | null;
+    courtCount?: number | null;
+    durationHours?: number | null;
+    maxPlayers?: number | null;
+    cost?: string | null;
+    location?: string | null;
+  },
 ): Promise<{ in_count: number; waitlist_count: number }> {
   const { data, error } = await supabase.rpc("update_club_event", {
     p_event_id: eventId,
+    p_title: d.title?.trim() || null,
+    p_scheduled_at: d.scheduledAt ?? null,
     p_court_count: d.courtCount ?? null,
     p_duration_hours: d.durationHours ?? null,
     p_max_players: d.maxPlayers ?? null,

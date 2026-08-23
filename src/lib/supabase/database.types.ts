@@ -638,6 +638,8 @@ export interface Database {
       update_club_event: {
         Args: {
           p_event_id: string;
+          p_title?: string | null;
+          p_scheduled_at?: string | null;
           p_court_count?: number | null;
           p_duration_hours?: number | null;
           p_max_players?: number | null;

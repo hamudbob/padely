@@ -345,8 +345,13 @@ grant execute on function create_club_event(uuid, text, timestamptz, text, text,
 -- Numbers change: a court falls through, the venue puts the price up, someone
 -- talks you into a fourth hour. Editing them shouldn't mean cancelling the
 -- night and re-inviting everyone, which is what hosts do today.
+-- If an earlier form of this function ever landed, drop it: two candidates
+-- differing only by defaulted arguments make every PostgREST call ambiguous.
+drop function if exists update_club_event(uuid, int, numeric, int, text, text);
+
 create or replace function update_club_event(
   p_event_id uuid,
+  p_title text default null, p_scheduled_at timestamptz default null,
   p_court_count int default null, p_duration_hours numeric default null,
   p_max_players int default null, p_cost text default null,
   p_location text default null
@@ -361,7 +366,12 @@ begin
     raise exception 'Only admins can change a scheduled session.' using errcode = 'P0001';
   end if;
 
+  -- Title and time are coalesced (null means "leave it"), because most edits
+  -- touch one field. The four numbers are set outright, so clearing one is
+  -- possible — "actually there's no cap" has to be expressible.
   update club_events set
+    title          = coalesce(nullif(trim(coalesce(p_title, '')), ''), title),
+    scheduled_at   = coalesce(p_scheduled_at, scheduled_at),
     court_count    = p_court_count,
     duration_hours = p_duration_hours,
     max_players    = p_max_players,
@@ -383,8 +393,8 @@ begin
 end;
 $$;
 
-revoke all on function update_club_event(uuid, int, numeric, int, text, text) from anon;
-grant execute on function update_club_event(uuid, int, numeric, int, text, text) to authenticated;
+revoke all on function update_club_event(uuid, text, timestamptz, int, numeric, int, text, text) from anon;
+grant execute on function update_club_event(uuid, text, timestamptz, int, numeric, int, text, text) to authenticated;
 
-comment on function update_club_event(uuid, int, numeric, int, text, text) is
+comment on function update_club_event(uuid, text, timestamptz, int, numeric, int, text, text) is
   'Admin edit of a scheduled session''s numbers. Raising max_players drains the waiting list immediately; lowering it never removes anyone already in.';

@@ -5,7 +5,16 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { getTeam, getTeamMembers, leaveTeam, uploadClubLogo, getClubStats, Team, TeamMember, TeamRole, ClubStats } from "../../lib/supabase/teamQueries";
 import { getClubJoinRequests, respondJoinRequest, inviteByEmail, requestToJoin, JoinRequestItem } from "../../lib/supabase/clubJoinQueries";
-import { getClubEvents, createEvent, setRsvp, cancelEvent, eventCode, ClubEvent, RsvpResponse } from "../../lib/supabase/eventQueries";
+import {
+  getClubEvents,
+  createEvent,
+  setRsvp,
+  cancelEvent,
+  updateEventDetails,
+  eventCode,
+  ClubEvent,
+  RsvpResponse,
+} from "../../lib/supabase/eventQueries";
 import { useBackNav } from "../../lib/useBackNav";
 import Sheet from "../shell/Sheet";
 
@@ -494,7 +503,6 @@ function InviteSheet(props: {
 function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }) {
   const navigate = useNavigate();
   const [events, setEvents] = useState<ClubEvent[]>([]);
-  const [openId, setOpenId] = useState<string | null>(null);
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [when, setWhen] = useState("");
@@ -505,6 +513,60 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
   const [cost, setCost] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+
+  // Editing an existing event. Separate state from the create form on purpose:
+  // they can both be open, and sharing one set of fields would have the new
+  // session quietly inherit whatever was last edited.
+  const [editId, setEditId] = useState<string | null>(null);
+  const [eTitle, setETitle] = useState("");
+  const [eWhen, setEWhen] = useState("");
+  const [eLocation, setELocation] = useState("");
+  const [eCourts, setECourts] = useState("");
+  const [eHours, setEHours] = useState("");
+  const [eMax, setEMax] = useState("");
+  const [eCost, setECost] = useState("");
+  const [editBusy, setEditBusy] = useState(false);
+  const [editErr, setEditErr] = useState<string | null>(null);
+
+  function startEdit(ev: ClubEvent) {
+    setEditId(ev.id);
+    setEditErr(null);
+    setETitle(ev.title);
+    // <input type="datetime-local"> wants local time with no zone, so the ISO
+    // string has to be shifted out of UTC first or every edit moves the
+    // session by the timezone offset.
+    const d = new Date(ev.scheduledAt);
+    const local = new Date(d.getTime() - d.getTimezoneOffset() * 60000);
+    setEWhen(Number.isNaN(d.getTime()) ? "" : local.toISOString().slice(0, 16));
+    setELocation(ev.location ?? "");
+    setECourts(ev.courtCount != null ? String(ev.courtCount) : "");
+    setEHours(ev.durationHours != null ? String(ev.durationHours) : "");
+    setEMax(ev.maxPlayers != null ? String(ev.maxPlayers) : "");
+    setECost(ev.cost ?? "");
+  }
+
+  async function saveEdit(e: FormEvent, ev: ClubEvent) {
+    e.preventDefault();
+    setEditBusy(true);
+    setEditErr(null);
+    try {
+      await updateEventDetails(ev.id, {
+        title: eTitle,
+        scheduledAt: eWhen ? new Date(eWhen).toISOString() : null,
+        location: eLocation,
+        courtCount: eCourts ? Number(eCourts) : null,
+        durationHours: eHours ? Number(eHours) : null,
+        maxPlayers: eMax ? Number(eMax) : null,
+        cost: eCost,
+      });
+      setEditId(null);
+      load();
+    } catch (e2) {
+      setEditErr(e2 instanceof Error ? e2.message : "Couldn't save that.");
+    } finally {
+      setEditBusy(false);
+    }
+  }
 
   function load() {
     getClubEvents(clubId).then(setEvents).catch(() => setEvents([]));
@@ -657,15 +719,19 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
           <p className="text-[12.5px] text-warm-gray">No sessions scheduled{isAdmin ? " — tap + Schedule to plan one." : "."}</p>
         </div>
       ) : (
-        <div className="rounded-2xl bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+        /* One card per night, not rows in a list. A scheduled session is the
+           thing this page is FOR — it deserves the same weight as the live
+           session card on Play, and a row that only expands to reveal three
+           buttons was hiding the only information anyone wanted: how full it
+           is and who's in. */
+        <div className="flex flex-col gap-2.5">
           {events.map((ev) => {
-            const open = openId === ev.id;
             if (ev.isLive) {
               return (
                 <Link
                   key={ev.id}
                   to={`/live/${ev.liveToken}?j=${ev.liveCode ?? ""}`}
-                  className="block border-t border-line first:border-t-0 px-4 py-3 active:bg-surface-2 transition-colors"
+                  className="block rounded-3xl bg-surface border border-line px-4 py-3.5 shadow-[0_1px_3px_rgba(13,13,13,0.06)] active:scale-[0.99] transition-transform"
                 >
                   <div className="flex items-center gap-3">
                     <span className="flex-1 min-w-0">
@@ -683,77 +749,171 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
                 </Link>
               );
             }
+
+            const dp = eventDateParts(ev.scheduledAt);
+            const full = ev.maxPlayers != null && ev.counts.in >= ev.maxPlayers;
+            const fillPct = ev.maxPlayers ? Math.min(100, (ev.counts.in / ev.maxPlayers) * 100) : 0;
+            const editing = editId === ev.id;
+
             return (
-              <div key={ev.id} className="border-t border-line first:border-t-0">
-                <button onClick={() => setOpenId(open ? null : ev.id)} className="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-surface-2 transition-colors">
-                  <span className="flex-1 min-w-0">
-                    <b className="block text-[14px] font-semibold text-graphite truncate">
-                      {ev.title}
-                      {eventCode(ev) && (
-                        <span className="ml-1.5 font-mono text-[10.5px] font-bold tracking-[0.06em] text-gold-ink">
-                          {eventCode(ev)}
-                        </span>
-                      )}
-                    </b>
-                    <span className="block text-[11.5px] text-warm-gray">
-                      {formatEventWhen(ev.scheduledAt)}
-                      {ev.location ? ` · ${ev.location}` : ""}
-                      {" · "}
-                      {/* Against the cap when there is one: "8/12 in" says more
-                          than "8 in" and is the number the host is watching. */}
-                      {ev.maxPlayers ? `${ev.counts.in}/${ev.maxPlayers} in` : `${ev.counts.in} in`}
-                      {ev.counts.waitlist > 0 ? ` · ${ev.counts.waitlist} waiting` : ""}
-                      {ev.counts.maybe > 0 ? ` · ${ev.counts.maybe} maybe` : ""}
+              <div
+                key={ev.id}
+                className="rounded-3xl bg-surface border border-line overflow-hidden shadow-[0_1px_3px_rgba(13,13,13,0.06)]"
+              >
+                {/* The card body is the door to the RSVP page. */}
+                <Link to={`/e/${ev.id}`} className="block px-4 pt-4 pb-3 active:bg-surface-2 transition-colors">
+                  <div className="flex items-start gap-3">
+                    {dp && (
+                      <span className="shrink-0 w-[46px] rounded-xl bg-gold-soft py-1.5 text-center">
+                        <span className="block text-[9px] font-bold uppercase tracking-[0.1em] text-gold-ink">{dp.month}</span>
+                        <span className="block font-serif text-[19px] font-semibold text-graphite leading-none mt-0.5">{dp.day}</span>
+                      </span>
+                    )}
+                    <span className="flex-1 min-w-0">
+                      <span className="flex items-baseline gap-1.5">
+                        <b className="text-[15px] font-semibold text-graphite truncate">{ev.title}</b>
+                        {eventCode(ev) && (
+                          <span className="font-mono text-[10px] font-bold tracking-[0.06em] text-gold-ink shrink-0">
+                            {eventCode(ev)}
+                          </span>
+                        )}
+                      </span>
+                      <span className="block text-[11.5px] text-warm-gray mt-1">
+                        {dp ? `${dp.weekday} ${dp.time}` : formatEventWhen(ev.scheduledAt)}
+                        {ev.location ? ` · ${ev.location}` : ""}
+                        {ev.cost ? ` · ${ev.cost}` : ""}
+                      </span>
                     </span>
-                  </span>
-                  <span className={`text-stone text-[15px] transition-transform ${open ? "rotate-90" : ""}`}>›</span>
-                </button>
-                {open && (
-                  <div className="px-4 pb-3.5">
-                    <div className="flex rounded-full bg-ivory border border-line p-1 mb-2">
-                      {RSVP_OPTS.map((o) => (
-                        <button
-                          key={o.value}
-                          onClick={() => rsvp(ev.id, o.value)}
-                          className={`flex-1 rounded-full py-1.5 text-[12px] font-semibold ${
-                            ev.myResponse === o.value ? (o.value === "out" ? "bg-warm-gray text-ivory" : "bg-graphite text-ivory") : "text-warm-gray"
-                          }`}
-                        >
-                          {o.label}
-                        </button>
-                      ))}
+                    <span className="text-stone text-[15px] shrink-0">›</span>
+                  </div>
+
+                  {/* How full, as a bar rather than a sentence — a host checks
+                      this ten times a week and shouldn't have to read it. */}
+                  <div className="mt-3 flex items-center gap-2.5">
+                    <span className="font-mono tnum text-[12px] font-semibold text-graphite shrink-0">
+                      {ev.counts.in}
+                      {ev.maxPlayers ? <span className="text-warm-gray">/{ev.maxPlayers}</span> : null}
+                      <span className="text-warm-gray font-sans font-normal"> in</span>
+                    </span>
+                    {ev.maxPlayers != null && (
+                      <span className="flex-1 h-1.5 rounded-full bg-stone/40 overflow-hidden">
+                        <span
+                          className={`block h-full rounded-full ${full ? "bg-gold" : "bg-win"}`}
+                          style={{ width: `${fillPct}%` }}
+                        />
+                      </span>
+                    )}
+                    {ev.counts.waitlist > 0 && (
+                      <span className="text-[11px] font-semibold text-gold-ink shrink-0">{ev.counts.waitlist} waiting</span>
+                    )}
+                    {ev.counts.maybe > 0 && ev.counts.waitlist === 0 && (
+                      <span className="text-[11px] text-warm-gray shrink-0">{ev.counts.maybe} maybe</span>
+                    )}
+                  </div>
+
+                  {ev.goingNames.length > 0 && (
+                    <p className="text-[11px] text-warm-gray mt-2 truncate">{ev.goingNames.join(", ")}</p>
+                  )}
+                </Link>
+
+                {/* Your answer, always visible — the whole point of the card. */}
+                <div className="px-4 pb-3">
+                  <div className="flex rounded-full bg-ivory border border-line p-1">
+                    {RSVP_OPTS.map((o) => (
+                      <button
+                        key={o.value}
+                        onClick={() => rsvp(ev.id, o.value)}
+                        className={`flex-1 rounded-full py-1.5 text-[12px] font-semibold transition-colors ${
+                          ev.myResponse === o.value || (o.value === "in" && ev.myResponse === "waitlist")
+                            ? o.value === "out"
+                              ? "bg-warm-gray text-ivory"
+                              : ev.myResponse === "waitlist"
+                                ? "bg-gold-soft text-gold-ink"
+                                : "bg-graphite text-ivory"
+                            : "text-warm-gray"
+                        }`}
+                      >
+                        {o.value === "in" && full && ev.myResponse !== "in" ? "Waitlist" : o.label}
+                      </button>
+                    ))}
+                  </div>
+                  {ev.myResponse === "waitlist" && (
+                    <p className="text-[11px] text-gold-ink text-center mt-1.5">
+                      You're on the waiting list — we'll move you up if someone drops out.
+                    </p>
+                  )}
+                </div>
+
+                {/* Admin edit, inline: the numbers change often enough that
+                    cancelling the night and re-inviting everyone — which is
+                    what hosts do today — is the wrong answer. */}
+                {isAdmin && editing && (
+                  <form onSubmit={(e) => saveEdit(e, ev)} className="px-4 pb-3 border-t border-line pt-3 space-y-2">
+                    <input
+                      value={eTitle}
+                      onChange={(e) => setETitle(e.target.value)}
+                      maxLength={80}
+                      placeholder="Session title"
+                      className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink"
+                    />
+                    <input
+                      value={eWhen}
+                      onChange={(e) => setEWhen(e.target.value)}
+                      type="datetime-local"
+                      className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink"
+                    />
+                    <input
+                      value={eLocation}
+                      onChange={(e) => setELocation(e.target.value)}
+                      maxLength={120}
+                      placeholder="Location"
+                      className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink"
+                    />
+                    <div className="grid grid-cols-2 gap-2">
+                      <input value={eCourts} onChange={(e) => setECourts(e.target.value.replace(/\D/g, "").slice(0, 2))} inputMode="numeric" placeholder="Courts" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink" />
+                      <input value={eHours} onChange={(e) => setEHours(e.target.value.replace(/[^\d.]/g, "").slice(0, 4))} inputMode="decimal" placeholder="Hours" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink" />
+                      <input value={eMax} onChange={(e) => setEMax(e.target.value.replace(/\D/g, "").slice(0, 3))} inputMode="numeric" placeholder="Max players" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink" />
+                      <input value={eCost} onChange={(e) => setECost(e.target.value.slice(0, 40))} placeholder="Cost" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink" />
                     </div>
-                    {ev.goingNames.length > 0 && (
-                      <p className="text-[11px] text-warm-gray mb-2">
-                        In: {ev.goingNames.slice(0, 8).join(", ")}
-                        {ev.goingNames.length > 8 ? "…" : ""}
+                    {ev.maxPlayers != null && eMax && Number(eMax) < ev.counts.in && (
+                      <p className="text-[11px] text-gold-ink">
+                        {ev.counts.in} people are already in. Lowering the cap won't remove anyone — it just closes it to
+                        new joins.
                       </p>
                     )}
-                    {/* The event page is the RSVP page — faces, the waiting
-                        list, the whole thing — and it is what the share link
-                        opens. Before this, the only way in was the link, so
-                        nobody in the app ever saw it. */}
-                    <Link
-                      to={`/e/${ev.id}`}
-                      className="block text-[12px] font-semibold text-gold-ink mb-2.5 active:opacity-70"
-                    >
-                      See everyone and the details ›
-                    </Link>
+                    {editErr && <p className="text-[11px] text-loss">{editErr}</p>}
                     <div className="flex gap-2">
-                      <button onClick={() => share(ev)} className={`rounded-full border border-line text-ink-2 bg-surface text-[12px] font-semibold py-2 ${isAdmin ? "px-3" : "flex-1"}`}>
-                        Share
+                      <button type="button" onClick={() => setEditId(null)} className="rounded-full border border-line text-ink-2 bg-surface text-[12px] font-semibold py-2 px-4">
+                        Discard
                       </button>
-                      {isAdmin && (
-                        <>
-                          <button onClick={() => navigate(`/create?club=${clubId}&name=${encodeURIComponent(ev.title)}&event=${ev.id}`)} className="flex-1 rounded-full border border-graphite text-graphite bg-surface text-[12px] font-semibold py-2 active:scale-[0.99] transition-transform">
-                            Start this session
-                          </button>
-                          <button onClick={() => cancel(ev.id)} className="rounded-full text-[12px] font-semibold text-warm-gray px-3">Cancel</button>
-                        </>
-                      )}
+                      <button type="submit" disabled={editBusy} className="flex-1 rounded-full bg-graphite text-ivory text-[12px] font-semibold py-2 disabled:opacity-40">
+                        {editBusy ? "Saving…" : "Save changes"}
+                      </button>
                     </div>
-                  </div>
+                  </form>
                 )}
+
+                <div className="flex gap-2 px-4 pb-3.5 pt-0.5">
+                  <button onClick={() => share(ev)} className={`rounded-full border border-line text-ink-2 bg-surface text-[12px] font-semibold py-2 ${isAdmin ? "px-3" : "flex-1"}`}>
+                    Share
+                  </button>
+                  {isAdmin && (
+                    <>
+                      <button
+                        onClick={() => (editing ? setEditId(null) : startEdit(ev))}
+                        className="rounded-full border border-line text-ink-2 bg-surface text-[12px] font-semibold py-2 px-3"
+                      >
+                        {editing ? "Close" : "Edit"}
+                      </button>
+                      <button onClick={() => navigate(`/create?club=${clubId}&name=${encodeURIComponent(ev.title)}&event=${ev.id}`)} className="flex-1 rounded-full border border-graphite text-graphite bg-surface text-[12px] font-semibold py-2 active:scale-[0.99] transition-transform">
+                        Start
+                      </button>
+                      <button onClick={() => cancel(ev.id)} className="rounded-full text-[12px] font-semibold text-warm-gray px-2">
+                        Call off
+                      </button>
+                    </>
+                  )}
+                </div>
               </div>
             );
           })}
@@ -761,6 +921,18 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
       )}
     </div>
   );
+}
+
+/** The date ticket's four pieces: AUG / 24 / Monday / 09:00 PM. */
+function eventDateParts(iso: string): { month: string; day: string; weekday: string; time: string } | null {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return null;
+  return {
+    month: d.toLocaleDateString(undefined, { month: "short" }).toUpperCase(),
+    day: d.toLocaleDateString(undefined, { day: "numeric" }),
+    weekday: d.toLocaleDateString(undefined, { weekday: "long" }),
+    time: d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }),
+  };
 }
 
 function formatEventWhen(iso: string): string {
