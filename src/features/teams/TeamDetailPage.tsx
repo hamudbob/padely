@@ -5,7 +5,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { getTeam, getTeamMembers, leaveTeam, uploadClubLogo, getClubStats, Team, TeamMember, TeamRole, ClubStats } from "../../lib/supabase/teamQueries";
 import { getClubJoinRequests, respondJoinRequest, inviteByEmail, requestToJoin, JoinRequestItem } from "../../lib/supabase/clubJoinQueries";
-import { getClubEvents, createEvent, setRsvp, cancelEvent, ClubEvent, RsvpResponse } from "../../lib/supabase/eventQueries";
+import { getClubEvents, createEvent, setRsvp, cancelEvent, eventCode, ClubEvent, RsvpResponse } from "../../lib/supabase/eventQueries";
 import { useBackNav } from "../../lib/useBackNav";
 import Sheet from "../shell/Sheet";
 
@@ -499,6 +499,10 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
   const [title, setTitle] = useState("");
   const [when, setWhen] = useState("");
   const [location, setLocation] = useState("");
+  const [courts, setCourts] = useState("");
+  const [hours, setHours] = useState("");
+  const [maxPlayers, setMaxPlayers] = useState("");
+  const [cost, setCost] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
@@ -513,10 +517,22 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
     setBusy(true);
     setErr(null);
     try {
-      await createEvent(clubId, { title, scheduledAt: new Date(when).toISOString(), location });
+      await createEvent(clubId, {
+        title,
+        scheduledAt: new Date(when).toISOString(),
+        location,
+        courtCount: courts ? Number(courts) : null,
+        durationHours: hours ? Number(hours) : null,
+        maxPlayers: maxPlayers ? Number(maxPlayers) : null,
+        cost,
+      });
       setTitle("");
       setWhen("");
       setLocation("");
+      setCourts("");
+      setHours("");
+      setMaxPlayers("");
+      setCost("");
       setShowForm(false);
       load();
     } catch (e2) {
@@ -548,7 +564,9 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
 
   async function share(ev: ClubEvent) {
     const url = `${window.location.origin}/e/${ev.id}`;
-    const text = `${ev.title} · ${formatEventWhen(ev.scheduledAt)}${ev.location ? ` @ ${ev.location}` : ""} — Padelier`;
+    const text = `${ev.title}${eventCode(ev) ? ` ${eventCode(ev)}` : ""} · ${formatEventWhen(ev.scheduledAt)}${
+      ev.location ? ` @ ${ev.location}` : ""
+    }${ev.cost ? ` (${ev.cost})` : ""} — Padelier`;
     const nav = navigator as Navigator & { share?: (d: { title?: string; text?: string; url?: string }) => Promise<void> };
     if (nav.share) {
       try {
@@ -588,6 +606,45 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Session title" maxLength={80} className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
           <input value={when} onChange={(e) => setWhen(e.target.value)} type="datetime-local" className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
           <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location (optional)" maxLength={120} className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
+
+          {/* The four questions the group chat asks within a minute of the
+              invite. All optional — an event with none of them behaves exactly
+              as it did before. inputMode="numeric" so phones show digits. */}
+          <div className="grid grid-cols-2 gap-2">
+            <input
+              value={courts}
+              onChange={(e) => setCourts(e.target.value.replace(/\D/g, "").slice(0, 2))}
+              inputMode="numeric"
+              placeholder="Courts"
+              className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+            />
+            <input
+              value={hours}
+              onChange={(e) => setHours(e.target.value.replace(/[^\d.]/g, "").slice(0, 4))}
+              inputMode="decimal"
+              placeholder="Hours"
+              className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+            />
+            <input
+              value={maxPlayers}
+              onChange={(e) => setMaxPlayers(e.target.value.replace(/\D/g, "").slice(0, 3))}
+              inputMode="numeric"
+              placeholder="Max players"
+              className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+            />
+            <input
+              value={cost}
+              onChange={(e) => setCost(e.target.value.slice(0, 40))}
+              placeholder="Cost e.g. 100K"
+              className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+            />
+          </div>
+          {courts && !maxPlayers && (
+            <p className="text-[11px] text-warm-gray px-0.5">
+              {Number(courts) * 4} players fills {courts} {Number(courts) === 1 ? "court" : "courts"} — leave max blank for
+              no limit.
+            </p>
+          )}
           {err && <p className="text-[11px] text-loss">{err}</p>}
           <button type="submit" disabled={busy || !title.trim() || !when} className="w-full rounded-full bg-graphite text-ivory text-[13px] font-semibold py-2.5 disabled:opacity-40">
             {busy ? "Scheduling…" : "Schedule session"}
@@ -630,10 +687,23 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
               <div key={ev.id} className="border-t border-line first:border-t-0">
                 <button onClick={() => setOpenId(open ? null : ev.id)} className="w-full flex items-center gap-3 px-4 py-3 text-left active:bg-surface-2 transition-colors">
                   <span className="flex-1 min-w-0">
-                    <b className="block text-[14px] font-semibold text-graphite truncate">{ev.title}</b>
+                    <b className="block text-[14px] font-semibold text-graphite truncate">
+                      {ev.title}
+                      {eventCode(ev) && (
+                        <span className="ml-1.5 font-mono text-[10.5px] font-bold tracking-[0.06em] text-gold-ink">
+                          {eventCode(ev)}
+                        </span>
+                      )}
+                    </b>
                     <span className="block text-[11.5px] text-warm-gray">
                       {formatEventWhen(ev.scheduledAt)}
-                      {ev.location ? ` · ${ev.location}` : ""} · {ev.counts.in} in{ev.counts.maybe > 0 ? ` · ${ev.counts.maybe} maybe` : ""}
+                      {ev.location ? ` · ${ev.location}` : ""}
+                      {" · "}
+                      {/* Against the cap when there is one: "8/12 in" says more
+                          than "8 in" and is the number the host is watching. */}
+                      {ev.maxPlayers ? `${ev.counts.in}/${ev.maxPlayers} in` : `${ev.counts.in} in`}
+                      {ev.counts.waitlist > 0 ? ` · ${ev.counts.waitlist} waiting` : ""}
+                      {ev.counts.maybe > 0 ? ` · ${ev.counts.maybe} maybe` : ""}
                     </span>
                   </span>
                   <span className={`text-stone text-[15px] transition-transform ${open ? "rotate-90" : ""}`}>›</span>
@@ -653,7 +723,22 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
                         </button>
                       ))}
                     </div>
-                    {ev.goingNames.length > 0 && <p className="text-[11px] text-warm-gray mb-2">In: {ev.goingNames.slice(0, 8).join(", ")}{ev.goingNames.length > 8 ? "…" : ""}</p>}
+                    {ev.goingNames.length > 0 && (
+                      <p className="text-[11px] text-warm-gray mb-2">
+                        In: {ev.goingNames.slice(0, 8).join(", ")}
+                        {ev.goingNames.length > 8 ? "…" : ""}
+                      </p>
+                    )}
+                    {/* The event page is the RSVP page — faces, the waiting
+                        list, the whole thing — and it is what the share link
+                        opens. Before this, the only way in was the link, so
+                        nobody in the app ever saw it. */}
+                    <Link
+                      to={`/e/${ev.id}`}
+                      className="block text-[12px] font-semibold text-gold-ink mb-2.5 active:opacity-70"
+                    >
+                      See everyone and the details ›
+                    </Link>
                     <div className="flex gap-2">
                       <button onClick={() => share(ev)} className={`rounded-full border border-line text-ink-2 bg-surface text-[12px] font-semibold py-2 ${isAdmin ? "px-3" : "flex-1"}`}>
                         Share

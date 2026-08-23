@@ -443,6 +443,12 @@ export interface Database {
           session_id: string | null;
           created_by: string | null;
           created_at: string;
+          // 0048 — the four planning numbers a host is asked for in the group
+          // chat within a minute of the invite: courts, hours, places, price.
+          court_count: number | null;
+          duration_hours: number | null;
+          max_players: number | null;
+          cost: string | null;
         };
         Insert: {
           id?: string;
@@ -454,6 +460,10 @@ export interface Database {
           status?: "scheduled" | "cancelled";
           session_id?: string | null;
           created_by?: string | null;
+          court_count?: number | null;
+          duration_hours?: number | null;
+          max_players?: number | null;
+          cost?: string | null;
         };
         Update: Partial<Database["public"]["Tables"]["club_events"]["Row"]>;
         Relationships: [];
@@ -462,13 +472,13 @@ export interface Database {
         Row: {
           event_id: string;
           user_id: string;
-          response: "in" | "maybe" | "out";
+          response: "in" | "maybe" | "out" | "waitlist";
           responded_at: string;
         };
         Insert: {
           event_id: string;
           user_id: string;
-          response: "in" | "maybe" | "out";
+          response: "in" | "maybe" | "out" | "waitlist";
           responded_at?: string;
         };
         Update: Partial<Database["public"]["Tables"]["club_event_rsvps"]["Insert"]>;
@@ -601,8 +611,40 @@ export interface Database {
         Returns: unknown; // setof { id, name, club_code, logo_url, member_count, is_member, requested }
       };
       create_club_event: {
-        Args: { p_club_id: string; p_title: string; p_scheduled_at: string; p_location?: string | null; p_notes?: string | null };
+        Args: {
+          p_club_id: string;
+          p_title: string;
+          p_scheduled_at: string;
+          p_location?: string | null;
+          p_notes?: string | null;
+          // 0048 — the old 5-argument signature was dropped, not overloaded:
+          // PostgREST resolves by argument name and two candidates differing
+          // only by defaults make every call ambiguous.
+          p_court_count?: number | null;
+          p_duration_hours?: number | null;
+          p_max_players?: number | null;
+          p_cost?: string | null;
+        };
         Returns: string; // uuid
+      };
+      set_event_rsvp: {
+        Args: { p_event_id: string; p_response: string };
+        Returns: unknown; // jsonb — what you actually got, which may be a waitlist place
+      };
+      event_set_member_rsvp: {
+        Args: { p_event_id: string; p_user_id: string; p_response: string };
+        Returns: unknown; // jsonb
+      };
+      update_club_event: {
+        Args: {
+          p_event_id: string;
+          p_court_count?: number | null;
+          p_duration_hours?: number | null;
+          p_max_players?: number | null;
+          p_cost?: string | null;
+          p_location?: string | null;
+        };
+        Returns: unknown; // jsonb
       };
       notify_club_session_started: {
         Args: { p_session_id: string };

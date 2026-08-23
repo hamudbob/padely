@@ -8,7 +8,9 @@ import { getProfiles } from "./profileQueries";
  * with the team + title via /create?club=&name=).
  */
 
-export type RsvpResponse = "in" | "maybe" | "out";
+/** "waitlist" is never something a person chooses — it is what "in" becomes on
+ *  a full night, and what they are until a place opens. */
+export type RsvpResponse = "in" | "maybe" | "out" | "waitlist";
 
 export interface ClubEvent {
   id: string;
@@ -18,10 +20,16 @@ export interface ClubEvent {
   location: string | null;
   notes: string | null;
   status: "scheduled" | "cancelled";
+  /** The four planning numbers, any of which may be unset on an older event. */
+  courtCount: number | null;
+  durationHours: number | null;
+  maxPlayers: number | null;
+  cost: string | null;
   myResponse: RsvpResponse | null;
-  counts: { in: number; maybe: number; out: number };
+  counts: { in: number; maybe: number; out: number; waitlist: number };
   goingNames: string[];
   maybeNames: string[];
+  waitlistNames: string[];
   /** True once a session has been started from this event and is still live —
    * members can then watch/join it right from the club page. */
   isLive: boolean;
@@ -30,11 +38,37 @@ export interface ClubEvent {
   liveCode: string | null;
 }
 
+/**
+ * The shorthand a host writes at the top of a group-chat invite: 2C3H12P —
+ * two courts, three hours, twelve places.
+ *
+ * Only the parts that exist appear, so a night with no cap reads 2C3H and one
+ * with nothing set contributes nothing at all rather than a stray separator.
+ * Hours keep a half if there is one (1.5H) and lose a trailing .0 (3H).
+ */
+export function eventCode(e: {
+  courtCount?: number | null;
+  durationHours?: number | null;
+  maxPlayers?: number | null;
+}): string {
+  const parts: string[] = [];
+  if (e.courtCount) parts.push(`${e.courtCount}C`);
+  if (e.durationHours) parts.push(`${Number(e.durationHours.toFixed(1)).toString()}H`);
+  if (e.maxPlayers) parts.push(`${e.maxPlayers}P`);
+  return parts.join("");
+}
+
 export interface NewEvent {
   title: string;
   scheduledAt: string; // ISO
   location?: string | null;
   notes?: string | null;
+  /** The four planning numbers. All optional — an event with none of them is
+   *  exactly what an event was before 0048. */
+  courtCount?: number | null;
+  durationHours?: number | null;
+  maxPlayers?: number | null;
+  cost?: string | null;
 }
 
 /** Schedule a session for a team (admins only). Goes through create_club_event
@@ -46,6 +80,10 @@ export async function createEvent(clubId: string, input: NewEvent): Promise<stri
     p_scheduled_at: input.scheduledAt,
     p_location: input.location?.trim() || null,
     p_notes: input.notes?.trim() || null,
+    p_court_count: input.courtCount ?? null,
+    p_duration_hours: input.durationHours ?? null,
+    p_max_players: input.maxPlayers ?? null,
+    p_cost: input.cost?.trim() || null,
   });
   if (error) throw new Error(error.message);
   return data as string;
@@ -86,7 +124,9 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
 
   const { data: events, error } = await supabase
     .from("club_events")
-    .select("id, club_id, title, scheduled_at, location, notes, status, session_id, created_by, created_at")
+    .select(
+      "id, club_id, title, scheduled_at, location, notes, status, session_id, created_by, created_at, court_count, duration_hours, max_players, cost",
+    )
     .eq("club_id", clubId)
     .eq("status", "scheduled")
     .order("scheduled_at", { ascending: true });
@@ -113,13 +153,17 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
   const profiles = await getProfiles([...new Set((rsvps ?? []).map((r) => r.user_id))]);
   const nameOf = (uid: string) => profiles.get(uid)?.displayName ?? "Player";
 
-  const byEvent = new Map<string, { in: string[]; maybe: string[]; out: string[]; mine: RsvpResponse | null }>();
-  for (const id of eventIds) byEvent.set(id, { in: [], maybe: [], out: [], mine: null });
+  const byEvent = new Map<
+    string,
+    { in: string[]; maybe: string[]; out: string[]; waitlist: string[]; mine: RsvpResponse | null }
+  >();
+  for (const id of eventIds) byEvent.set(id, { in: [], maybe: [], out: [], waitlist: [], mine: null });
   for (const r of rsvps ?? []) {
     const rec = byEvent.get(r.event_id);
     if (!rec) continue;
     const resp = r.response as RsvpResponse;
-    rec[resp].push(nameOf(r.user_id));
+    // A row with an unknown response would otherwise push onto undefined.
+    if (resp in rec) rec[resp].push(nameOf(r.user_id));
     if (myId && r.user_id === myId) rec.mine = resp;
   }
 
@@ -146,10 +190,15 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
           location: e.location,
           notes: e.notes,
           status: e.status,
+          courtCount: e.court_count ?? null,
+          durationHours: e.duration_hours === null || e.duration_hours === undefined ? null : Number(e.duration_hours),
+          maxPlayers: e.max_players ?? null,
+          cost: e.cost ?? null,
           myResponse: rec.mine,
-          counts: { in: rec.in.length, maybe: rec.maybe.length, out: rec.out.length },
+          counts: { in: rec.in.length, maybe: rec.maybe.length, out: rec.out.length, waitlist: rec.waitlist.length },
           goingNames: rec.in,
           maybeNames: rec.maybe,
+          waitlistNames: rec.waitlist,
           isLive: !!isLive,
           liveToken: isLive ? sess?.public_token ?? null : null,
           liveCode: isLive ? sess?.join_code ?? null : null,
@@ -182,14 +231,24 @@ export interface PublicEvent {
   scheduledAt: string;
   location: string | null;
   status: "scheduled" | "cancelled";
-  counts: { in: number; maybe: number; out: number };
+  courtCount: number | null;
+  durationHours: number | null;
+  maxPlayers: number | null;
+  cost: string | null;
+  counts: { in: number; maybe: number; out: number; waitlist: number };
   goingNames: string[];
-  /** RSVP "in" players, as tappable profiles. */
+  /** RSVP "in" players, as tappable profiles. Alphabetical — it's a roster. */
   going: EventAttendee[];
-  /** RSVP "maybe" players, as tappable profiles. */
+  /** RSVP "maybe" players. */
   maybe: EventAttendee[];
+  /** Who said no. */
+  out: EventAttendee[];
+  /** In the order they asked — this one is a queue, so the order IS the point. */
+  waitlist: EventAttendee[];
   myResponse: RsvpResponse | null;
   isMember: boolean;
+  /** Club owner or admin: can promote and remove people. */
+  isAdmin: boolean;
 }
 
 /** Read-only shareable view of a scheduled session (0026) — works for anyone,
@@ -208,12 +267,19 @@ export async function getPublicEvent(eventId: string): Promise<PublicEvent | nul
     scheduled_at: string;
     location: string | null;
     status: "scheduled" | "cancelled";
-    counts: { in: number; maybe: number; out: number };
+    court_count: number | null;
+    duration_hours: number | null;
+    max_players: number | null;
+    cost: string | null;
+    counts: { in: number; maybe: number; out: number; waitlist: number };
     going_names: string[] | null;
     going: { id: string; name: string | null; avatar: string | null }[] | null;
     maybe: { id: string; name: string | null; avatar: string | null }[] | null;
+    out: { id: string; name: string | null; avatar: string | null }[] | null;
+    waitlist: { id: string; name: string | null; avatar: string | null }[] | null;
     my_response: RsvpResponse | null;
     is_member: boolean;
+    is_admin: boolean;
   };
   const mapPeople = (rows: { id: string; name: string | null; avatar: string | null }[] | null): EventAttendee[] =>
     (rows ?? []).map((r) => ({ userId: r.id, displayName: r.name ?? "Player", avatarUrl: r.avatar }));
@@ -226,26 +292,83 @@ export async function getPublicEvent(eventId: string): Promise<PublicEvent | nul
     scheduledAt: d.scheduled_at,
     location: d.location,
     status: d.status,
-    counts: d.counts,
+    courtCount: d.court_count ?? null,
+    durationHours: d.duration_hours === null || d.duration_hours === undefined ? null : Number(d.duration_hours),
+    maxPlayers: d.max_players ?? null,
+    cost: d.cost ?? null,
+    counts: { in: d.counts.in, maybe: d.counts.maybe, out: d.counts.out, waitlist: d.counts.waitlist ?? 0 },
     goingNames: d.going_names ?? [],
     going: mapPeople(d.going),
     maybe: mapPeople(d.maybe),
+    out: mapPeople(d.out),
+    waitlist: mapPeople(d.waitlist),
     myResponse: d.my_response,
     isMember: d.is_member,
+    isAdmin: !!d.is_admin,
   };
 }
 
-/** Set (or change) the caller's RSVP for an event. */
-export async function setRsvp(eventId: string, response: RsvpResponse): Promise<void> {
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) throw new Error("Please log in again.");
-  const { error } = await supabase
-    .from("club_event_rsvps")
-    .upsert(
-      { event_id: eventId, user_id: userData.user.id, response, responded_at: new Date().toISOString() },
-      { onConflict: "event_id,user_id" },
-    );
+export interface RsvpResult {
+  /** What you ACTUALLY are — asking for "in" on a full night returns "waitlist". */
+  response: RsvpResponse;
+  asked_for: RsvpResponse;
+  /** True when you asked to be in and were queued instead. */
+  waitlisted: boolean;
+  /** Your place in the queue, 1-based. Null unless you're waitlisted. */
+  position: number | null;
+  in_count: number;
+  promoted_user_id: string | null;
+}
+
+/**
+ * Set (or change) the caller's RSVP.
+ *
+ * Goes through the set_event_rsvp RPC rather than writing the row directly,
+ * because a capped event cannot be enforced from here: two phones counting
+ * "11 in, room for one" at the same moment would both write themselves in.
+ * The function takes a row lock on the event before counting. It also returns
+ * what you actually got, which is not always what you asked for.
+ */
+export async function setRsvp(eventId: string, response: RsvpResponse): Promise<RsvpResult> {
+  const { data, error } = await supabase.rpc("set_event_rsvp", {
+    p_event_id: eventId,
+    p_response: response,
+  });
   if (error) throw new Error(error.message);
+  return data as RsvpResult;
+}
+
+/** A club admin sets someone else's answer — promoting off the waiting list,
+ *  or taking someone out who can't make it. May exceed the cap on purpose. */
+export async function setMemberRsvp(
+  eventId: string,
+  userId: string,
+  response: RsvpResponse,
+): Promise<{ in_count: number; promoted_user_id: string | null }> {
+  const { data, error } = await supabase.rpc("event_set_member_rsvp", {
+    p_event_id: eventId,
+    p_user_id: userId,
+    p_response: response,
+  });
+  if (error) throw new Error(error.message);
+  return data as { in_count: number; promoted_user_id: string | null };
+}
+
+/** Admin edit of the planning numbers on a scheduled session. */
+export async function updateEventDetails(
+  eventId: string,
+  d: { courtCount?: number | null; durationHours?: number | null; maxPlayers?: number | null; cost?: string | null; location?: string | null },
+): Promise<{ in_count: number; waitlist_count: number }> {
+  const { data, error } = await supabase.rpc("update_club_event", {
+    p_event_id: eventId,
+    p_court_count: d.courtCount ?? null,
+    p_duration_hours: d.durationHours ?? null,
+    p_max_players: d.maxPlayers ?? null,
+    p_cost: d.cost?.trim() || null,
+    p_location: d.location?.trim() || null,
+  });
+  if (error) throw new Error(error.message);
+  return data as { in_count: number; waitlist_count: number };
 }
 
 /** Cancel a scheduled event (admins only — enforced by RLS). */
