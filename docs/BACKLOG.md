@@ -9,15 +9,10 @@ shipped.
 
 ## Blockers outside the code
 
-- **padelier.id doesn't resolve.** Google's public resolver returns NXDOMAIN for
-  A, NS and SOA, while the `.id` TLD answers normally — so the name isn't in the
-  registry zone at all. That's expiry, a removed delegation, or a registrar
-  suspension, not Netlify and not DNS propagation. Everything else on this list
-  is downstream of it: the app is unreachable, the confirmation and reset emails
-  point at a dead host, and App Review clicks the support URL.
-- **Migrations 0046, 0047 and 0048 to run.** All idempotent; re-running is free.
-  The check-what's-applied query is in the session notes — or just run them.
-- **Two commits unpushed** as of writing.
+- ~~**padelier.id doesn't resolve.**~~ Fixed. NS, A, TXT and SOA all answer now,
+  which unblocked Google's domain verification and the OAuth redirect URIs.
+- ~~**Migrations 0046–0051 to run.**~~ Run.
+- ~~**Commits unpushed.**~~ Pushed.
 
 ---
 
@@ -125,23 +120,27 @@ sum to 26, not 22).
 
 ---
 
-### Sign in with Google (and then, necessarily, Apple)
-Both are supported by Supabase Auth. Google is the cheap one: OAuth credentials
-in Google Cloud, the provider switched on in Supabase, one `signInWithOAuth`
-call. Apple costs the developer account, a Services ID, a key and domain
-verification — and it is **not optional once Google exists on iOS**: guideline
-4.8 requires an equivalent private login wherever a third-party one is offered.
+### ~~Sign in with Google~~ — shipped. Apple still to come.
+Google is live: OAuth client in Google Cloud, provider enabled in Supabase, a
+Continue with Google button under the email field, and 0051 teaching
+handle_new_user() to read `full_name` and the provider photo. The consent screen
+carries the Padelier mark, so the app is published to production and the domain
+is verified in Search Console.
 
-The thing to design before either: identity. Padelier keys everything to the
-auth user id, so someone who signed up with a password and later taps "Sign in
-with Google" on the same address must land in the SAME account, or they get a
-second one with no rating, no history and no clubs. Supabase links identities by
-verified email, but this needs proving on a scratch project before it goes near
-real players — a duplicate account is the same class of bug as the duplicate
-teams row that broke a friend's home screen for a week.
+**Still unproven: identity linking.** What has been tested is a fresh Google
+account signing up, signing out and signing back in. What has NOT been tested is
+the case that actually costs a player their history — someone who signed up with
+a password and later taps Sign in with Google on the SAME address. Supabase links
+identities by verified email, but if it ever doesn't, they get a second account
+with no rating, no clubs and no sessions, and the first sign-in that proves it
+will be a member's rather than ours. The check is one look at the Supabase Users
+table: one row for that address with BOTH Email and Google in the Providers
+column. Do it with an account whose loss wouldn't matter.
 
-Both need the domain working: OAuth redirect URIs and Apple's domain
-verification both point at padelier.id.
+Apple is the other half and is **not optional once Google exists on iOS**:
+guideline 4.8 requires an equivalent private login wherever a third-party one is
+offered. It costs the developer account, a Services ID, a key and its own domain
+verification — so it lands with the App Store push, not before.
 
 ## Smaller
 
