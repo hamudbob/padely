@@ -1,64 +1,22 @@
 -- ---------------------------------------------------------------------
--- 0049 — two bugs, and a club's own history.
+-- 0050  Put back the half of admin_session_detail that 0049 dropped
 --
--- 1. A CLAIMED SESSION NEVER APPEARED IN THAT PLAYER'S OWN TAB.
---    get_player_sessions has matched on a confirmed join request BY EMAIL
---    since 0006. Claiming a spot doesn't file a join request — that's the
---    whole point of claiming, you're taking a seat the host already typed in —
---    so the session vanished from the one list where the player would look for
---    it. Their record, rating and partner stats all included it, because
---    get_my_participation matches on players.linked_user_id. The profile could
---    therefore say "12 sessions played" directly above a list of eleven.
+-- 0049 added one field to admin_session_detail (rated_for_session) by
+-- rewriting the whole function from memory, and the rewrite only carried
+-- three of the eight keys 0043 returned. The admin session page reads
+-- data.ratings.length with no guard, so the first admin who opened a
+-- session after 0049 got an error screen instead of a page.
 --
---    The fix is the union: a session is yours if you were confirmed by email
---    OR if a player row in it is linked to your account. Same for a spot an
---    admin links after the fact.
+-- This restores score_edits, ratings, league_rows, join_requests and
+-- claims exactly as 0043 defined them, keeps rated_for_session, and puts
+-- results_applied back on the sessions column rather than the exists()
+-- probe 0049 substituted for it (they disagree for a session whose
+-- results were written and later cleared).
 --
--- 2. THE ADMIN "CREDIT RATING" BUTTON WAS OFFERED WHERE IT CANNOT WORK.
---    /admin/s/<id> showed it for every linked player on an ended, rated
---    session — which is nearly everyone, since ending a session rates them all.
---    admin_credit_session_rating refuses correctly (a rating_history row for
---    that pair already exists), so nothing was ever double-counted; the button
---    was simply wrong 95% of the time and only proved it after a tap. The
---    guard was in the database doing the thinking the interface should have
---    done. admin_session_detail now says, per player, whether this session has
---    already counted toward their rating.
---
--- 3. A CLUB'S PAST SESSIONS.
---    get_club_sessions gains the winner and the field size so the club page can
---    list its own history without a second round trip. Returns-table shape
---    changes need a drop first (42P13).
+-- 0049 has been corrected in place too, so a fresh replay is right; this
+-- file is for databases where 0049 already ran.
 -- ---------------------------------------------------------------------
 
--- --- 1. Claimed sessions belong to the claimer -------------------------
-create or replace function get_player_sessions()
-returns jsonb language sql stable security definer set search_path = public as $$
-  select coalesce(jsonb_agg(t order by t.created_at desc), '[]'::jsonb)
-  from (
-    -- Confirmed by email: the original route, for someone the host invited.
-    select distinct s.id, s.name, s.format, s.status, s.created_at, s.public_token
-      from join_requests jr
-      join sessions s on s.id = jr.session_id
-     where jr.status = 'confirmed'
-       and lower(jr.email) = lower(nullif(auth.jwt() ->> 'email', ''))
-
-    union
-
-    -- Claimed, or linked afterwards by an admin: a player row that IS you.
-    select distinct s.id, s.name, s.format, s.status, s.created_at, s.public_token
-      from players p
-      join sessions s on s.id = p.session_id
-     where p.linked_user_id = auth.uid()
-       and s.status <> 'draft'
-  ) t;
-$$;
-
-grant execute on function get_player_sessions() to authenticated;
-
-comment on function get_player_sessions() is
-  'Sessions the caller played: confirmed by email OR holding a player row linked to their account (a claimed spot files no join request, which is why the second branch exists).';
-
--- --- 2. Does this session already count toward that account's rating? ---
 create or replace function admin_session_detail(p_session_id uuid)
 returns jsonb language plpgsql stable security definer set search_path = public as $$
 declare v_payload jsonb;
@@ -201,34 +159,3 @@ $$;
 
 revoke all on function admin_session_detail(uuid) from anon;
 grant execute on function admin_session_detail(uuid) to authenticated;
-
--- --- 3. A club's sessions, with who won ---------------------------------
-drop function if exists get_club_sessions(uuid);
-
-create or replace function get_club_sessions(p_club_id uuid)
-returns table (
-  id uuid, name text, status text, format text,
-  created_at timestamptz, started_at timestamptz, ended_at timestamptz,
-  public_token text, created_by uuid, counts_for_league boolean,
-  winner_name text, field_size int
-) language sql stable security definer set search_path = public as $$
-  select s.id, s.name, s.status, s.format, s.created_at, s.started_at, s.ended_at,
-         s.public_token, s.created_by, coalesce(s.counts_for_league, true),
-         w.display_name as winner_name,
-         (select count(*)::int from session_results sr where sr.session_id = s.id) as field_size
-  from sessions s
-  left join lateral (
-    select pr.display_name
-      from session_results sr
-      join profiles pr on pr.id = sr.user_id
-     where sr.session_id = s.id and sr.rank = 1
-     limit 1
-  ) w on true
-  where s.club_id = p_club_id and s.status <> 'draft' and is_club_member(p_club_id)
-  order by s.created_at desc;
-$$;
-
-grant execute on function get_club_sessions(uuid) to authenticated;
-
-comment on function get_club_sessions(uuid) is
-  'Every non-draft session a club has played, newest first, with the winner where results were recorded. Members only.';

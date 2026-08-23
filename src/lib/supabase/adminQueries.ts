@@ -403,8 +403,23 @@ export interface AppSettings {
   maintenance_message: string | null;
 }
 
-export const getSessionDetail = (sessionId: string) =>
-  call<SessionDetail>("admin_session_detail", { p_session_id: sessionId });
+/** The admin session page reads every list on this payload without a guard,
+ *  so one missing key is a blank error screen rather than a smaller page —
+ *  which is exactly what migration 0049 caused. Default the lists here so a
+ *  server-side omission degrades into an empty section instead. */
+export const getSessionDetail = async (sessionId: string): Promise<SessionDetail> => {
+  const d = await call<SessionDetail>("admin_session_detail", { p_session_id: sessionId });
+  return {
+    ...d,
+    players: d?.players ?? [],
+    rounds: d?.rounds ?? [],
+    score_edits: d?.score_edits ?? [],
+    ratings: d?.ratings ?? [],
+    league_rows: d?.league_rows ?? [],
+    join_requests: d?.join_requests ?? [],
+    claims: d?.claims ?? [],
+  };
+};
 export const getLiveNow = () => call<LiveSession[]>("admin_live_now");
 export const adminSearch = (query: string) => call<SearchHit[]>("admin_search", { p_query: query });
 
