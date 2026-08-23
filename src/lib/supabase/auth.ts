@@ -22,6 +22,41 @@ export async function emailHasAccount(email: string): Promise<{ exists: boolean;
   return { exists: row.exists, confirmed: row.confirmed === true };
 }
 
+/**
+ * Hand off to Google's consent screen. Supabase does the OAuth dance; the
+ * browser comes back to `redirectTo` with the session in the URL fragment,
+ * which the client picks up automatically (detectSessionInUrl defaults on).
+ *
+ * There is no `data` to read here and no session yet — a successful call ends
+ * with a full-page navigation away, so anything after it never runs. Only an
+ * error means we're still on the page.
+ *
+ * `prompt: "select_account"` is deliberate: without it Google silently reuses
+ * whichever account the browser is already signed into, which is wrong on a
+ * shared phone and confusing on a laptop with two Gmail accounts.
+ *
+ * `redirectTo` MUST be on the project's redirect allow-list (Supabase →
+ * Authentication → URL Configuration) or Google returns to the Site URL and
+ * drops the ?next= we sent it.
+ */
+export async function signInWithGoogle(redirectTo: string) {
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "google",
+    options: { redirectTo, queryParams: { prompt: "select_account" } },
+  });
+  if (error) throw error;
+}
+
+/** True when the signed-in account has no password of its own — it exists only
+ *  because of Google (or another provider). Settings uses this to hide "change
+ *  password", which would otherwise ask for a current password that never
+ *  existed. */
+export async function hasPasswordIdentity(): Promise<boolean> {
+  const { data } = await supabase.auth.getUser();
+  const identities = data.user?.identities ?? [];
+  return identities.some((i) => i.provider === "email");
+}
+
 /** Marks the caller's onboarding finished, so the router stops sending them to /welcome. */
 export async function completeOnboarding() {
   const { error } = await supabase.rpc("complete_onboarding");

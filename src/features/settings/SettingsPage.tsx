@@ -7,6 +7,7 @@ import {
   signOutHost,
   deleteMyAccount,
   InvalidCredentialsError,
+  hasPasswordIdentity,
 } from "../../lib/supabase/auth";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { amIAdmin } from "../../lib/supabase/adminQueries";
@@ -85,6 +86,18 @@ export default function SettingsPage() {
     () => evaluatePassword(newPw, { name, email: user?.email ?? undefined }),
     [newPw, name, user?.email],
   );
+
+  // Someone who arrived through Google has no password to change, and the
+  // change-password form would ask them for a "current password" that has
+  // never existed — then reject whatever they guessed. Default to showing the
+  // row, so a failed lookup errs towards the working case for the majority who
+  // do have one.
+  const [hasPassword, setHasPassword] = useState(true);
+  useEffect(() => {
+    hasPasswordIdentity()
+      .then(setHasPassword)
+      .catch(() => undefined);
+  }, []);
 
   useEffect(() => {
     getMyProfile()
@@ -463,17 +476,29 @@ export default function SettingsPage() {
           </>
         )}
 
-        <button
-          type="button"
-          onClick={() => toggle("password")}
-          aria-expanded={openRow === "password"}
-          className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left active:bg-surface-2 transition-colors"
-        >
-          <span className="text-[14px] font-semibold text-graphite">Change password</span>
-          <span className={`text-stone text-[15px] shrink-0 transition-transform ${openRow === "password" ? "rotate-90" : ""}`} aria-hidden>›</span>
-        </button>
+        {!hasPassword && (
+          <div className="px-4 py-3.5">
+            <p className="text-[14px] font-semibold text-graphite">Signed in with Google</p>
+            <p className="text-[12.5px] text-ink-2 mt-1 leading-relaxed">
+              There's no Padelier password on this account — Google handles it. Change it at
+              myaccount.google.com and nothing here needs updating.
+            </p>
+          </div>
+        )}
 
-        {openRow === "password" && (
+        {hasPassword && (
+          <button
+            type="button"
+            onClick={() => toggle("password")}
+            aria-expanded={openRow === "password"}
+            className="w-full flex items-center justify-between gap-3 px-4 py-3.5 text-left active:bg-surface-2 transition-colors"
+          >
+            <span className="text-[14px] font-semibold text-graphite">Change password</span>
+            <span className={`text-stone text-[15px] shrink-0 transition-transform ${openRow === "password" ? "rotate-90" : ""}`} aria-hidden>›</span>
+          </button>
+        )}
+
+        {hasPassword && openRow === "password" && (
           <form onSubmit={submitPassword} className="px-4 pb-4 pt-1 border-t border-line anim-fade">
             <div className="space-y-2.5">
               <PasswordField

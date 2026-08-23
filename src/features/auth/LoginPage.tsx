@@ -10,6 +10,7 @@ import {
   ensureHostTeamForCurrentUser,
   sendPasswordReset,
   emailHasAccount,
+  signInWithGoogle,
 } from "../../lib/supabase/auth";
 import { getMyProfile } from "../../lib/supabase/profileQueries";
 import { useAppSettings } from "../../lib/supabase/appSettings";
@@ -68,6 +69,7 @@ export default function LoginPage() {
   // address has an account — it offers the sign-up door without ever guessing.
   const [offerSignup, setOfferSignup] = useState(false);
   const [resetState, setResetState] = useState<"idle" | "sending" | "sent">("idle");
+  const [googleBusy, setGoogleBusy] = useState(false);
   const pwRef = useRef<HTMLInputElement | null>(null);
 
   const navigate = useNavigate();
@@ -112,6 +114,20 @@ export default function LoginPage() {
       cancelled = true;
     };
   }, [user, next, navigate, stage]);
+
+  /** Leave for Google's consent screen. On success this navigates away and
+   *  nothing below it runs; we only ever land back here on failure, so the
+   *  busy flag is cleared in the catch rather than a finally. */
+  async function handleGoogle() {
+    setError(null);
+    setGoogleBusy(true);
+    try {
+      await signInWithGoogle(`${window.location.origin}/login?next=${encodeURIComponent(next)}`);
+    } catch (err) {
+      setGoogleBusy(false);
+      setError(withFallback(err, "Couldn't reach Google just now. Try your email instead."));
+    }
+  }
 
   /** Move to a password stage and put the cursor in the field. */
   function goToPassword(target: Stage) {
@@ -336,6 +352,10 @@ export default function LoginPage() {
     "w-full flex items-center justify-center rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-40 disabled:active:scale-100";
   const quietBtn =
     "w-full rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform disabled:opacity-40";
+  // Google's brand guidance: their mark on a plain surface, never recoloured
+  // and never inside our filled graphite pill.
+  const googleBtn =
+    "w-full flex items-center justify-center gap-2.5 rounded-full px-4 py-3.5 font-semibold text-ink border border-line bg-surface active:scale-[0.99] transition-transform disabled:opacity-40 disabled:active:scale-100";
   const inputCls =
     "w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55";
 
@@ -520,6 +540,30 @@ export default function LoginPage() {
 
           <button type="submit" disabled={loading || !email.trim()} className={primaryBtn}>
             {loading ? "Checking…" : "Continue"}
+          </button>
+
+          {/* Google sits BELOW the email field, not above it. Padelier's own
+              accounts are the main road — most players arrive from a shared
+              session link with an address the host already typed for them —
+              and a provider button on top makes the ordinary path look like
+              the fallback. It stays visible while signups are paused: the
+              pause closes the front door, it is not a lock (see the note on
+              signupsPaused above), and hiding it would shut existing Google
+              users out of accounts they already have. */}
+          <div className="flex items-center gap-3 pt-1" aria-hidden>
+            <span className="h-px flex-1 bg-line" />
+            <span className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray">or</span>
+            <span className="h-px flex-1 bg-line" />
+          </div>
+
+          <button type="button" onClick={handleGoogle} disabled={googleBusy} className={googleBtn}>
+            <svg width="17" height="17" viewBox="0 0 18 18" aria-hidden className="shrink-0">
+              <path fill="#4285F4" d="M17.64 9.2c0-.64-.06-1.25-.16-1.84H9v3.48h4.84a4.14 4.14 0 0 1-1.8 2.72v2.26h2.92c1.7-1.57 2.68-3.88 2.68-6.62Z" />
+              <path fill="#34A853" d="M9 18c2.43 0 4.47-.8 5.96-2.18l-2.92-2.26c-.81.54-1.84.86-3.04.86-2.34 0-4.32-1.58-5.03-3.7H.96v2.33A9 9 0 0 0 9 18Z" />
+              <path fill="#FBBC05" d="M3.97 10.72a5.4 5.4 0 0 1 0-3.44V4.95H.96a9 9 0 0 0 0 8.1l3.01-2.33Z" />
+              <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z" />
+            </svg>
+            {googleBusy ? "Taking you to Google…" : "Continue with Google"}
           </button>
         </form>
       ) : (
