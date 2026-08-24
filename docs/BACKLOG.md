@@ -1,6 +1,6 @@
 # What's left
 
-Written 26 Aug 2026, from a working session. Ordered by what I'd do next, not by
+Written 26 Aug 2026, corrected 24 Aug after the Google sign-in session. Ordered by what I'd do next, not by
 size. Anything marked **bug** is provably wrong in the code today, not a
 preference — those come first because they quietly undo work that's already
 shipped.
@@ -18,27 +18,15 @@ shipped.
 
 ## Bugs
 
-### A claimed session never appears in that player's own tab — **bug**
-`get_player_sessions` still matches on a *confirmed join request by email* (the
-0006 version). Claiming a spot doesn't file one, so someone who claims their
-name — or who an admin links after the fact — plays a whole session that never
-shows in their list. Their record, rating and partner stats DO include it
-(`get_my_participation` matches on `linked_user_id`), so the profile can say "12
-sessions" above a list of 11.
+### ~~A claimed session never appears in that player's own tab~~ — fixed
+Migration 0049: `get_player_sessions` now matches `players.linked_user_id =
+auth.uid()` as well as the old confirmed-join-request-by-email route.
 
-*Fix:* one migration — match `players.linked_user_id = auth.uid()` as well as
-the email route. No client change.
-
-### The admin "Credit rating" button is offered when it can't work — **bug**
-`/admin/s/<id>` shows it for every linked player on an ended, rated session,
-without checking whether that person was already rated normally at session end —
-which is nearly everyone. The RPC refuses correctly (a `rating_history` row for
-that pair already exists), so nothing double-counts, but the button is wrong
-95% of the time and only proves it after a tap.
-
-*Fix:* `admin_session_detail` returns a per-player "already rated for this
-session" flag; the row shows "rating counted ✓" and the button appears only for
-someone who genuinely missed out.
+### ~~The admin "Credit rating" button is offered when it can't work~~ — fixed
+Migration 0049: `admin_session_detail` returns `rated_for_session` per player;
+the row shows "rating counted ✓" and the button only appears for someone who
+genuinely missed out. (0049's rewrite also dropped five keys from that payload
+and broke the admin page outright — repaired in 0050.)
 
 ### The mix fairness cap is unimplemented and its test is red
 `balancePoolByKey` swaps players to even the gender split no matter what it
@@ -101,11 +89,10 @@ night. Let the host hand one court to a player who can enter that court's score
 and nothing else. A court still has exactly one scorer, so the "one source of
 truth" rule holds.
 
-### A club's past sessions
-The Champions Hall's recent-champions rows should link through to
-`/session/<id>/final` (already public for any non-draft session), and the club
-page should carry a "Past sessions" block — last five with date, format and
-winner, plus "See all".
+### ~~A club's past sessions~~ — done
+Champions Hall rows link through to `/session/<id>/final`, and the club page
+carries a Past sessions block (date, format, winner). `get_club_sessions` gained
+`winner_name` and `field_size` in 0049.
 
 ### Clear all notifications
 "Mark all as read" as the everyday action, "Clear read" to actually delete, so
