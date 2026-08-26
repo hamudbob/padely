@@ -11,6 +11,7 @@ import {
 } from "../../lib/supabase/auth";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { amIAdmin } from "../../lib/supabase/adminQueries";
+import { getMyBlocks, unblockUser, BlockedPlayer } from "../../lib/supabase/safetyQueries";
 import { useBackNav } from "../../lib/useBackNav";
 import { evaluatePassword } from "../../lib/passwordPolicy";
 import PasswordField from "../auth/PasswordField";
@@ -92,6 +93,18 @@ export default function SettingsPage() {
   // never existed — then reject whatever they guessed. Default to showing the
   // row, so a failed lookup errs towards the working case for the majority who
   // do have one.
+  // Blocked players. Loaded once; the list is short by nature and a blocker
+  // who opens this screen is usually here to undo one.
+  const [blocks, setBlocks] = useState<BlockedPlayer[] | null>(null);
+  const [unblocking, setUnblocking] = useState<string | null>(null);
+  useEffect(() => {
+    getMyBlocks()
+      .then(setBlocks)
+      // Before 0053 is applied the RPC doesn't exist. An empty list hides the
+      // section rather than showing an error nobody can act on.
+      .catch(() => setBlocks([]));
+  }, []);
+
   const [hasPassword, setHasPassword] = useState(true);
   useEffect(() => {
     hasPasswordIdentity()
@@ -219,7 +232,11 @@ export default function SettingsPage() {
     setDelErr(null);
     try {
       await deleteMyAccount();
-      navigate("/", { replace: true });
+      // Not "/" — the signed-out home says nothing about what just happened,
+      // and being dropped there is indistinguishable from a bug that logged you
+      // out. /delete-account?done=1 confirms it worked and answers the question
+      // the confirmation raises: what was erased, and what stayed.
+      navigate("/delete-account?done=1", { replace: true });
     } catch (err) {
       setDelErr(
         err instanceof Error
@@ -551,6 +568,43 @@ export default function SettingsPage() {
           Reachable from inside the app, not only from the logged-out home.
           Someone deciding whether to delete their account is exactly the
           person who wants to read what happens to their data. */}
+      {/* Only rendered once there IS someone blocked. An empty "Blocked
+          players" row on every account advertises a feature most people will
+          never need, and reads as an accusation waiting to happen. */}
+      {blocks && blocks.length > 0 && (
+        <>
+          <p className={`${label} mb-2 px-1`}>Blocked players</p>
+          <div className="rounded-2xl border border-line bg-surface overflow-hidden mb-5">
+            {blocks.map((b, i) => (
+              <div key={b.id}>
+                {i > 0 && <div className="h-px bg-line" />}
+                <div className="flex items-center gap-3 px-4 py-3">
+                  <div className="w-9 h-9 rounded-full bg-gold-soft overflow-hidden shrink-0 flex items-center justify-center text-[13px] font-semibold text-gold-ink">
+                    {b.avatarUrl ? <img src={b.avatarUrl} alt="" className="w-full h-full object-cover" /> : b.displayName.charAt(0).toUpperCase()}
+                  </div>
+                  <span className="flex-1 min-w-0 text-[14px] text-ink-2 truncate">{b.displayName}</span>
+                  <button
+                    onClick={async () => {
+                      setUnblocking(b.id);
+                      try {
+                        await unblockUser(b.id);
+                        setBlocks((prev) => (prev ?? []).filter((x) => x.id !== b.id));
+                      } finally {
+                        setUnblocking(null);
+                      }
+                    }}
+                    disabled={unblocking === b.id}
+                    className="rounded-full border border-line text-ink-2 bg-surface text-[12px] font-semibold px-3 py-1.5 shrink-0 active:scale-95 transition-transform disabled:opacity-40"
+                  >
+                    {unblocking === b.id ? "…" : "Unblock"}
+                  </button>
+                </div>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
+
       <p className={`${label} mb-2 px-1`}>Legal</p>
       <div className="rounded-2xl border border-line bg-surface overflow-hidden mb-5">
         <Link to="/privacy" className="flex items-center justify-between gap-3 px-4 py-3.5 active:bg-surface-2 transition-colors">

@@ -12,11 +12,13 @@ import ErrorCodesPage from "./features/help/ErrorCodesPage";
 import FeaturePage from "./features/discover/FeaturePage";
 import FeaturesIndexPage from "./features/discover/FeaturesIndexPage";
 import LegalPage from "./features/legal/LegalPage";
+import DeleteAccountPage from "./features/legal/DeleteAccountPage";
 import { PRIVACY, TERMS } from "./features/legal/legalContent";
 import SettingsPage from "./features/settings/SettingsPage";
 import ProfilePage from "./features/profile/ProfilePage";
 import RequireHost from "./features/auth/RequireHost";
 import { useHostSession } from "./lib/supabase/useHostSession";
+import { useDeepLinks } from "./lib/useDeepLinks";
 import WatchPage from "./features/watch/WatchPage";
 import CreateSessionPage from "./features/create-session/CreateSessionPage";
 import HostLivePage from "./features/host-live/HostLivePage";
@@ -78,6 +80,10 @@ function RootRoute() {
 
 export default function App() {
   useRecoveryRedirect();
+  // Everything the OS hands the native app comes through here: the OAuth
+  // return, and later a shared /e/<id> link tapped in a group chat. No-op in a
+  // browser.
+  useDeepLinks();
   return (
     <>
       {/* Above the router so one announcement reaches every screen, including
@@ -101,6 +107,9 @@ export default function App() {
       {/* Public for the same reason, and for one more: a privacy notice that
           only a signed-in person can read is no notice at all — it has to be
           readable *before* someone hands over an email address. */}
+      {/* Public, unauthenticated, and it must stay that way: Play requires a
+          URL someone can open AFTER uninstalling the app. */}
+      <Route path="/delete-account" element={<DeleteAccountPage />} />
       <Route path="/privacy" element={<LegalPage doc={PRIVACY} other="terms" />} />
       <Route path="/terms" element={<LegalPage doc={TERMS} other="privacy" />} />
       {/* Where Supabase's password-recovery email lands. */}

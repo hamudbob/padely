@@ -22,9 +22,14 @@
 # exclude storage objects too. If avatars matter, download the bucket separately.
 set -euo pipefail
 
+# Read silently rather than exported — see the note in apply-migrations.sh.
 if [[ -z "${SUPABASE_DB_URL:-}" ]]; then
-  echo "SUPABASE_DB_URL is not set. See the comment at the top of this script." >&2
-  exit 1
+  echo
+  echo "  Paste the connection string (it will not be shown), then press Enter."
+  printf '  > '
+  read -rs SUPABASE_DB_URL
+  echo
+  [[ -n "$SUPABASE_DB_URL" ]] || { echo "  Nothing pasted." >&2; exit 1; }
 fi
 
 if ! command -v pg_dump >/dev/null 2>&1; then

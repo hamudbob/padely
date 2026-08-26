@@ -449,6 +449,10 @@ export interface Database {
           duration_hours: number | null;
           max_players: number | null;
           cost: string | null;
+          // 0055 — the readable share path. Written once at creation and never
+          // rewritten, so renaming a session can't break a link already in a
+          // group chat.
+          slug: string | null;
         };
         Insert: {
           id?: string;
@@ -634,6 +638,38 @@ export interface Database {
       attach_session_to_event: {
         Args: { p_session_id: string };
         Returns: string | null; // the event it claimed, or null when it declined — 0052
+      };
+      get_public_event_by_ref: {
+        Args: { p_ref: string };
+        Returns: unknown; // jsonb — 0055, slug or uuid
+      };
+      resolve_event_ref: {
+        Args: { p_ref: string };
+        Returns: string | null; // uuid — 0055
+      };
+      admin_reports: {
+        Args: { p_include_closed?: boolean };
+        Returns: unknown; // jsonb — 0054
+      };
+      admin_resolve_report: {
+        Args: { p_report_id: string; p_status: string; p_note?: string | null };
+        Returns: undefined; // void — 0054
+      };
+      block_user: {
+        Args: { p_user_id: string };
+        Returns: undefined; // void — 0053
+      };
+      unblock_user: {
+        Args: { p_user_id: string };
+        Returns: undefined; // void — 0053
+      };
+      my_blocks: {
+        Args: Record<string, never>;
+        Returns: unknown; // jsonb — 0053
+      };
+      report_user: {
+        Args: { p_user_id: string; p_reason: string; p_detail?: string | null };
+        Returns: unknown; // jsonb — 0053
       };
       set_event_rsvp: {
         Args: { p_event_id: string; p_response: string };

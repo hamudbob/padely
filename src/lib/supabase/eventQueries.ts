@@ -36,6 +36,22 @@ export interface ClubEvent {
   /** The live session's public token + join code (present only when isLive). */
   liveToken: string | null;
   liveCode: string | null;
+  /** Readable share path — padelier.id/e/pler-monday-sesh (0055). Null on an
+   *  event whose title had no letters or digits to build one from, and on any
+   *  event created before 0055 that the backfill couldn't name; the uuid link
+   *  still works in both cases. */
+  slug: string | null;
+}
+
+/**
+ * The path this event should be shared as.
+ *
+ * The slug when there is one, the uuid when there isn't. One function so the
+ * club card, the event page and anything added later can't drift apart and
+ * start handing out two different links for the same night.
+ */
+export function eventPath(e: { id: string; slug?: string | null }): string {
+  return `/e/${e.slug || e.id}`;
 }
 
 /**
@@ -144,7 +160,7 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
   const { data: events, error } = await supabase
     .from("club_events")
     .select(
-      "id, club_id, title, scheduled_at, location, notes, status, session_id, created_by, created_at, court_count, duration_hours, max_players, cost",
+      "id, club_id, title, scheduled_at, location, notes, status, session_id, created_by, created_at, court_count, duration_hours, max_players, cost, slug",
     )
     .eq("club_id", clubId)
     .eq("status", "scheduled")
@@ -221,6 +237,7 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
           isLive: !!isLive,
           liveToken: isLive ? sess?.public_token ?? null : null,
           liveCode: isLive ? sess?.join_code ?? null : null,
+          slug: (e as { slug?: string | null }).slug ?? null,
         } as ClubEvent,
         keep,
         isLive: !!isLive,
@@ -268,6 +285,9 @@ export interface PublicEvent {
   isMember: boolean;
   /** Club owner or admin: can promote and remove people. */
   isAdmin: boolean;
+  /** The readable path this event answers to (0055), for the share button on
+   *  the page itself. */
+  slug: string | null;
   /** Set once a session has been started from this event. While it is live the
    *  page offers the scoreboard instead of an RSVP form — answering here would
    *  change nothing on court, and the server refuses it anyway (0052). */
@@ -277,8 +297,14 @@ export interface PublicEvent {
 /** Read-only shareable view of a scheduled session (0026) — works for anyone,
  * incl. logged-out visitors. Members get their own response + is_member so the
  * page can offer the RSVP control. */
-export async function getPublicEvent(eventId: string): Promise<PublicEvent | null> {
-  const { data, error } = await supabase.rpc("get_public_event", { p_event_id: eventId });
+/**
+ * `ref` is a slug OR a uuid, and both work forever (0055). Every /e/ link
+ * shared before slugs existed is a uuid, and those must keep resolving; a slug
+ * must keep resolving after the session it belongs to has ended. The server
+ * decides which shape it's holding — nothing here inspects the string.
+ */
+export async function getPublicEvent(ref: string): Promise<PublicEvent | null> {
+  const { data, error } = await supabase.rpc("get_public_event_by_ref", { p_ref: ref });
   if (error) throw error;
   if (!data) return null;
   const d = data as {
@@ -304,6 +330,7 @@ export async function getPublicEvent(eventId: string): Promise<PublicEvent | nul
     is_member: boolean;
     is_admin: boolean;
     session: { id: string; status: string; public_token: string | null; join_code: string | null } | null;
+    slug?: string | null;
   };
   const mapPeople = (rows: { id: string; name: string | null; avatar: string | null }[] | null): EventAttendee[] =>
     (rows ?? []).map((r) => ({ userId: r.id, displayName: r.name ?? "Player", avatarUrl: r.avatar }));
@@ -329,6 +356,7 @@ export async function getPublicEvent(eventId: string): Promise<PublicEvent | nul
     myResponse: d.my_response,
     isMember: d.is_member,
     isAdmin: !!d.is_admin,
+    slug: d.slug ?? null,
     session: d.session
       ? {
           id: d.session.id,

@@ -144,6 +144,28 @@ guideline 4.8 requires an equivalent private login wherever a third-party one is
 offered. It costs the developer account, a Services ID, a key and its own domain
 verification — so it lands with the App Store push, not before.
 
+### A readable share link for a club session
+`/e/<uuid>` is unreadable and unrepeatable — nobody can say it out loud or
+retype it. Wanted: `padelier.id/e/pler-monday-sesh`, built from the club and
+the session title.
+
+Three things to settle before building it, none of them hard but all of them
+annoying to retrofit:
+
+- **Collisions.** A club runs "Monday Sesh" every week. The slug has to be
+  unique across time, so it needs the date or a short suffix —
+  `pler-monday-sesh-0902` — or every link points at whichever one was created
+  last, which is the worst possible failure for a share link.
+- **Renaming.** Editing the title must not break a link already sitting in a
+  group chat. Store the slug once at creation, never derive it on read, and
+  keep the uuid route working forever alongside it.
+- **Guessability, which is a decision not a detail.** A uuid makes the page
+  public but unlisted; a readable slug makes it public and *discoverable* —
+  anyone can try `/e/pler-monday-sesh`. The going list carries members' names
+  and photos. Hamud's call on 26 Aug was that a public going list is no
+  different from any booking site, and that reasoning holds for an unguessable
+  link; it is worth re-asking for a guessable one.
+
 ## Smaller
 
 - **The schedule form's time still defaults to empty**, which on some phones

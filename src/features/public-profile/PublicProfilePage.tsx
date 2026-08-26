@@ -6,6 +6,8 @@ import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
 import { RatingStrip, RecordCard, TrendCard, SectionHeading, memberSince } from "../profile/playerStats";
 import AvatarLightbox from "../shell/AvatarLightbox";
+import SafetySheet from "./SafetySheet";
+import { unblockUser } from "../../lib/supabase/safetyQueries";
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -20,6 +22,7 @@ export default function PublicProfilePage() {
   const [photoOpen, setPhotoOpen] = useState(false);
   const [viewerTeams, setViewerTeams] = useState<MyTeam[]>([]);
   const [busy, setBusy] = useState<string | null>(null);
+  const [safetyOpen, setSafetyOpen] = useState(false);
 
   const isSelf = !!user?.id && user.id === userId;
 
@@ -95,7 +98,24 @@ export default function PublicProfilePage() {
       <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
         Padelier<span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
       </div>
-      <div className="w-9" />
+      {/* Only for a signed-in viewer looking at someone else. A logged-out
+          visitor has nobody to report as, and reporting yourself is refused
+          server-side anyway. */}
+      {user && !isSelf && userId ? (
+        <button
+          onClick={() => setSafetyOpen(true)}
+          aria-label="Report or block this player"
+          className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center active:scale-95 transition-transform"
+        >
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            <circle cx="12" cy="5" r="1.7" />
+            <circle cx="12" cy="12" r="1.7" />
+            <circle cx="12" cy="19" r="1.7" />
+          </svg>
+        </button>
+      ) : (
+        <div className="w-9" />
+      )}
     </div>
   );
 
@@ -234,9 +254,45 @@ export default function PublicProfilePage() {
         </>
       )}
 
+      {/* Only ever shown to the blocker. Someone who has BEEN blocked sees a
+          profile named "Player" with no explanation, which is the point. */}
+      {profile.blockedByMe && (
+        <div className="mt-8 rounded-2xl border border-line bg-surface-2 px-4 py-4 text-center">
+          <p className="text-[13px] font-semibold text-graphite">You blocked this player</p>
+          <p className="text-[12.5px] text-warm-gray leading-relaxed mt-1">
+            Their name, photo and bio are hidden from you, and yours from them.
+          </p>
+          <button
+            onClick={async () => {
+              if (!userId) return;
+              setBusy("unblock");
+              try {
+                await unblockUser(userId);
+                refresh();
+              } finally {
+                setBusy(null);
+              }
+            }}
+            disabled={busy === "unblock"}
+            className="mt-3 rounded-full border-[1.5px] border-graphite text-graphite bg-surface text-[13px] font-semibold px-6 py-2.5 active:scale-[0.99] transition-transform disabled:opacity-40"
+          >
+            {busy === "unblock" ? "Unblocking…" : "Unblock"}
+          </button>
+        </div>
+      )}
+
       <button onClick={share} className="w-full mt-8 rounded-full border border-line bg-surface text-ink-2 text-[12.5px] font-semibold py-2.5 active:bg-surface-2 transition-colors">
         {copied ? "Link copied ✓" : "Share this profile"}
       </button>
+
+      {safetyOpen && userId && (
+        <SafetySheet
+          userId={userId}
+          displayName={profile.displayName}
+          onClose={() => setSafetyOpen(false)}
+          onBlocked={refresh}
+        />
+      )}
     </div>
   );
 }

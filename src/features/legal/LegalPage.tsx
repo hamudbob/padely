@@ -133,6 +133,14 @@ export default function LegalPage({ doc, other }: { doc: Doc; other: "privacy" |
         <Link to="/about" className="font-semibold text-gold-ink">
           {lang === "id" ? "Cara kerjanya" : "How it all works"}
         </Link>
+        <span className="mx-2" aria-hidden>
+          ·
+        </span>
+        {/* Findable from the policy that describes it, not only from Settings —
+            the person most likely to want it has already left. */}
+        <Link to="/delete-account" className="font-semibold text-gold-ink">
+          {lang === "id" ? "Hapus akun" : "Delete account"}
+        </Link>
       </p>
 
       <p className="text-[11px] text-warm-gray text-center mt-4">

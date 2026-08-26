@@ -24,6 +24,9 @@ import {
   getAdminSessions,
   getAdminUsers,
   resolveErrorGroup,
+  getAdminReports,
+  resolveReport,
+  AdminReport,
 } from "../../lib/supabase/adminQueries";
 import { applySessionRatings } from "../../lib/supabase/ratingActions";
 import { applySessionResults } from "../../lib/supabase/resultActions";
@@ -55,6 +58,7 @@ type Tab =
   | "sessions"
   | "growth"
   | "errors"
+  | "reports"
   | "activity"
   | "settings";
 
@@ -66,6 +70,7 @@ const TABS: { id: Tab; label: string }[] = [
   { id: "sessions", label: "Sessions" },
   { id: "growth", label: "Growth" },
   { id: "errors", label: "Errors" },
+  { id: "reports", label: "Reports" },
   { id: "activity", label: "Activity" },
   { id: "settings", label: "Settings" },
 ];
@@ -598,6 +603,182 @@ function detailLine(item: ActivityItem): string {
   return parts.join(" · ");
 }
 
+const REPORT_REASON_LABEL: Record<string, string> = {
+  abuse: "Abusive or threatening",
+  impersonation: "Pretending to be someone",
+  inappropriate_photo: "Inappropriate photo",
+  inappropriate_name: "Inappropriate name or bio",
+  spam: "Spam or advertising",
+  other: "Something else",
+};
+
+/**
+ * The report queue.
+ *
+ * 0053 made reports safe to file and impossible to snoop on; without this the
+ * person who filed one was told "a person reads every report" and that was not
+ * true. Open ones first, and only open ones by default — a queue that shows
+ * everything ever filed is a queue nobody finishes.
+ *
+ * Each row carries the profile TWICE: as it was when the complaint was made,
+ * and as it is now. That comparison is the whole job. A subject who swapped a
+ * photo an hour after being reported would otherwise present a clean profile
+ * and no evidence.
+ */
+function ReportsTab() {
+  const [includeClosed, setIncludeClosed] = useState(false);
+  const { data, error, loading, reload } = useAsync<AdminReport[]>(
+    () => getAdminReports(includeClosed),
+    [includeClosed],
+  );
+  const [note, setNote] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
+
+  async function decide(r: AdminReport, status: AdminReport["status"]) {
+    setBusy(r.id);
+    try {
+      await resolveReport(r.id, status, note[r.id]);
+      reload();
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  const rows = data ?? [];
+
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between">
+        <p className="text-[12px] text-warm-gray">
+          {includeClosed ? "Everything ever filed." : "Open reports, newest first."}
+        </p>
+        <button
+          onClick={() => setIncludeClosed((v) => !v)}
+          className="text-[12px] font-semibold text-ink-2 border border-line rounded-full px-3 py-1.5 bg-surface active:opacity-70"
+        >
+          {includeClosed ? "Open only" : "Show closed"}
+        </button>
+      </div>
+
+      <Loading error={error} loading={loading} empty={rows.length === 0} />
+
+      {rows.map((r) => {
+        const changed =
+          r.snapshot_name !== r.current_name ||
+          r.snapshot_avatar !== r.current_avatar ||
+          r.snapshot_bio !== r.current_bio;
+        return (
+          <div key={r.id} className="rounded-2xl border border-line bg-surface p-4">
+            <div className="flex items-start justify-between gap-3">
+              <div className="min-w-0">
+                <p className="text-[13.5px] font-semibold text-graphite">
+                  {REPORT_REASON_LABEL[r.reason] ?? r.reason}
+                </p>
+                <p className="text-[11.5px] text-warm-gray mt-0.5">
+                  {new Date(r.created_at).toLocaleString()} · reported by{" "}
+                  <Link to={`/admin/u/${r.reporter_id}`} className="font-semibold text-gold-ink">
+                    {r.reporter_name ?? "someone"}
+                  </Link>
+                  {r.reports_by_reporter > 3 && ` · ${r.reports_by_reporter} reports filed`}
+                </p>
+              </div>
+              {r.status !== "open" && (
+                <span className="text-[10px] font-bold uppercase tracking-[0.1em] text-warm-gray border border-line rounded-full px-2 py-1 shrink-0">
+                  {r.status}
+                </span>
+              )}
+            </div>
+
+            {r.detail && (
+              <p className="text-[13px] text-ink-2 leading-relaxed mt-2 rounded-xl bg-surface-2 px-3 py-2">
+                “{r.detail}”
+              </p>
+            )}
+
+            {/* Then and now, side by side. If nothing changed we say so rather
+                than drawing two identical columns. */}
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <ProfileSnap title="When reported" name={r.snapshot_name} avatar={r.snapshot_avatar} bio={r.snapshot_bio} />
+              <ProfileSnap title="Now" name={r.current_name} avatar={r.current_avatar} bio={r.current_bio} muted={!changed} />
+            </div>
+            {changed && (
+              <p className="text-[11.5px] text-gold-ink mt-2">
+                The profile changed after this was filed.
+              </p>
+            )}
+            {r.subject_deleted && (
+              <p className="text-[11.5px] text-loss mt-2">This account has since been deleted.</p>
+            )}
+
+            <p className="text-[11.5px] text-warm-gray mt-2">
+              <Link to={`/admin/u/${r.subject_user_id}`} className="font-semibold text-gold-ink">
+                Open their account
+              </Link>
+              {r.reports_about_subject > 1 && ` · reported ${r.reports_about_subject} times`}
+            </p>
+
+            {r.status === "open" ? (
+              <>
+                <input
+                  value={note[r.id] ?? ""}
+                  onChange={(e) => setNote((n) => ({ ...n, [r.id]: e.target.value }))}
+                  placeholder="What you did, for the next person reading this"
+                  className="w-full mt-3 rounded-xl border border-line bg-surface-2 px-3 py-2 text-[12.5px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+                />
+                <div className="flex gap-2 mt-2">
+                  <button onClick={() => decide(r, "actioned")} disabled={busy === r.id}
+                    className="flex-1 rounded-full bg-graphite text-ivory text-[12.5px] font-semibold py-2 active:scale-[0.99] transition-transform disabled:opacity-40">
+                    Actioned
+                  </button>
+                  <button onClick={() => decide(r, "reviewed")} disabled={busy === r.id}
+                    className="flex-1 rounded-full border border-line text-ink-2 bg-surface text-[12.5px] font-semibold py-2 active:scale-[0.99] transition-transform disabled:opacity-40">
+                    Reviewed
+                  </button>
+                  <button onClick={() => decide(r, "dismissed")} disabled={busy === r.id}
+                    className="flex-1 rounded-full border border-line text-warm-gray bg-surface text-[12.5px] font-semibold py-2 active:scale-[0.99] transition-transform disabled:opacity-40">
+                    Dismiss
+                  </button>
+                </div>
+              </>
+            ) : (
+              <div className="mt-3 rounded-xl bg-surface-2 px-3 py-2">
+                <p className="text-[12px] text-ink-2">
+                  {r.admin_note || "No note left."}
+                </p>
+                <p className="text-[11px] text-warm-gray mt-1">
+                  {r.reviewed_by_name ?? "An admin"}
+                  {r.reviewed_at ? ` · ${new Date(r.reviewed_at).toLocaleDateString()}` : ""}
+                  {" · "}
+                  <button onClick={() => decide(r, "open")} className="font-semibold text-gold-ink active:opacity-70">
+                    Reopen
+                  </button>
+                </p>
+              </div>
+            )}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function ProfileSnap({
+  title, name, avatar, bio, muted = false,
+}: { title: string; name: string | null; avatar: string | null; bio: string | null; muted?: boolean }) {
+  return (
+    <div className={`rounded-xl border border-line px-3 py-2.5 ${muted ? "bg-surface-2 opacity-60" : "bg-surface-2"}`}>
+      <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-warm-gray">{title}</p>
+      <div className="flex items-center gap-2 mt-1.5">
+        <div className="w-7 h-7 rounded-full bg-gold-soft overflow-hidden shrink-0 flex items-center justify-center text-[11px] font-semibold text-gold-ink">
+          {avatar ? <img src={avatar} alt="" className="w-full h-full object-cover" /> : (name ?? "?").charAt(0).toUpperCase()}
+        </div>
+        <span className="text-[12.5px] font-semibold text-graphite truncate">{name ?? "—"}</span>
+      </div>
+      {bio && <p className="text-[11.5px] text-ink-2 leading-snug mt-1.5 line-clamp-3">{bio}</p>}
+    </div>
+  );
+}
+
 function ActivityTab() {
   const { data, error, loading } = useAsync<ActivityItem[]>(() => getAdminActivity(80), []);
   if (!data) return <Loading error={error} loading={loading} />;
@@ -1014,6 +1195,7 @@ export default function AdminPage() {
       {tab === "sessions" && <SessionsTab />}
       {tab === "growth" && <GrowthTab />}
       {tab === "errors" && <ErrorsTab />}
+      {tab === "reports" && <ReportsTab />}
       {tab === "activity" && <ActivityTab />}
       {tab === "settings" && <SettingsTab />}
     </div>

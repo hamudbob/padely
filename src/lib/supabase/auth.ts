@@ -1,4 +1,5 @@
 import { supabase } from "./client";
+import { isNative, startNativeOAuth } from "../native";
 
 export interface HostCredentials {
   email: string;
@@ -40,6 +41,15 @@ export async function emailHasAccount(email: string): Promise<{ exists: boolean;
  * drops the ?next= we sent it.
  */
 export async function signInWithGoogle(redirectTo: string) {
+  // On a phone this cannot be a navigation. Google rejects OAuth inside an
+  // app's embedded webview, so the native build hands the whole thing to the
+  // system browser and picks the session up from a deep link instead. Same
+  // provider, same Supabase project, different doorway.
+  if (isNative()) {
+    await startNativeOAuth("google");
+    return;
+  }
+
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: { redirectTo, queryParams: { prompt: "select_account" } },
@@ -206,9 +216,18 @@ export async function sendPasswordReset(email: string, redirectTo: string) {
   if (error && /rate|too many/i.test(error.message)) throw error;
 }
 
-/** Set a new password for the currently-authenticated (or recovery) session. */
-export async function updatePassword(newPassword: string) {
-  const { error } = await supabase.auth.updateUser({ password: newPassword });
+/** Set a new password for the currently-authenticated (or recovery) session.
+ *
+ * `currentPassword` is optional because the recovery flow doesn't have one —
+ * the emailed link IS the proof there. It must be passed everywhere else: the
+ * project has "Secure password change" enabled, which makes GoTrue require the
+ * current password to be SENT with the update, not merely checked beforehand.
+ * Without it the server answers "Current password required when setting new
+ * password" no matter how recently you signed in. */
+export async function updatePassword(newPassword: string, currentPassword?: string) {
+  const { error } = await supabase.auth.updateUser(
+    currentPassword ? { password: newPassword, current_password: currentPassword } : { password: newPassword },
+  );
   if (error) throw error;
 }
 
@@ -238,7 +257,7 @@ export async function changePassword(currentPassword: string, newPassword: strin
     throw checkError;
   }
 
-  await updatePassword(newPassword);
+  await updatePassword(newPassword, currentPassword);
 }
 
 export async function signOutHost() {
