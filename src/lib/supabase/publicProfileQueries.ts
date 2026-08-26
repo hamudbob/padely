@@ -45,6 +45,10 @@ export interface PublicProfile {
   form: FormResult[];
   /** Up-to-12 rating points, oldest → newest, for the trend sparkline. */
   ratingTrend: RatingPoint[];
+  /** True when the viewer has blocked this player (0053). Never true the other
+   *  way round: being blocked is not announced. When set, the name, photo and
+   *  bio arrive already redacted from the server. */
+  blockedByMe: boolean;
 }
 
 export async function getPublicProfile(userId: string): Promise<PublicProfile | null> {
@@ -66,6 +70,7 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     draws: number | null;
     form: FormResult[] | null;
     rating_trend: { rating: number | null; delta: number | null }[] | null;
+    blocked_by_me?: boolean;
   };
   const wins = d.wins ?? 0;
   const losses = d.losses ?? 0;
@@ -90,5 +95,8 @@ export async function getPublicProfile(userId: string): Promise<PublicProfile | 
     winRate: matches > 0 ? wins / matches : 0,
     form: (d.form ?? []).filter((f): f is FormResult => f === "W" || f === "L" || f === "D"),
     ratingTrend: (d.rating_trend ?? []).map((p) => ({ rating: Math.round(p.rating ?? 1500), delta: Math.round(p.delta ?? 0) })),
+    // Undefined before 0053 is applied — the same as "not blocked", so an
+    // unrun migration hides the feature rather than crashing the page.
+    blockedByMe: d.blocked_by_me === true,
   };
 }

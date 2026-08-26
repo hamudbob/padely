@@ -635,6 +635,22 @@ export interface Database {
         Args: { p_session_id: string };
         Returns: string | null; // the event it claimed, or null when it declined — 0052
       };
+      block_user: {
+        Args: { p_user_id: string };
+        Returns: undefined; // void — 0053
+      };
+      unblock_user: {
+        Args: { p_user_id: string };
+        Returns: undefined; // void — 0053
+      };
+      my_blocks: {
+        Args: Record<string, never>;
+        Returns: unknown; // jsonb — 0053
+      };
+      report_user: {
+        Args: { p_user_id: string; p_reason: string; p_detail?: string | null };
+        Returns: unknown; // jsonb — 0053
+      };
       set_event_rsvp: {
         Args: { p_event_id: string; p_response: string };
         Returns: unknown; // jsonb — what you actually got, which may be a waitlist place
