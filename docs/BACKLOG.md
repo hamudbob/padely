@@ -28,12 +28,22 @@ the row shows "rating counted ✓" and the button only appears for someone who
 genuinely missed out. (0049's rewrite also dropped five keys from that payload
 and broke the admin page outright — repaired in 0050.)
 
-### The mix fairness cap is unimplemented and its test is red
-`balancePoolByKey` swaps players to even the gender split no matter what it
-costs rest fairness. With 6 men and 5 women on 2 courts the women play every
-round and the spread hits 2 where the test wants ≤1. Decision already taken: cap
-the unfairness — before each swap, check whether it would push someone's
-play-count gap past a limit, and if so accept one same-gender pair that round.
+### ~~The mix fairness cap is unimplemented and its test is red~~ — done
+`balancePoolByKey` now refuses a swap that would push any player's game count
+more than `MAX_PLAY_GAP` (1) ahead of another's, and accepts a same-key pair
+that round instead.
+
+It was worse than this entry said. The 6M/5F case in the test drifts to a spread
+of 2 over ten rounds, but 8M/4F on two courts over twenty rounds reached **10** —
+all four women on court every single round while men sat out half the night.
+Measured across 942 runs (rosters 4–16 players, 1–3 courts, six seeds), the
+spread after the cap never exceeds 1.
+
+The price, measured on the same runs: on lopsided rosters some teams are now
+same-gender — 8M/4F drops from 100% to ~70% mixed, 6M/5F to ~93%. Evenly split
+rosters are untouched at 100%, and rosters where the mix was already limited by
+the roster itself (5M/3F, 9M/3F) are unchanged. A cap of 2 was measured as an
+alternative: it buys 2–3 percentage points of mix and allows a spread of 2.
 
 ---
 

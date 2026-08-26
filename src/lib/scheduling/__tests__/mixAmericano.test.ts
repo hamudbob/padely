@@ -98,4 +98,86 @@ describe("Mix Americano scheduling", () => {
     const played = players.map((id) => stats.get(id)!.matchesPlayed);
     expect(Math.max(...played) - Math.min(...played)).toBeLessThanOrEqual(1);
   });
+
+  /**
+   * The case that made MAX_PLAY_GAP necessary, and the one that hurt most.
+   *
+   * 8M/4F on two courts: a perfectly mixed pool is 4M/4F, so ALL FOUR women are
+   * on court every single round while the men take turns. Twenty rounds of that
+   * left a spread of 10 — four people who never once sat down, and men who
+   * played half the night. Perfect mixing every round IS that outcome; it isn't
+   * a scheduling mistake, it's arithmetic, which is why it needed a cap rather
+   * than a fix.
+   *
+   * The price is visible and accepted: about 30% of teams here are same-gender.
+   */
+  it("caps the damage on a lopsided roster: nobody drifts more than one game ahead (8M/4F, 2 courts, 20 rounds)", () => {
+    const { players, genderById } = makeRoster(8, 4);
+    const stats = new Map<PlayerId, PlayerFairnessState>(
+      players.map((id) => [id, { playerId: id, matchesPlayed: 0, restedLastRound: false }]),
+    );
+    const rng = mulberry32(404);
+    const history = emptyHistory();
+    for (let round = 0; round < 20; round++) {
+      const result = generateMixAmericanoRound({
+        activePlayerIds: players,
+        genderById,
+        statsById: stats,
+        courtsAvailable: 2,
+        history,
+        rng,
+      });
+      const playingSet = new Set(result.matches.flatMap((m) => [...m.teamA, ...m.teamB]));
+      for (const id of players) {
+        const s = stats.get(id)!;
+        stats.set(
+          id,
+          playingSet.has(id)
+            ? { playerId: id, matchesPlayed: s.matchesPlayed + 1, restedLastRound: false }
+            : { playerId: id, matchesPlayed: s.matchesPlayed, restedLastRound: true },
+        );
+      }
+      // Every round, not just at the end — the old behaviour drifted steadily,
+      // so a check only at the finish would let an interim blowout through.
+      const running = players.map((id) => stats.get(id)!.matchesPlayed);
+      expect(Math.max(...running) - Math.min(...running)).toBeLessThanOrEqual(1);
+    }
+  });
+
+  /**
+   * The cap must be invisible when the roster can satisfy both goals. An even
+   * split never needs a swap that widens the spread, so nothing changes.
+   */
+  it("an evenly split roster is untouched by the cap — still every team mixed (6M/6F, 3 courts, 12 rounds)", () => {
+    const { players, genderById } = makeRoster(6, 6);
+    const stats = new Map<PlayerId, PlayerFairnessState>(
+      players.map((id) => [id, { playerId: id, matchesPlayed: 0, restedLastRound: false }]),
+    );
+    const rng = mulberry32(1234);
+    const history = emptyHistory();
+    for (let round = 0; round < 12; round++) {
+      const result = generateMixAmericanoRound({
+        activePlayerIds: players,
+        genderById,
+        statsById: stats,
+        courtsAvailable: 3,
+        history,
+        rng,
+      });
+      for (const m of result.matches) {
+        expect(genderById.get(m.teamA[0])).not.toBe(genderById.get(m.teamA[1]));
+        expect(genderById.get(m.teamB[0])).not.toBe(genderById.get(m.teamB[1]));
+      }
+      const playingSet = new Set(result.matches.flatMap((m) => [...m.teamA, ...m.teamB]));
+      for (const id of players) {
+        const s = stats.get(id)!;
+        stats.set(
+          id,
+          playingSet.has(id)
+            ? { playerId: id, matchesPlayed: s.matchesPlayed + 1, restedLastRound: false }
+            : { playerId: id, matchesPlayed: s.matchesPlayed, restedLastRound: true },
+        );
+      }
+    }
+  });
 });

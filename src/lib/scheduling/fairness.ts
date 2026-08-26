@@ -24,6 +24,12 @@ export interface RestSelectionResult {
  * only reorders WHO rests, never HOW MANY — so it can't leave a court short. */
 export const MAX_CONSECUTIVE_PLAYED = 3;
 
+/** How far apart two players' game counts may drift before mix-balancing gives
+ * way. selectPlayersForRound already guarantees a spread of at most 1; without
+ * this cap, balancePoolByKey was free to widen it every round, in the same
+ * direction, for the whole night. See the note on balancePoolByKey. */
+export const MAX_PLAY_GAP = 1;
+
 export function selectPlayersForRound(
   activePlayerIds: PlayerId[],
   stateById: Map<PlayerId, PlayerFairnessState>,
@@ -112,11 +118,34 @@ export function selectPlayersForRound(
  * back). If the roster itself can't support an even split — seven men and one
  * woman — this gets as close as the roster allows and stops. It never changes
  * how MANY play, so it can't leave a court short.
+ *
+ * THE CAP, and why the repair alone wasn't enough. On a roster that isn't
+ * evenly split the two goals are arithmetically incompatible, and swapping
+ * without limit sacrifices the same people every round. Eleven players, 6M/5F,
+ * two courts: a perfectly mixed pool is 4M/4F, so four of six men play (two
+ * rounds in three) while four of five women play (four rounds in five). Ten
+ * rounds later the women have eight games and the men six. Nobody wrote a bug —
+ * insisting on a perfect mix every round IS that outcome.
+ *
+ * So a swap is now only taken if the round it produces keeps every player's
+ * game count within MAX_PLAY_GAP of every other's. When it doesn't, we stop and
+ * let one team be same-key for this round; the next round's fairness pick
+ * starts from a different place and the mix usually comes back on its own.
+ *
+ * The greedy pair is already the least-damaging one available — benching the
+ * over-represented player with the MOST games and playing the under-represented
+ * one with the FEWEST is exactly the swap that moves the spread least — so if
+ * that pair breaks the cap, no other pair would fit, and we stop rather than
+ * hunt.
+ *
+ * On an evenly-split roster the cap never binds: the two goals agree, no swap
+ * ever widens the spread, and behaviour is identical to before.
  */
 export function balancePoolByKey(
   selection: RestSelectionResult,
   keyById: Map<PlayerId, string>,
   stateById: Map<PlayerId, PlayerFairnessState>,
+  maxPlayGap: number = MAX_PLAY_GAP,
 ): RestSelectionResult {
   const { playingIds, restingIds, courtsUsed } = selection;
   if (courtsUsed === 0 || restingIds.length === 0) return selection;
@@ -131,6 +160,14 @@ export function balancePoolByKey(
   if (keys.length !== 2) return selection;
 
   const target = playing.length / 2;
+
+  /** The spread in game counts this pool would leave behind once the round is
+   *  played — the number the fairness rule actually cares about. Everyone in
+   *  `pool` gains a game; everyone on the bench doesn't. */
+  const spreadAfterRound = (pool: PlayerId[], bench: PlayerId[]): number => {
+    const counts = [...pool.map((id) => played(id) + 1), ...bench.map((id) => played(id))];
+    return Math.max(...counts) - Math.min(...counts);
+  };
 
   for (let guard = 0; guard < playing.length; guard++) {
     const countOf = (k: string) => playing.filter((id) => (keyById.get(id) ?? "") === k).length;
@@ -147,6 +184,15 @@ export function balancePoolByKey(
       .filter((id) => (keyById.get(id) ?? "") === under)
       .sort((a, b) => played(a) - played(b))[0];
     if (!out || !inn) break; // the roster can't do better than this
+
+    // Would this swap push someone too far ahead of someone else? Try it on a
+    // copy first. A rejected swap ends the loop: the pair we just tried is the
+    // cheapest one there is, so nothing else would pass either.
+    const nextPlaying = [...playing];
+    const nextResting = [...resting];
+    nextPlaying[nextPlaying.indexOf(out)] = inn;
+    nextResting[nextResting.indexOf(inn)] = out;
+    if (spreadAfterRound(nextPlaying, nextResting) > maxPlayGap) break;
 
     playing[playing.indexOf(out)] = inn;
     resting[resting.indexOf(inn)] = out;
