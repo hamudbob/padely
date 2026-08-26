@@ -10,9 +10,12 @@
 # months" is not the same claim.
 #
 # USAGE
-#   export TARGET_DB_URL='postgresql://postgres.<ref>:<password>@<host>:5432/postgres'
 #   ./scripts/apply-migrations.sh              # every migration, in order
 #   ./scripts/apply-migrations.sh --from 0046  # resume from one
+#
+# It asks for the connection string and reads it silently. Don't set it with
+# `export` — that puts your database password in ~/.zsh_history and on screen,
+# where it gets copied into a chat or a screenshot without anyone meaning to.
 #
 # The URL comes from the Supabase dashboard: the CONNECT button at the top of
 # the page. Three are offered; the port is what tells them apart:
@@ -45,9 +48,21 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 
+# Asked for, not exported. A connection string typed as `export TARGET_DB_URL=...`
+# ends up in ~/.zsh_history and on screen, where it gets copied into a chat or a
+# screenshot along with everything around it. Read silently instead: nothing is
+# echoed, nothing is saved, and there is no command to paste back.
 if [[ -z "${TARGET_DB_URL:-}" ]]; then
-  echo "TARGET_DB_URL is not set. See the comment at the top of this script." >&2
-  exit 1
+  echo
+  echo "  Paste the connection string (it will not be shown), then press Enter."
+  echo "  Supabase -> Connect -> Direct connection, ending in :5432/postgres"
+  printf '  > '
+  read -rs TARGET_DB_URL
+  echo
+  if [[ -z "$TARGET_DB_URL" ]]; then
+    echo "  Nothing pasted." >&2
+    exit 1
+  fi
 fi
 command -v psql >/dev/null 2>&1 || {
   echo "psql not found. Two ways to get it on a Mac:" >&2
