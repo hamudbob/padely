@@ -71,6 +71,36 @@ add functions rather than rewriting them where you can, never `drop column` on
 a table with data in it. An additive migration that turns out to be wrong is a
 thing you can ignore. A destructive one is a thing you restore from backup.
 
+### Nothing ever moves from staging to production
+
+Worth stating flatly, because it's the easiest thing to get backwards.
+
+A database is never swapped, promoted, copied back, or "moved across". Staging
+holds invented data; production holds real people. What travels between them is
+**a migration file**, and it only ever travels one way:
+
+    write the .sql  ->  run it on staging  ->  it works  ->  run the SAME file
+                                                             on production
+
+The file is the deliverable. Both databases end up with the same *shape*, and
+they never share a single row.
+
+That leaves the question of what happens when a migration is wrong, and the
+answer isn't staging — staging has already said yes by then. It's two things:
+
+- **Write additive migrations.** Add a table, add a nullable column, add a
+  function. An app that doesn't know about a new column simply doesn't select
+  it. This is why production can safely run ahead of the app, and why a change
+  that turns out to be wrong can usually just be ignored rather than undone.
+- **Take a dump first** (`./scripts/backup-db.sh`) for the rare migration that
+  can't be additive. That, not staging, is the undo.
+
+Because additive migrations are invisible to the running app, the safe order
+for the next phase is *not* "keep production frozen until iOS ships". It is:
+prove each migration on staging, apply it to production as you go, and let the
+old app carry on ignoring what it doesn't use. The only thing held back on a
+branch is the front end — which is the half Netlify can roll back in one click.
+
 ## 2. Backing up the database
 
 ### What Supabase already does
