@@ -52,10 +52,16 @@ done
 # ends up in ~/.zsh_history and on screen, where it gets copied into a chat or a
 # screenshot along with everything around it. Read silently instead: nothing is
 # echoed, nothing is saved, and there is no command to paste back.
-if [[ -z "${TARGET_DB_URL:-}" ]]; then
+FROM_ENV=""
+if [[ -n "${TARGET_DB_URL:-}" ]]; then
+  # An exported variable from earlier in the same terminal silently wins over
+  # the prompt, so the script appears to ignore what you meant to paste. Say so.
+  FROM_ENV="yes"
+else
   echo
   echo "  Paste the connection string (it will not be shown), then press Enter."
-  echo "  Supabase -> Connect -> Direct connection, ending in :5432/postgres"
+  echo "  Supabase -> Connect -> Direct tab. On an IPv4-only network use the"
+  echo "  Session pooler string (aws-...pooler.supabase.com, port 5432)."
   printf '  > '
   read -rs TARGET_DB_URL
   echo
@@ -103,6 +109,11 @@ REF="$(printf '%s' "$TARGET_DB_URL" | sed -nE 's#^.*://postgres\.([a-z0-9]+):.*$
 [[ -z "$REF" ]] && REF="$HOST"
 
 echo
+if [[ -n "$FROM_ENV" ]]; then
+  echo "  Using TARGET_DB_URL already set in this terminal."
+  echo "  To be asked for a different one:  unset TARGET_DB_URL"
+  echo
+fi
 echo "  Target host : $HOST"
 echo "  Project ref : $REF"
 echo
