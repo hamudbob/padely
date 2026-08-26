@@ -52,6 +52,20 @@ real-shaped data, and only then run it on production. The whole reason
 migrations 0046-0052 have been safe is that each was tried on a throwaway
 Postgres before it touched anything of yours.
 
+Stand it up with:
+
+    export TARGET_DB_URL='...'      # the staging project's DIRECT connection
+    ./scripts/apply-migrations.sh
+
+That replays all 52 migrations in order. The whole chain was verified against
+an empty Postgres on 26 Aug 2026 — 30 tables, 109 functions, 59 RLS policies,
+no failures — so a clean replay is the expected result, not a hope.
+
+**The staging project is not the iOS database.** iOS, Android and the web all
+talk to the ONE production project, or the same person gets a different account
+depending on which one they opened. Staging exists so migrations can be tried
+somewhere harmless; it would exist even if you never shipped an app.
+
 And keep writing migrations the way you already do: add columns as nullable,
 add functions rather than rewriting them where you can, never `drop column` on
 a table with data in it. An additive migration that turns out to be wrong is a
