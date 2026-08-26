@@ -21,3 +21,6 @@ _to_delete/
 tests/.auth/
 test-results/
 playwright-report/
+
+# Database dumps: they contain every user's email address.
+backups/
