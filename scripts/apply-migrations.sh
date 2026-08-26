@@ -93,9 +93,13 @@ fi
 
 cd "$(dirname "$0")/.."
 
-# Pull the project ref out of the host for the confirmation prompt.
-HOST="$(printf '%s' "$TARGET_DB_URL" | sed -E 's#^[^@]*@##; s#[:/].*$##')"
+# Pull the project ref out for the confirmation prompt. The two connection
+# styles put it in different places:
+#   direct  postgresql://postgres:pw@db.<ref>.supabase.co:5432/postgres
+#   pooler  postgresql://postgres.<ref>:pw@aws-0-<region>.pooler.supabase.com:5432/...
+HOST="$(printf '%s' "$TARGET_DB_URL" | sed -E 's#^.*@##; s#[:/].*$##')"
 REF="$(printf '%s' "$TARGET_DB_URL" | sed -nE 's#^.*://postgres\.([a-z0-9]+):.*$#\1#p')"
+[[ -z "$REF" ]] && REF="$(printf '%s' "$HOST" | sed -nE 's#^db\.([a-z0-9]+)\.supabase\.co$#\1#p')"
 [[ -z "$REF" ]] && REF="$HOST"
 
 echo
@@ -109,6 +113,36 @@ if [[ "$TYPED" != "$REF" ]]; then
   echo "  Didn't match. Nothing was run." >&2
   exit 1
 fi
+
+# Prove the connection before touching anything. Failing on migration 0001
+# looks like a broken migration; it is almost always the network.
+echo
+echo "Checking the connection ..."
+if ! PRE="$(psql "$TARGET_DB_URL" -Atc 'select 1' 2>&1)"; then
+  echo >&2
+  if printf '%s' "$PRE" | grep -qi 'could not translate host name\|no route to host\|network is unreachable'; then
+    cat >&2 <<'HINT'
+Could not resolve that host. This is almost never a wrong password.
+
+Supabase's DIRECT connection is IPv6-only, and most home and office networks
+are IPv4-only — so the name genuinely does not resolve for you.
+
+The fix: Supabase -> Connect -> Direct tab, and take the SESSION POOLER string
+instead. It is also port 5432 and works identically for migrations. It looks
+like:
+
+  postgresql://postgres.<ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres
+
+NOT the Transaction pooler on 6543 — that one cannot run these migrations.
+HINT
+  else
+    echo "Could not connect:" >&2
+    printf '%s\n' "$PRE" >&2
+  fi
+  exit 1
+fi
+echo "Connected."
+echo
 
 APPLIED=0
 for f in supabase/migrations/*.sql; do
