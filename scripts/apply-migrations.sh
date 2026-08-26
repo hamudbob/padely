@@ -50,10 +50,31 @@ if [[ -z "${TARGET_DB_URL:-}" ]]; then
   exit 1
 fi
 command -v psql >/dev/null 2>&1 || {
-  echo "psql not found. brew install libpq, then:" >&2
-  echo "  export PATH=\"/opt/homebrew/opt/libpq/bin:\$PATH\"" >&2
+  echo "psql not found. Two ways to get it on a Mac:" >&2
+  echo >&2
+  echo "  1. Homebrew (worth having anyway):" >&2
+  echo '     /bin/bash -c "$(curl -fsSL https://raw.githubusercontent.com/Homebrew/install/HEAD/install.sh)"' >&2
+  echo "     brew install libpq" >&2
+  echo '     echo '"'"'export PATH="/opt/homebrew/opt/libpq/bin:$PATH"'"'"' >> ~/.zshrc && source ~/.zshrc' >&2
+  echo >&2
+  echo "  2. Postgres.app from postgresapp.com — drag to Applications, then:" >&2
+  echo "     sudo mkdir -p /etc/paths.d && echo /Applications/Postgres.app/Contents/Versions/latest/bin | sudo tee /etc/paths.d/postgresapp" >&2
   exit 1
 }
+
+# A password with @ or / or # in it silently breaks the URL: everything before
+# the LAST @ is read as user:password, so an @ in the password moves the host.
+# The error you get is about the host, which sends you looking in the wrong
+# place entirely. Catch it here instead.
+AT_COUNT="$(printf '%s' "${TARGET_DB_URL#*://}" | tr -cd '@' | wc -c | tr -d ' ')"
+if [[ "$AT_COUNT" -gt 1 ]]; then
+  echo "That URL has more than one @ in it, which means your password contains one." >&2
+  echo "Postgres URLs need it percent-encoded:  @ becomes %40" >&2
+  echo >&2
+  echo "Easier: Supabase -> Project Settings -> Database -> Reset database password," >&2
+  echo "and choose one with only letters and numbers. Nothing depends on it yet." >&2
+  exit 1
+fi
 
 cd "$(dirname "$0")/.."
 
