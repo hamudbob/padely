@@ -109,11 +109,30 @@ export async function getEventGoing(eventId: string): Promise<EventGoing[]> {
   return ids.map((id) => ({ userId: id, displayName: profiles.get(id)?.displayName ?? "Player" }));
 }
 
-/** Link a scheduled event to the session that was started from it (admins only,
- * via RLS). Best-effort — never blocks the session start. */
+/** Link a scheduled event to the session started from it — the Start button on
+ *  the club's event card. Goes through the RPC (0052) rather than a table
+ *  update so it also clears any OTHER event that was auto-attached to this
+ *  session a moment earlier; one session belongs to one night. */
 export async function linkEventSession(eventId: string, sessionId: string): Promise<void> {
-  const { error } = await supabase.from("club_events").update({ session_id: sessionId }).eq("id", eventId);
+  const { error } = await supabase.rpc("link_event_session", { p_event_id: eventId, p_session_id: sessionId });
   if (error) throw new Error(error.message);
+}
+
+/** The safety net for every other way a club session gets started (0052).
+ *
+ *  The explicit link above only happens if the host used the event card's Start
+ *  button. Start the same night from Play instead and the club page kept
+ *  offering an RSVP form for a session already in play. This attaches the
+ *  club's single scheduled event near this moment — and does nothing at all
+ *  when there's more than one candidate, because attaching the wrong night's
+ *  RSVPs to a real session is worse than the problem it fixes.
+ *
+ *  Returns the event it claimed, or null when it declined. Best-effort:
+ *  a failure here must never make a successful session start look failed. */
+export async function attachSessionToEvent(sessionId: string): Promise<string | null> {
+  const { data, error } = await supabase.rpc("attach_session_to_event", { p_session_id: sessionId });
+  if (error) return null;
+  return (data as unknown as string | null) ?? null;
 }
 
 /** Upcoming scheduled sessions for a team, each with RSVP counts, who's coming,
@@ -249,6 +268,10 @@ export interface PublicEvent {
   isMember: boolean;
   /** Club owner or admin: can promote and remove people. */
   isAdmin: boolean;
+  /** Set once a session has been started from this event. While it is live the
+   *  page offers the scoreboard instead of an RSVP form — answering here would
+   *  change nothing on court, and the server refuses it anyway (0052). */
+  session: { id: string; status: string; publicToken: string | null; joinCode: string | null } | null;
 }
 
 /** Read-only shareable view of a scheduled session (0026) — works for anyone,
@@ -280,6 +303,7 @@ export async function getPublicEvent(eventId: string): Promise<PublicEvent | nul
     my_response: RsvpResponse | null;
     is_member: boolean;
     is_admin: boolean;
+    session: { id: string; status: string; public_token: string | null; join_code: string | null } | null;
   };
   const mapPeople = (rows: { id: string; name: string | null; avatar: string | null }[] | null): EventAttendee[] =>
     (rows ?? []).map((r) => ({ userId: r.id, displayName: r.name ?? "Player", avatarUrl: r.avatar }));
@@ -305,6 +329,14 @@ export async function getPublicEvent(eventId: string): Promise<PublicEvent | nul
     myResponse: d.my_response,
     isMember: d.is_member,
     isAdmin: !!d.is_admin,
+    session: d.session
+      ? {
+          id: d.session.id,
+          status: d.session.status,
+          publicToken: d.session.public_token,
+          joinCode: d.session.join_code,
+        }
+      : null,
   };
 }
 

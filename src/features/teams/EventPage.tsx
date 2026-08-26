@@ -114,6 +114,13 @@ export default function EventPage() {
   // Full is a real state, not a styling detail: it changes what the In button
   // says, what a tap does, and whether the counts read 8/12 or just 8.
   const full = !!ev && ev.maxPlayers != null && ev.counts.in >= ev.maxPlayers;
+  // The night stopped being a plan and became a thing that happened. Once a
+  // session has been started from this event the RSVP list is no longer what
+  // decides who plays — the session roster is — so the form comes down. The
+  // server refuses the write too (0052); this is so nobody taps a control that
+  // was only ever going to fail.
+  const started = !!ev?.session && (ev.session.status === "live" || ev.session.status === "ended");
+  const live = ev?.session?.status === "live";
   const myQueuePosition =
     ev && ev.myResponse === "waitlist" ? ev.waitlist.findIndex((p) => p.userId === user?.id) + 1 || null : null;
 
@@ -197,8 +204,36 @@ export default function EventPage() {
         )}
       </div>
 
+      {/* In play, or played. Either way the plan is over. */}
+      {started && (
+        <div className="mt-6">
+          {live && ev.session?.publicToken ? (
+            <Link
+              to={`/live/${ev.session.publicToken}${ev.session.joinCode ? `?j=${ev.session.joinCode}` : ""}`}
+              className="block rounded-2xl bg-graphite px-4 py-4 text-center active:scale-[0.99] transition-transform"
+            >
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-court-lime/25 px-2.5 py-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-court-lime" aria-hidden />
+                <span className="text-[9.5px] font-bold tracking-[0.12em] text-ivory">LIVE NOW</span>
+              </span>
+              <span className="block text-[14px] font-semibold text-ivory mt-2">This session is being played</span>
+              <span className="block text-[12px] text-ivory/70 mt-0.5">Tap for the live scoreboard</span>
+            </Link>
+          ) : (
+            <div className="rounded-2xl border border-line bg-surface-2 px-4 py-4 text-center">
+              <p className="text-[13.5px] font-semibold text-graphite">
+                {live ? "This session is being played" : "This session has finished"}
+              </p>
+              <p className="text-[12px] text-warm-gray mt-1 leading-snug">
+                RSVPs are closed — who played is on the session itself now.
+              </p>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* RSVP */}
-      {!cancelled && ev.isMember && (
+      {!started && !cancelled && ev.isMember && (
         <div className="mt-6">
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray text-center mb-2">Your RSVP</p>
           <div className="flex rounded-full bg-surface border border-line p-1">
@@ -232,7 +267,7 @@ export default function EventPage() {
           {note && <p className="text-[12px] text-ink-2 text-center mt-2 leading-snug">{note}</p>}
         </div>
       )}
-      {!cancelled && !ev.isMember && (
+      {!started && !cancelled && !ev.isMember && (
         <div className="mt-6 rounded-2xl border border-dashed border-line bg-surface px-4 py-5 text-center">
           <p className="text-[13px] text-graphite font-semibold">Members-only RSVP</p>
           {user ? (

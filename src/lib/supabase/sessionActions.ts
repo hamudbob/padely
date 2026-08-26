@@ -250,12 +250,24 @@ export async function finalizeAndStart(
   const { error: liveError } = await supabase.from("sessions").update({ status: "live", started_at: new Date().toISOString() }).eq("id", sessionId);
   if (liveError) throw liveError;
 
-  // Team session just went live → let the club's members know (best-effort).
+  // Team session just went live → let the club's members know, and attach it to
+  // the night it was scheduled as. Both best-effort: neither is worth turning a
+  // session that IS running into an error on the host's screen.
   if (draft.clubId) {
     try {
       await supabase.rpc("notify_club_session_started", { p_session_id: sessionId });
     } catch {
       /* notifications are non-essential — never block a successful start */
+    }
+    // Here rather than in the create wizard so it covers every route into a
+    // live club session, not just the one that starts from the event card. The
+    // wizard still links explicitly when it knows the event, and that link wins
+    // (0052 clears whatever this attached). Declines silently when the club has
+    // no single obvious candidate.
+    try {
+      await supabase.rpc("attach_session_to_event", { p_session_id: sessionId });
+    } catch {
+      /* a session with no scheduled event is the normal case, not a failure */
     }
   }
 }

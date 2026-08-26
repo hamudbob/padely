@@ -797,7 +797,12 @@ export default function CreateSessionPage() {
       );
       startedRef.current = true; // it's live now — don't let the unmount cleanup delete it
       if (eventId) void linkEventSession(eventId, sid).catch(() => {}); // best-effort event↔session link
-      navigate(`/session/${sid}/host`);
+      // REPLACE, not push. The wizard is finished the moment the session is
+      // live, and leaving it in history meant a host who backed out of the live
+      // screen mid-session landed on "Create session" — which reads like the
+      // night they are running has vanished. Replacing sends them back to
+      // wherever they started from instead: Play, or the club page.
+      navigate(`/session/${sid}/host`, { replace: true });
     } catch (err) {
       setStartError(withFallback(err, "Could not start the session."));
     } finally {

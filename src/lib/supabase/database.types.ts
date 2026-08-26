@@ -627,6 +627,14 @@ export interface Database {
         };
         Returns: string; // uuid
       };
+      link_event_session: {
+        Args: { p_event_id: string; p_session_id: string };
+        Returns: undefined; // void — 0052
+      };
+      attach_session_to_event: {
+        Args: { p_session_id: string };
+        Returns: string | null; // the event it claimed, or null when it declined — 0052
+      };
       set_event_rsvp: {
         Args: { p_event_id: string; p_response: string };
         Returns: unknown; // jsonb — what you actually got, which may be a waitlist place
