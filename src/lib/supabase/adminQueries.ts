@@ -403,6 +403,47 @@ export interface AppSettings {
   maintenance_message: string | null;
 }
 
+/** One row in the report queue (0054).
+ *
+ *  Carries the profile twice on purpose: as it was when someone complained,
+ *  and as it is now. A difference between them is itself information — either
+ *  the subject tidied up, or somebody already acted. */
+export interface AdminReport {
+  id: string;
+  reason: string;
+  detail: string | null;
+  status: "open" | "reviewed" | "actioned" | "dismissed";
+  created_at: string;
+  reviewed_at: string | null;
+  admin_note: string | null;
+  reporter_id: string | null;
+  reporter_name: string | null;
+  subject_user_id: string;
+  snapshot_name: string | null;
+  snapshot_avatar: string | null;
+  snapshot_bio: string | null;
+  current_name: string | null;
+  current_avatar: string | null;
+  current_bio: string | null;
+  subject_deleted: boolean;
+  /** How often this subject has been reported, and how often this reporter
+   *  reports. A first complaint and a fifth are different situations, and
+   *  reading them one at a time hides that. */
+  reports_about_subject: number;
+  reports_by_reporter: number;
+  reviewed_by_name: string | null;
+}
+
+export const getAdminReports = (includeClosed = false) =>
+  call<AdminReport[]>("admin_reports", { p_include_closed: includeClosed });
+
+export const resolveReport = (reportId: string, status: AdminReport["status"], note?: string) =>
+  call<void>("admin_resolve_report", {
+    p_report_id: reportId,
+    p_status: status,
+    p_note: note?.trim() || null,
+  });
+
 /** The admin session page reads every list on this payload without a guard,
  *  so one missing key is a blank error screen rather than a smaller page —
  *  which is exactly what migration 0049 caused. Default the lists here so a

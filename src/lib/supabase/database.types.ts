@@ -635,6 +635,14 @@ export interface Database {
         Args: { p_session_id: string };
         Returns: string | null; // the event it claimed, or null when it declined — 0052
       };
+      admin_reports: {
+        Args: { p_include_closed?: boolean };
+        Returns: unknown; // jsonb — 0054
+      };
+      admin_resolve_report: {
+        Args: { p_report_id: string; p_status: string; p_note?: string | null };
+        Returns: undefined; // void — 0054
+      };
       block_user: {
         Args: { p_user_id: string };
         Returns: undefined; // void — 0053
