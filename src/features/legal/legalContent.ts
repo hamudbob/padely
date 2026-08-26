@@ -72,6 +72,98 @@ export const LEGAL_UI = {
 const UPDATED: Bi = { en: "13 August 2026", id: "13 Agustus 2026" };
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Account deletion — the public page
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Google Play requires a page anyone can reach WITHOUT the app, explaining how
+ * to delete an account and what happens to the data. That last part is the
+ * point: the deletion itself has worked since migration 0037 and lives in
+ * Settings, but somebody who has already uninstalled has no way to reach it,
+ * and no way to find out what was kept.
+ *
+ * Every claim below is checked against delete_my_account and deleteMyAccount():
+ * the avatar goes first through the storage API, then the RPC erases identity
+ * and ends the session. Match rows survive with the name replaced, because
+ * other people played those matches and their history is the same rows.
+ */
+export const DELETE_ACCOUNT = {
+  title: { en: "Delete your Padelier account", id: "Menghapus akun Padelier Anda" },
+  updated: UPDATED,
+
+  intro: [
+    {
+      en: "You can delete your account yourself, at any time, and it takes effect immediately — there is no waiting period and nobody has to approve it.",
+      id: "Anda dapat menghapus akun sendiri, kapan saja, dan langsung berlaku — tidak ada masa tunggu dan tidak perlu persetujuan siapa pun.",
+    },
+    {
+      en: "This page also exists for people who have already removed the app. If that's you, write to us and we'll do it for you.",
+      id: "Halaman ini juga untuk Anda yang sudah menghapus aplikasinya. Jika demikian, kirim email kepada kami dan kami akan melakukannya untuk Anda.",
+    },
+  ],
+
+  inApp: {
+    title: { en: "If you still have the app", id: "Jika aplikasi masih terpasang" },
+    steps: [
+      { en: "Open Padelier and sign in.", id: "Buka Padelier dan masuk." },
+      { en: "Go to the You tab, then the gear icon for Settings.", id: "Buka tab You, lalu ikon gerigi untuk Pengaturan." },
+      { en: "Scroll to the bottom and tap Delete account.", id: "Gulir ke bawah dan ketuk Hapus akun." },
+      { en: "Confirm. Your identity is erased and you are signed out straight away.", id: "Konfirmasi. Identitas Anda dihapus dan Anda langsung keluar." },
+    ],
+  },
+
+  byEmail: {
+    title: { en: "If you have removed the app", id: "Jika aplikasi sudah dihapus" },
+    body: [
+      {
+        en: "Email us from the address you signed up with and ask us to delete the account. Writing from that address is what tells us it's yours; if you can't, we'll ask you something only the account holder would know rather than delete the wrong one.",
+        id: "Kirim email kepada kami dari alamat yang Anda gunakan saat mendaftar dan minta akun dihapus. Menulis dari alamat itulah yang menunjukkan bahwa akun tersebut milik Anda; jika tidak bisa, kami akan menanyakan sesuatu yang hanya diketahui pemilik akun daripada menghapus akun yang salah.",
+      },
+      {
+        en: "We do it within 7 days and reply when it's done.",
+        id: "Kami memprosesnya dalam 7 hari dan membalas setelah selesai.",
+      },
+    ],
+  },
+
+  erased: {
+    title: { en: "Erased immediately", id: "Dihapus seketika" },
+    items: [
+      { en: "Your email address and password", id: "Alamat email dan kata sandi Anda" },
+      { en: "Your name and profile photo", id: "Nama dan foto profil Anda" },
+      { en: "Your bio, playing side and other profile details", id: "Bio, sisi bermain, dan detail profil lainnya" },
+      { en: "Your rating and rating history", id: "Rating dan riwayat rating Anda" },
+      { en: "Your club memberships and notifications", id: "Keanggotaan klub dan notifikasi Anda" },
+      { en: "Your session, and every round in it, if you were the host", id: "Sesi Anda beserta seluruh rondenya, jika Anda hostnya" },
+    ],
+  },
+
+  kept: {
+    title: { en: "Kept, without your name on it", id: "Tetap disimpan, tanpa nama Anda" },
+    body: [
+      {
+        en: "Matches you played in someone else's session stay, with your name replaced by \"Deleted player\". This is not a loophole: other people played those matches, and their record, rating and history are built from the same rows. Removing them would quietly rewrite somebody else's season.",
+        id: "Pertandingan yang Anda mainkan di sesi orang lain tetap ada, dengan nama Anda diganti menjadi \"Pemain terhapus\". Ini bukan celah: pertandingan itu juga dimainkan orang lain, dan rekor, rating, serta riwayat mereka dibangun dari baris data yang sama. Menghapusnya berarti diam-diam mengubah musim orang lain.",
+      },
+      {
+        en: "Once your name is gone, those rows no longer identify you.",
+        id: "Setelah nama Anda hilang, baris data tersebut tidak lagi mengidentifikasi Anda.",
+      },
+    ],
+  },
+
+  warning: {
+    en: "Deletion cannot be undone. There is no restore, and signing up again with the same email gives you a new, empty account — not your old one.",
+    id: "Penghapusan tidak dapat dibatalkan. Tidak ada pemulihan, dan mendaftar lagi dengan email yang sama akan memberi Anda akun baru yang kosong — bukan akun lama Anda.",
+  },
+
+  ui: {
+    en: { emailCta: "Email us to delete your account", subject: "Delete my Padelier account", back: "Privacy policy" },
+    id: { emailCta: "Email kami untuk menghapus akun", subject: "Hapus akun Padelier saya", back: "Kebijakan Privasi" },
+  },
+} as const;
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Privacy policy
 // ─────────────────────────────────────────────────────────────────────────────
 
