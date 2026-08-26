@@ -449,6 +449,10 @@ export interface Database {
           duration_hours: number | null;
           max_players: number | null;
           cost: string | null;
+          // 0055 — the readable share path. Written once at creation and never
+          // rewritten, so renaming a session can't break a link already in a
+          // group chat.
+          slug: string | null;
         };
         Insert: {
           id?: string;
@@ -634,6 +638,14 @@ export interface Database {
       attach_session_to_event: {
         Args: { p_session_id: string };
         Returns: string | null; // the event it claimed, or null when it declined — 0052
+      };
+      get_public_event_by_ref: {
+        Args: { p_ref: string };
+        Returns: unknown; // jsonb — 0055, slug or uuid
+      };
+      resolve_event_ref: {
+        Args: { p_ref: string };
+        Returns: string | null; // uuid — 0055
       };
       admin_reports: {
         Args: { p_include_closed?: boolean };

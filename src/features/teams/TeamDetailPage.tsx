@@ -14,6 +14,7 @@ import {
   eventCode,
   ClubEvent,
   RsvpResponse,
+  eventPath,
 } from "../../lib/supabase/eventQueries";
 import { useBackNav } from "../../lib/useBackNav";
 import Sheet from "../shell/Sheet";
@@ -677,7 +678,10 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
   }
 
   async function share(ev: ClubEvent) {
-    const url = `${window.location.origin}/e/${ev.id}`;
+    // The readable path when the event has one, the uuid when it doesn't.
+    // eventPath is the single place that decides, so the club card and the
+    // event page can never start handing out two links for the same night.
+    const url = `${window.location.origin}${eventPath(ev)}`;
     const text = `${ev.title}${eventCode(ev) ? ` ${eventCode(ev)}` : ""} · ${formatEventWhen(ev.scheduledAt)}${
       ev.location ? ` @ ${ev.location}` : ""
     }${ev.cost ? ` (${ev.cost})` : ""} — Padelier`;
