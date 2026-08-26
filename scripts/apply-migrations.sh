@@ -99,14 +99,16 @@ fi
 
 cd "$(dirname "$0")/.."
 
-# Pull the project ref out for the confirmation prompt. The two connection
-# styles put it in different places:
-#   direct  postgresql://postgres:pw@db.<ref>.supabase.co:5432/postgres
-#   pooler  postgresql://postgres.<ref>:pw@aws-0-<region>.pooler.supabase.com:5432/...
-HOST="$(printf '%s' "$TARGET_DB_URL" | sed -E 's#^.*@##; s#[:/].*$##')"
-REF="$(printf '%s' "$TARGET_DB_URL" | sed -nE 's#^.*://postgres\.([a-z0-9]+):.*$#\1#p')"
-[[ -z "$REF" ]] && REF="$(printf '%s' "$HOST" | sed -nE 's#^db\.([a-z0-9]+)\.supabase\.co$#\1#p')"
-[[ -z "$REF" ]] && REF="$HOST"
+# Show the connection with the password masked and ask for a plain yes.
+#
+# This used to print a project ref pulled out with a regex and ask you to type
+# it back. Two connection formats put the ref in two different places, the
+# extraction was fragile, and when it failed the prompt asked for a hostname
+# nobody would guess to type — so the confirmation blocked correct attempts
+# while proving nothing. Showing the whole string minus the password is both
+# safer to read and impossible to get wrong: the project ref is right there in
+# it, either in the username or the host.
+SAFE="$(printf '%s' "$TARGET_DB_URL" | sed -E 's#(://[^:/@]+):[^@]*@#\1:******@#')"
 
 echo
 if [[ -n "$FROM_ENV" ]]; then
@@ -114,14 +116,13 @@ if [[ -n "$FROM_ENV" ]]; then
   echo "  To be asked for a different one:  unset TARGET_DB_URL"
   echo
 fi
-echo "  Target host : $HOST"
-echo "  Project ref : $REF"
+echo "  $SAFE"
 echo
-echo "  This applies migrations. There is no undo."
-printf '  Type the project ref to continue: '
+echo "  This applies every migration to that database. There is no undo."
+printf '  Type yes to continue: '
 read -r TYPED
-if [[ "$TYPED" != "$REF" ]]; then
-  echo "  Didn't match. Nothing was run." >&2
+if [[ "$TYPED" != "yes" ]]; then
+  echo "  Stopped. Nothing was run." >&2
   exit 1
 fi
 
