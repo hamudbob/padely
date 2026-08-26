@@ -1,4 +1,5 @@
 import PageHeader from "../shell/PageHeader";
+import { tap } from "../../lib/nativeShell";
 import ErrorNote from "../shell/ErrorNote";
 import { withFallback } from "../../lib/errors";
 import { useEffect, useRef, useState } from "react";
@@ -561,7 +562,7 @@ export default function HostLivePage() {
 
   async function pickNumber(value: number) {
     if (!activeMatch || !pickerSide) return;
-    navigator.vibrate?.(8); // light haptic tap on each number press
+    void tap("light"); // a real Taptic tap on a phone; navigator.vibrate elsewhere
 
     // Fixed-sum formats: one tap on EITHER side is enough — the other side is
     // (total − this score). Tapping Team A sets A; tapping Team B sets B.
@@ -618,7 +619,7 @@ export default function HostLivePage() {
           )
         : prev,
     );
-    navigator.vibrate?.(18); // confirmation buzz
+    void tap("medium"); // the score landed
     closePicker();
 
     // Hand off to the background sync queue (persists to localStorage + uploads

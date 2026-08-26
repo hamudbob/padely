@@ -27,8 +27,12 @@ const config: CapacitorConfig = {
 
   plugins: {
     SplashScreen: {
-      launchShowDuration: 600,
-      backgroundColor: "#0D0D0D", // graphite, matching the icon's ground
+      // The app hides it (see dismissSplash in lib/nativeShell), so autoHide is
+      // off. A fixed duration races the first paint: too short flashes white on
+      // a cold start, too long holds a static logo over an app that is already
+      // usable.
+      launchAutoHide: false,
+      backgroundColor: "#0D0D0D", // graphite, matching the mark's ground
       showSpinner: false,
     },
   },
