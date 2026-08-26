@@ -1,4 +1,5 @@
 import { supabase } from "./client";
+import { isNative, startNativeOAuth } from "../native";
 
 export interface HostCredentials {
   email: string;
@@ -40,6 +41,15 @@ export async function emailHasAccount(email: string): Promise<{ exists: boolean;
  * drops the ?next= we sent it.
  */
 export async function signInWithGoogle(redirectTo: string) {
+  // On a phone this cannot be a navigation. Google rejects OAuth inside an
+  // app's embedded webview, so the native build hands the whole thing to the
+  // system browser and picks the session up from a deep link instead. Same
+  // provider, same Supabase project, different doorway.
+  if (isNative()) {
+    await startNativeOAuth("google");
+    return;
+  }
+
   const { error } = await supabase.auth.signInWithOAuth({
     provider: "google",
     options: { redirectTo, queryParams: { prompt: "select_account" } },

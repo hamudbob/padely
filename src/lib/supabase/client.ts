@@ -17,26 +17,6 @@ export const supabase = createClient<Database>(supabaseUrl, supabaseAnonKey, {
   auth: {
     persistSession: true,
     autoRefreshToken: true,
-    // PKCE rather than the implicit default.
-    //
-    // Implicit hands the access token back in the URL fragment, where it can
-    // leak through history, logs and referrers. PKCE returns a one-time code
-    // that is worthless without a verifier only this client holds.
-    //
-    // It is also the only flow a native app can complete. Google refuses OAuth
-    // inside an app's embedded webview, so sign-in there happens in the system
-    // browser and comes back through a deep link — which means exchanging a
-    // code, not catching a fragment.
-    //
-    // This also changes the shape of confirmation and password-reset links
-    // (?code= rather than #access_token=). detectSessionInUrl handles both, so
-    // no screen changes — but a link already sitting in an inbox when this
-    // deploys was minted under the old flow and will not work. Those expire
-    // within the hour, which is why this is its own commit: it can be
-    // cherry-picked onto main and shipped alone, at a quiet time, rather than
-    // riding along with the iOS release where a broken reset email would be
-    // one suspect among fifty.
-    flowType: "pkce",
   },
   global: {
     // Every request the app makes — PostgREST and GoTrue alike — passes

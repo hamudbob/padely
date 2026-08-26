@@ -18,6 +18,7 @@ import SettingsPage from "./features/settings/SettingsPage";
 import ProfilePage from "./features/profile/ProfilePage";
 import RequireHost from "./features/auth/RequireHost";
 import { useHostSession } from "./lib/supabase/useHostSession";
+import { useDeepLinks } from "./lib/useDeepLinks";
 import WatchPage from "./features/watch/WatchPage";
 import CreateSessionPage from "./features/create-session/CreateSessionPage";
 import HostLivePage from "./features/host-live/HostLivePage";
@@ -79,6 +80,10 @@ function RootRoute() {
 
 export default function App() {
   useRecoveryRedirect();
+  // Everything the OS hands the native app comes through here: the OAuth
+  // return, and later a shared /e/<id> link tapped in a group chat. No-op in a
+  // browser.
+  useDeepLinks();
   return (
     <>
       {/* Above the router so one announcement reaches every screen, including
