@@ -14,10 +14,20 @@
 #   ./scripts/apply-migrations.sh              # every migration, in order
 #   ./scripts/apply-migrations.sh --from 0046  # resume from one
 #
-# The URL comes from Supabase: Project Settings -> Database -> Connection string
-# -> URI. Use the DIRECT connection (port 5432), not the pooler (6543) — the
-# pooler is in transaction mode and some of these migrations create functions
-# across multiple statements.
+# The URL comes from the Supabase dashboard: the CONNECT button at the top of
+# the page. Three are offered; the port is what tells them apart:
+#
+#   Direct connection      5432  <- first choice
+#   Session pooler         5432  <- use this if Direct can't connect
+#   Transaction pooler     6543  <- never, for migrations
+#
+# Direct is IPv6-only. Plenty of home and office networks are IPv4-only, and on
+# those it fails to resolve at all — that is a network fact, not a broken
+# password. The Session pooler is IPv4 on every tier and behaves the same way
+# for this purpose, so it is the fallback.
+#
+# Not the Transaction pooler. It is transaction-mode, and these migrations
+# create functions across statements that must stay on one connection.
 #
 # SAFETY. This asks you to type the project reference from the URL before it
 # runs anything. That sounds fussy until the day two connection strings are open
