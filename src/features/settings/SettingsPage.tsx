@@ -219,7 +219,11 @@ export default function SettingsPage() {
     setDelErr(null);
     try {
       await deleteMyAccount();
-      navigate("/", { replace: true });
+      // Not "/" — the signed-out home says nothing about what just happened,
+      // and being dropped there is indistinguishable from a bug that logged you
+      // out. /delete-account?done=1 confirms it worked and answers the question
+      // the confirmation raises: what was erased, and what stayed.
+      navigate("/delete-account?done=1", { replace: true });
     } catch (err) {
       setDelErr(
         err instanceof Error

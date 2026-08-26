@@ -157,6 +157,16 @@ export const DELETE_ACCOUNT = {
     id: "Penghapusan tidak dapat dibatalkan. Tidak ada pemulihan, dan mendaftar lagi dengan email yang sama akan memberi Anda akun baru yang kosong — bukan akun lama Anda.",
   },
 
+  /** Shown when the app lands here straight after a successful deletion. */
+  done: {
+    title: { en: "Your account has been deleted", id: "Akun Anda telah dihapus" },
+    body: {
+      en: "That's done, and it took effect immediately. Here's exactly what was erased and what stayed behind.",
+      id: "Selesai, dan langsung berlaku. Berikut rincian apa yang dihapus dan apa yang tetap ada.",
+    },
+    home: { en: "Back to Padelier", id: "Kembali ke Padelier" },
+  },
+
   ui: {
     en: { emailCta: "Email us to delete your account", subject: "Delete my Padelier account", back: "Privacy policy" },
     id: { emailCta: "Email kami untuk menghapus akun", subject: "Hapus akun Padelier saya", back: "Kebijakan Privasi" },
