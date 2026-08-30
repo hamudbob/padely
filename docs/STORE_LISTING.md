@@ -148,9 +148,14 @@ and the route, not who was on it.
 Paste this into "Notes" at submission. It answers the two things a reviewer
 will ask before they ask them.
 
+The build a reviewer downloads points at PRODUCTION, so the demo account has to
+exist there — a padelier-v2 account will not let them in. Deciding which account
+that is, and seeding it, is the last thing to do before submitting.
+See docs/SCREENSHOTS.md, section 6.
+
     DEMO ACCOUNT
-    Email: <a real account on production>
-    Password: <its password>
+    Email: <fill in before submitting>
+    Password: <fill in before submitting>
     This account hosts a club with a scheduled session and past results,
     so every screen has content in it.
 
@@ -186,7 +191,9 @@ the argument has to be made by then.
 1. **A live session mid-round** — two courts, real names, a score being
    entered. The product doing its job, first.
 2. **The leaderboard** — ordered, with a rating column.
-3. **Format picker** — the seven formats. Breadth, in one glance.
+3. **Format picker** — the format list. Breadth, in one glance. Note the
+   picker itself offers six; Fixed Partner is started from the Formats page,
+   so a caption claiming seven would not match the image.
 4. **A club's scheduled session** — the RSVP card, "8/12 in", names visible.
 5. **A player profile** — record, rating trend, partners and rivals.
 6. **Final summary** — the podium at the end of a night.
@@ -199,7 +206,7 @@ not left to the App Store's own caption field:
 
     1. Every round, worked out for you
     2. The board sorts itself
-    3. Seven formats, one app
+    3. Pick a format, it does the rest
     4. See who's in before you book
     5. A rating that means something
     6. Somebody has to win
@@ -207,6 +214,9 @@ not left to the App Store's own caption field:
 **Take them on the simulator against padelier-v2**, with invented but plausible
 names. Never production: real members' names and faces in a public store
 listing is a privacy problem you cannot take back.
+
+Step by step, including the seed that populates the club and the simulator
+commands: **docs/SCREENSHOTS.md**.
 
 ---
 

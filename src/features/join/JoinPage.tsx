@@ -218,7 +218,7 @@ export default function JoinPage() {
   }
 
   return (
-    <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8 anim-fade">
+    <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8 safe-top safe-bottom anim-fade">
       {/* Back + wordmark header */}
       <div className="flex items-center gap-3 mb-6">
         <button

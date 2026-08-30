@@ -17,7 +17,8 @@ import {
   eventPath,
 } from "../../lib/supabase/eventQueries";
 import { useBackNav } from "../../lib/useBackNav";
-import Sheet from "../shell/Sheet";
+import { BottomSheet } from "../shell/Sheet";
+import { SkeletonScreen, SkeletonHero, SkeletonStats, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
 
 const ROLE_LABEL: Record<TeamRole, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -224,7 +225,18 @@ export default function TeamDetailPage() {
     </div>
   );
 
-  if (loading || !membersLoaded) return <div className={shell}>{backBar}<p className="text-[13px] text-warm-gray mt-16 text-center">Loading…</p></div>;
+  if (loading || !membersLoaded)
+    return (
+      <div className={shell}>
+        {backBar}
+        <SkeletonScreen label="Loading this club">
+          <SkeletonHero square className="mt-2 mb-6" />
+          <SkeletonStats className="mb-6" />
+          <SkeletonBlock h={216} className="mb-6" />
+          <SkeletonRows n={2} />
+        </SkeletonScreen>
+      </div>
+    );
   if (notFound || !team) return <div className={shell}>{backBar}<p className="text-[13px] text-warm-gray mt-16 text-center">This team isn't available.</p></div>;
 
   // ---- Non-member: quiet public card + request to join --------------------
@@ -506,13 +518,12 @@ function InviteSheet(props: {
     // Portalled to <body>: nested inside the screen this sheet lost to the tab
     // bar, because the screen root's filling `anim-fade` makes a stacking
     // context. See features/shell/Sheet.tsx.
-    <Sheet>
-      <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true">
-      <div className="absolute inset-0 bg-graphite/45 anim-fade" onClick={props.onClose} />
-      <div className="relative w-full max-w-sm bg-ivory rounded-t-[26px] px-5 pt-2.5 pb-7 anim-rise shadow-[0_-8px_40px_rgba(13,13,13,0.25)]">
-        <div className="w-9 h-[5px] rounded-full bg-stone/70 mx-auto mb-3.5" />
-        <h4 className="font-serif text-[20px] font-semibold text-graphite text-center">Invite to {teamName}</h4>
-        <p className="text-[12px] text-warm-gray text-center mt-1 mb-4">Anyone with the code or link can ask to join.</p>
+    <BottomSheet
+      onClose={props.onClose}
+      scrim="bg-graphite/45"
+      title={<>Invite to {teamName}</>}
+      subtitle="Anyone with the code or link can ask to join."
+    >
 
         <div className="rounded-2xl bg-surface px-4 py-3.5 text-center shadow-[0_1px_2px_rgba(13,13,13,0.04)] mb-3.5">
           <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-warm-gray">Team code</p>
@@ -546,9 +557,7 @@ function InviteSheet(props: {
         )}
 
         <button onClick={props.onClose} className="w-full text-[14px] font-semibold text-warm-gray py-3 mt-1.5 active:opacity-70">Done</button>
-      </div>
-      </div>
-    </Sheet>
+    </BottomSheet>
   );
 }
 

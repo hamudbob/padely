@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { getClubChampions, ClubChampions } from "../../lib/supabase/championsQueries";
 import { getTeam } from "../../lib/supabase/teamQueries";
 import { useBackNav } from "../../lib/useBackNav";
+import { SkeletonScreen, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
 
 function shortDate(iso: string): string {
   const d = new Date(iso);
@@ -49,7 +50,16 @@ export default function ChampionsPage() {
     </div>
   );
 
-  if (loading) return <div className={shell}>{topBar}<p className="text-[13px] text-warm-gray mt-16 text-center">Loading…</p></div>;
+  if (loading)
+    return (
+      <div className={shell}>
+        {topBar}
+        <SkeletonScreen label="Loading the champions">
+          <SkeletonBlock h={184} className="mb-6" />
+          <SkeletonRows n={5} avatar />
+        </SkeletonScreen>
+      </div>
+    );
   if (notAllowed || !data) return <div className={shell}>{topBar}<p className="text-[13px] text-warm-gray mt-16 text-center">This hall isn't available.</p></div>;
 
   const { titles, recent } = data;

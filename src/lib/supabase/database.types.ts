@@ -472,6 +472,28 @@ export interface Database {
         Update: Partial<Database["public"]["Tables"]["club_events"]["Row"]>;
         Relationships: [];
       };
+      club_event_guests: {
+        Row: {
+          id: string;
+          event_id: string;
+          display_name: string;
+          gender: "M" | "F";
+          invited_by: string | null;
+          response: "in" | "waitlist";
+          created_at: string;
+        };
+        Insert: {
+          id?: string;
+          event_id: string;
+          display_name: string;
+          gender?: "M" | "F";
+          invited_by?: string | null;
+          response?: "in" | "waitlist";
+          created_at?: string;
+        };
+        Update: Partial<Database["public"]["Tables"]["club_event_guests"]["Insert"]>;
+        Relationships: [];
+      };
       club_event_rsvps: {
         Row: {
           event_id: string;
@@ -670,6 +692,18 @@ export interface Database {
       report_user: {
         Args: { p_user_id: string; p_reason: string; p_detail?: string | null };
         Returns: unknown; // jsonb — 0053
+      };
+      add_event_guest: {
+        Args: { p_event_id: string; p_name: string; p_gender?: string };
+        Returns: unknown; // jsonb — the guest, and whether they landed on the waiting list
+      };
+      remove_event_guest: {
+        Args: { p_guest_id: string };
+        Returns: unknown; // jsonb
+      };
+      event_in_count: {
+        Args: { p_event_id: string };
+        Returns: number;
       };
       set_event_rsvp: {
         Args: { p_event_id: string; p_response: string };

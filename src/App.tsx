@@ -5,6 +5,7 @@ import LoginPage from "./features/auth/LoginPage";
 import ResetPasswordPage from "./features/auth/ResetPasswordPage";
 import OnboardingPage from "./features/auth/OnboardingPage";
 import AppShell from "./features/shell/AppShell";
+import LaunchVeil from "./features/shell/LaunchVeil";
 import PlayPage from "./features/play/PlayPage";
 import SubShell from "./features/shell/SubShell";
 import AboutPage from "./features/about/AboutPage";
@@ -70,7 +71,7 @@ function RootRoute() {
   const { user, loading } = useHostSession();
   if (loading) {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8 safe-top">
         <p className="text-sm text-warm-gray">One moment…</p>
       </div>
     );
@@ -86,6 +87,9 @@ export default function App() {
   useDeepLinks();
   return (
     <>
+      {/* First thing painted, and the only thing visible until it leaves.
+          Nothing at all in a browser. */}
+      <LaunchVeil />
       {/* Above the router so one announcement reaches every screen, including
           the signed-out ones. Renders nothing at all when there's no message,
           which is its normal state. */}

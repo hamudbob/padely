@@ -5,7 +5,7 @@ import { withFallback } from "../../lib/errors";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { getHostLiveSnapshot, HostLiveSnapshot } from "../../lib/supabase/sessionQueries";
-import { generateNextRound, regenerateCurrentRound, deleteCurrentRound, swapRoundPlayers } from "../../lib/supabase/roundActions";
+import { generateNextRound, regenerateCurrentRound, deleteCurrentRound, swapRoundPlayers, previewRedrawRemaining, redrawRemainingRounds } from "../../lib/supabase/roundActions";
 import { endSession } from "../../lib/supabase/sessionActions";
 import { getSessionStandings, SessionStandings } from "../../lib/supabase/standingsQueries";
 import { getRoundHistory, RoundHistoryEntry } from "../../lib/supabase/roundHistoryQueries";
@@ -26,6 +26,7 @@ import {
 } from "../../lib/supabase/scoreSyncQueue";
 import { supabase } from "../../lib/supabase/client";
 import { notifyLiveUpdate } from "../../lib/supabase/liveChannel";
+import { SkeletonScreen, SkeletonLine, SkeletonCourts } from "../shell/Skeleton";
 
 /**
  * Overlays any locally-queued (not-yet-synced) scores on top of the server's
@@ -183,6 +184,11 @@ export default function HostLivePage() {
   const [showManage, setShowManage] = useState(false);
   const [showMenu, setShowMenu] = useState(false); // header overflow (⋯) dropdown → Manage / End
   const [manageError, setManageError] = useState<unknown>(null);
+  // Which unplayed rounds a redraw would replace — loaded when the Manage
+  // panel opens so the button can name them before it's tapped.
+  const [redrawPreview, setRedrawPreview] = useState<{ fromSequence: number; toSequence: number; rounds: number } | null>(null);
+  const [redrawing, setRedrawing] = useState(false);
+  const [redrawNote, setRedrawNote] = useState<string | null>(null);
   const [manageSaving, setManageSaving] = useState(false);
   const [newPlayerName, setNewPlayerName] = useState("");
   const [newPlayerGender, setNewPlayerGender] = useState<"M" | "F">("M");
@@ -302,6 +308,9 @@ export default function HostLivePage() {
   // Refresh the pending self-service join list whenever the Manage panel opens.
   useEffect(() => {
     if (showManage) loadJoinRequests();
+    if (showManage && sessionId) {
+      previewRedrawRemaining(sessionId).then(setRedrawPreview).catch(() => setRedrawPreview(null));
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showManage, sessionId]);
 
@@ -350,15 +359,20 @@ export default function HostLivePage() {
 
   if (error) {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-4 py-8">
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-4 py-8 safe-top">
         <ErrorNote error={error} where="HostLivePage.load" />
       </div>
     );
   }
   if (!snapshot) {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-4 py-8">
-        <p className="text-sm text-warm-gray">Loading…</p>
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-4 py-8 safe-top">
+        <SkeletonScreen label="Loading this session">
+          <SkeletonLine w="62%" h={26} />
+          <div className="mt-2 mb-5"><SkeletonLine w="44%" h={11} /></div>
+          <div className="skeleton h-[46px] rounded-full mb-6" />
+          <SkeletonCourts n={3} />
+        </SkeletonScreen>
       </div>
     );
   }
@@ -418,11 +432,25 @@ export default function HostLivePage() {
   const safeIndex = roundHistory ? Math.min(viewedIndex, Math.max(0, roundHistory.length - 1)) : 0;
   const viewedRound = roundHistory?.[safeIndex] ?? null;
   const isViewingCurrent = safeIndex === 0;
-  // Scoring/Next Round only ever apply to the live round of a still-live
-  // Mexicano session — once ended, every round (including the last one) is
-  // read-only. Americano has no single "current" round to restrict to, so
-  // any round is editable until the session ends.
-  const canEdit = fullyPreGenerated ? !sessionEnded : isViewingCurrent && !sessionEnded;
+  // Any round of a live session can be corrected, in every format.
+  //
+  // This used to lock Mexicano history to the current round, on the reasoning
+  // that a Mexicano round is drawn from the standings and so an old score
+  // "belongs" to the pairings that came after it. That reasoning is wrong in
+  // practice. A wrong score is wrong; refusing to fix it doesn't restore the
+  // pairings that would have happened, it just leaves the board lying for the
+  // rest of the night — and the host is standing on a court with people
+  // waiting, which is the worst possible moment to be told no.
+  //
+  // Editing an old score does NOT regenerate anything. Rounds are stored rows;
+  // they stay exactly as they were played. The standings recompute from the
+  // match scores, and the NEXT round the host asks for is drawn from the
+  // corrected board. That is the behaviour Americano has always had, and there
+  // was never a good reason for Mexicano to differ.
+  //
+  // An ended session stays locked in both families — that's where results and
+  // ratings have already been applied downstream.
+  const canEdit = !sessionEnded;
   const canGoOlder = !!roundHistory && safeIndex < roundHistory.length - 1;
   const canGoNewer = safeIndex > 0;
 
@@ -480,9 +508,10 @@ export default function HostLivePage() {
   // used to gate on. Decides whether the round-nav header shows the outline
   // "Round N ›" pill (fires the SAME handleNextRound) vs. a history-forward
   // chip. Pure expression over existing values — no new state/handler/fetch.
-  const advanceAvailable = fullyPreGenerated
-    ? canEdit && isViewingCurrent && allMatchesFinal
-    : canEdit && allMatchesFinal;
+  // Both branches check isViewingCurrent now. The Mexicano branch used to lean
+  // on canEdit implying it — with history editable, leaning on it would offer
+  // "next round" while the host is browsing round 2 of 8.
+  const advanceAvailable = canEdit && isViewingCurrent && allMatchesFinal;
 
   // Round actions (Refresh / Randomize / Delete) only apply to the LIVE round
   // of a round-by-round (Mexicano-family) session, and only once there's a
@@ -545,7 +574,7 @@ export default function HostLivePage() {
   }
 
   function openPicker(matchId: string, side: "A" | "B") {
-    if (!canEdit) return; // history is read-only, and so is an ended session's live round
+    if (!canEdit) return; // an ended session is read-only; a live one is editable in any round
     // Fixed-sum formats now accept a tap on EITHER side — the other auto-fills
     // as (total − this score), so the host can enter whichever number they saw.
     setPickerMatchId(matchId);
@@ -832,6 +861,31 @@ export default function HostLivePage() {
     }
   }
 
+  async function handleRedraw() {
+    if (!sessionId || !redrawPreview) return;
+    const { fromSequence: from, toSequence: to } = redrawPreview;
+    const which = from === to ? `round ${from}` : `rounds ${from}–${to}`;
+    if (!confirm(`Redraw ${which} from the players still in? Rounds already played are untouched.`)) return;
+    setRedrawing(true);
+    setManageError(null);
+    setRedrawNote(null);
+    try {
+      const result = await redrawRemainingRounds(sessionId);
+      setRedrawNote(
+        `${result.rounds === 1 ? "Round" : "Rounds"} ${
+          result.fromSequence === result.toSequence ? result.fromSequence : `${result.fromSequence}–${result.toSequence}`
+        } redrawn for ${result.players} players.`,
+      );
+      load();
+      loadRoundHistory();
+      setRedrawPreview(await previewRedrawRemaining(sessionId));
+    } catch (err) {
+      setManageError(withFallback(err, "Could not redraw the remaining rounds."));
+    } finally {
+      setRedrawing(false);
+    }
+  }
+
   async function handleRestorePlayer(playerId: string) {
     setManageError(null);
     try {
@@ -1034,7 +1088,7 @@ export default function HostLivePage() {
                         ? `Round ${viewedRound.sequence} of ${roundHistory?.length ?? viewedRound.sequence}${
                             sessionEnded ? " · session ended" : ""
                           }`
-                        : canEdit
+                        : isViewingCurrent && !sessionEnded
                           ? "Current round"
                           : isViewingCurrent && sessionEnded
                             ? "Final round · session ended"
@@ -1189,7 +1243,7 @@ export default function HostLivePage() {
                 </div>
               )}
 
-              {canEdit && !allMatchesFinal && (
+              {canEdit && isViewingCurrent && !allMatchesFinal && (
                 <p className="text-[10px] text-warm-gray text-center mt-3">
                   Finish scoring every match this round to unlock the next round.
                 </p>
@@ -1646,10 +1700,45 @@ export default function HostLivePage() {
               })}
             </div>
 
+            {/* Pre-generated formats only. Americano and its relatives draw the
+                whole schedule at the start, so a player who leaves is still
+                written into every future round and nothing will ever take them
+                out on its own. Mexicano needs no button — it filters the roster
+                as it draws each round. */}
+            {fullyPreGenerated && !sessionEnded && (
+              <div className="mt-4 rounded-2xl border border-line bg-surface-2 px-3.5 py-3">
+                <p className="text-[12px] font-semibold text-ink">Rounds not yet played</p>
+                <p className="text-[11px] text-warm-gray mt-1 leading-snug">
+                  {redrawPreview
+                    ? `The whole schedule was drawn at the start, so ${
+                        redrawPreview.fromSequence === redrawPreview.toSequence
+                          ? `round ${redrawPreview.fromSequence} still lists`
+                          : `rounds ${redrawPreview.fromSequence}–${redrawPreview.toSequence} still list`
+                      } anyone who has left. Redraw them from the players still in — everything already played stays exactly as it is.`
+                    : "Every round has been played or scored. There's nothing left to redraw."}
+                </p>
+                <button
+                  onClick={handleRedraw}
+                  disabled={!redrawPreview || redrawing}
+                  className="w-full mt-2.5 rounded-full border border-graphite text-graphite bg-surface text-[12.5px] font-semibold py-2.5 active:scale-[0.99] transition-transform disabled:opacity-40"
+                >
+                  {redrawing
+                    ? "Redrawing…"
+                    : redrawPreview
+                      ? redrawPreview.fromSequence === redrawPreview.toSequence
+                        ? `Redraw round ${redrawPreview.fromSequence}`
+                        : `Redraw rounds ${redrawPreview.fromSequence}–${redrawPreview.toSequence}`
+                      : "Nothing to redraw"}
+                </button>
+                {redrawNote && <p className="text-[11px] text-win font-semibold mt-2">{redrawNote}</p>}
+              </div>
+            )}
+
             <p className="text-[11px] text-warm-gray mt-4">
-              Player changes take effect starting with the next generated round — scores and rounds already played stay
-              exactly as they are. Anyone marked "not here yet" is left out of the draw until you say they've arrived,
-              and keeps their place and their points meanwhile.
+              Scores and rounds already played always stay exactly as they are. In Mexicano, player changes take effect
+              from the next round you generate; in Americano the schedule was drawn up front, so use Redraw above to
+              apply them to the rounds still to come. Anyone marked "not here yet" is left out of the draw until you say
+              they've arrived, and keeps their place and their points meanwhile.
             </p>
           </div>
         </div>

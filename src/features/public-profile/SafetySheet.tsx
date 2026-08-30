@@ -1,5 +1,5 @@
 import { useState } from "react";
-import Sheet from "../shell/Sheet";
+import { BottomSheet } from "../shell/Sheet";
 import ErrorNote from "../shell/ErrorNote";
 import { withFallback } from "../../lib/errors";
 import { blockUser, reportUser, REPORT_REASONS, ReportReason } from "../../lib/supabase/safetyQueries";
@@ -64,17 +64,13 @@ export default function SafetySheet({
     }
   }
 
-  const panel =
-    "w-full max-w-sm rounded-3xl bg-ivory px-5 pt-5 pb-6 shadow-[0_8px_40px_rgba(13,13,13,0.28)]";
   const primary =
     "w-full rounded-full px-4 py-3.5 font-semibold text-[14px] text-ivory bg-graphite active:scale-[0.99] transition-transform disabled:opacity-40";
   const quiet =
     "w-full rounded-full px-4 py-3.5 font-semibold text-[14px] border border-line text-ink-2 bg-surface active:scale-[0.99] transition-transform disabled:opacity-40";
 
   return (
-    <Sheet>
-      <div className="fixed inset-0 z-[60] flex items-end justify-center bg-graphite/55 px-4 pb-4 anim-fade" role="dialog" aria-modal="true">
-        <div className={panel}>
+    <BottomSheet onClose={onClose} variant="card" panelClassName="pt-2.5">
           {sent ? (
             <>
               <div className="w-12 h-12 rounded-2xl bg-win-soft border border-win/25 flex items-center justify-center mb-4">
@@ -175,8 +171,6 @@ export default function SafetySheet({
               </div>
             </>
           )}
-        </div>
-      </div>
-    </Sheet>
+    </BottomSheet>
   );
 }
