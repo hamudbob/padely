@@ -69,7 +69,7 @@ export default function RequireHost({ children }: { children: ReactNode }) {
 
   if (loading) {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8 safe-top">
         <p className="text-sm text-warm-gray">Checking your session…</p>
       </div>
     );
@@ -77,7 +77,7 @@ export default function RequireHost({ children }: { children: ReactNode }) {
 
   if (!user) {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8 safe-top">
         {topBar}
         <h1 className="font-serif text-[27px] font-medium tracking-tight text-graphite leading-[1.1] mb-2">You need to log in first</h1>
         <p className="text-[13.5px] text-ink-2 mb-4 leading-relaxed">
@@ -98,7 +98,7 @@ export default function RequireHost({ children }: { children: ReactNode }) {
   // account never sees a flash of the app before being sent to /welcome.
   if (needsOnboarding === null) {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8 safe-top">
         <p className="text-sm text-warm-gray">Checking your session…</p>
       </div>
     );

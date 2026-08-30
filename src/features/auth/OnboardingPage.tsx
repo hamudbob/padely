@@ -122,7 +122,7 @@ export default function OnboardingPage() {
 
   if (sessionLoading) {
     return (
-      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8 safe-top">
         <p className="text-[13px] text-warm-gray mt-16 text-center">One moment…</p>
       </div>
     );

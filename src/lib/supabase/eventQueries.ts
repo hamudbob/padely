@@ -106,8 +106,11 @@ export async function createEvent(clubId: string, input: NewEvent): Promise<stri
 }
 
 export interface EventGoing {
-  userId: string;
+  /** Null for a guest — they have no account to link the player row to. */
+  userId: string | null;
   displayName: string;
+  /** Only set for guests. A member's gender comes from their profile. */
+  gender?: "M" | "F";
 }
 
 /** Members who RSVP'd "in" to an event — used to pre-seed the roster when the
@@ -120,9 +123,49 @@ export async function getEventGoing(eventId: string): Promise<EventGoing[]> {
     .eq("response", "in");
   if (error) throw error;
   const ids = (data ?? []).map((r) => r.user_id);
-  if (ids.length === 0) return [];
+
+  // Guests come too. Leaving them out here is the failure mode that would make
+  // the whole feature pointless: the RSVP page would say 12 going, and the
+  // session started from it would seed 10 players.
+  const { data: guestRows, error: guestError } = await supabase
+    .from("club_event_guests")
+    .select("id, display_name, gender")
+    .eq("event_id", eventId)
+    .eq("response", "in")
+    .order("created_at", { ascending: true });
+  if (guestError) throw guestError;
+  const guests: EventGoing[] = (guestRows ?? []).map((g) => ({
+    userId: null,
+    displayName: g.display_name,
+    gender: (g.gender as "M" | "F") ?? "M",
+  }));
+
+  if (ids.length === 0) return guests;
   const profiles = await getProfiles(ids);
-  return ids.map((id) => ({ userId: id, displayName: profiles.get(id)?.displayName ?? "Player" }));
+  return [...ids.map((id) => ({ userId: id, displayName: profiles.get(id)?.displayName ?? "Player" })), ...guests];
+}
+
+/** Bring someone who isn't on the app. Counts toward the cap; joins the queue
+ *  when the night is already full. */
+export async function addEventGuest(
+  eventId: string,
+  name: string,
+  gender: "M" | "F",
+): Promise<{ id: string; name: string; response: "in" | "waitlist"; waitlisted: boolean }> {
+  const { data, error } = await supabase.rpc("add_event_guest", {
+    p_event_id: eventId,
+    p_name: name,
+    p_gender: gender,
+  });
+  if (error) throw error;
+  return data as { id: string; name: string; response: "in" | "waitlist"; waitlisted: boolean };
+}
+
+/** Whoever brought them, or a club admin. Frees the place and promotes the
+ *  next person waiting. */
+export async function removeEventGuest(guestId: string): Promise<void> {
+  const { error } = await supabase.rpc("remove_event_guest", { p_guest_id: guestId });
+  if (error) throw error;
 }
 
 /** Link a scheduled event to the session started from it — the Start button on
@@ -252,10 +295,38 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
 
 /** An attendee shown on the public event page — enough to render an avatar row
  * and link to their public profile (/u/<id>). */
+/** A row in going/waitlist. The guest fields are absent for members. */
+interface GuestAwareRow {
+  id: string;
+  name: string | null;
+  avatar: string | null;
+  is_guest?: boolean;
+  guest_id?: string | null;
+  invited_by?: string | null;
+}
+
 export interface EventAttendee {
+  /** For a guest this is "guest:<uuid>" — deliberately not a bare uuid, so it
+   *  can never be mistaken for a user id and passed to something expecting an
+   *  account. Use `guestId` when you mean the guest row. */
   userId: string;
   displayName: string;
   avatarUrl: string | null;
+  /** Someone a member is bringing who has no account (0056). */
+  isGuest?: boolean;
+  guestId?: string | null;
+  /** The member who brought them — who may remove them again. */
+  invitedBy?: string | null;
+}
+
+/** A guest as their own record, with the gender a Mix draw needs. */
+export interface EventGuest {
+  id: string;
+  name: string;
+  gender: "M" | "F";
+  response: "in" | "waitlist";
+  invitedBy: string | null;
+  invitedByName: string | null;
 }
 
 export interface PublicEvent {
@@ -281,6 +352,9 @@ export interface PublicEvent {
   out: EventAttendee[];
   /** In the order they asked — this one is a queue, so the order IS the point. */
   waitlist: EventAttendee[];
+  /** Everyone's guests, in and waiting, with the gender the create wizard
+   *  needs to seed a Mix session. */
+  guests: EventGuest[];
   myResponse: RsvpResponse | null;
   isMember: boolean;
   /** Club owner or admin: can promote and remove people. */
@@ -322,18 +396,28 @@ export async function getPublicEvent(ref: string): Promise<PublicEvent | null> {
     cost: string | null;
     counts: { in: number; maybe: number; out: number; waitlist: number };
     going_names: string[] | null;
-    going: { id: string; name: string | null; avatar: string | null }[] | null;
+    going: GuestAwareRow[] | null;
     maybe: { id: string; name: string | null; avatar: string | null }[] | null;
     out: { id: string; name: string | null; avatar: string | null }[] | null;
-    waitlist: { id: string; name: string | null; avatar: string | null }[] | null;
+    waitlist: GuestAwareRow[] | null;
+    guests:
+      | { id: string; name: string; gender: "M" | "F"; response: "in" | "waitlist"; invited_by: string | null; invited_by_name: string | null }[]
+      | null;
     my_response: RsvpResponse | null;
     is_member: boolean;
     is_admin: boolean;
     session: { id: string; status: string; public_token: string | null; join_code: string | null } | null;
     slug?: string | null;
   };
-  const mapPeople = (rows: { id: string; name: string | null; avatar: string | null }[] | null): EventAttendee[] =>
-    (rows ?? []).map((r) => ({ userId: r.id, displayName: r.name ?? "Player", avatarUrl: r.avatar }));
+  const mapPeople = (rows: GuestAwareRow[] | null): EventAttendee[] =>
+    (rows ?? []).map((r) => ({
+      userId: r.id,
+      displayName: r.name ?? "Player",
+      avatarUrl: r.avatar,
+      isGuest: !!r.is_guest,
+      guestId: r.guest_id ?? null,
+      invitedBy: r.invited_by ?? null,
+    }));
   return {
     id: d.id,
     clubId: d.club_id,
@@ -353,6 +437,14 @@ export async function getPublicEvent(ref: string): Promise<PublicEvent | null> {
     maybe: mapPeople(d.maybe),
     out: mapPeople(d.out),
     waitlist: mapPeople(d.waitlist),
+    guests: (d.guests ?? []).map((g) => ({
+      id: g.id,
+      name: g.name,
+      gender: g.gender,
+      response: g.response,
+      invitedBy: g.invited_by,
+      invitedByName: g.invited_by_name,
+    })),
     myResponse: d.my_response,
     isMember: d.is_member,
     isAdmin: !!d.is_admin,

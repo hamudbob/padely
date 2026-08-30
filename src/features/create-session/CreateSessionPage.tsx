@@ -266,7 +266,10 @@ export default function CreateSessionPage() {
           const existing = new Set(prev.map((p) => p.linkedUserId).filter(Boolean));
           const add: DraftPlayer[] = going
             .filter((g) => !existing.has(g.userId))
-            .map((g) => ({ tempId: nextTempId("p"), name: g.displayName, gender: "M", linkedUserId: g.userId }));
+            // Guests carry the gender whoever brought them chose; members don't
+            // have one on their profile, so they still default to M and the
+            // host toggles it in the lobby as before.
+            .map((g) => ({ tempId: nextTempId("p"), name: g.displayName, gender: g.gender ?? "M", linkedUserId: g.userId }));
           return [...prev, ...add];
         });
       })
@@ -811,7 +814,7 @@ export default function CreateSessionPage() {
   }
 
   return (
-    <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8">
+    <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8 safe-top safe-bottom">
       <PageHeader
         className="mb-4"
         onBack={() => (step > 0 ? setStep((s) => s - 1) : navigate(-1))}

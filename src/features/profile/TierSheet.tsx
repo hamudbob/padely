@@ -1,4 +1,4 @@
-import Sheet from "../shell/Sheet";
+import { BottomSheet } from "../shell/Sheet";
 import { TIERS, tierFor } from "./playerStats";
 
 /**
@@ -27,15 +27,11 @@ export default function TierSheet({
   const mine = tierFor(rating, provisional);
 
   return (
-    <Sheet>
-      <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true">
-        <div className="absolute inset-0 bg-graphite/55 anim-fade" onClick={onClose} />
-        <div className="relative w-full max-w-sm bg-ivory rounded-t-[26px] px-5 pt-2.5 pb-7 anim-rise shadow-[0_-8px_40px_rgba(13,13,13,0.3)] max-h-[92vh] overflow-y-auto">
-          <div className="w-9 h-[5px] rounded-full bg-stone/70 mx-auto mb-3.5" />
-          <h4 className="font-serif text-[20px] font-semibold text-graphite text-center">The tiers</h4>
-          <p className="text-[12px] text-warm-gray text-center mt-1 mb-4">
-            Your tier is just a name for your rating. Nothing is calculated from it.
-          </p>
+    <BottomSheet
+      onClose={onClose}
+      title="The tiers"
+      subtitle="Your tier is just a name for your rating. Nothing is calculated from it."
+    >
 
           <div className="rounded-2xl bg-surface overflow-hidden">
             {[...TIERS].reverse().map((tier) => {
@@ -83,8 +79,6 @@ export default function TierSheet({
           >
             Done
           </button>
-        </div>
-      </div>
-    </Sheet>
+    </BottomSheet>
   );
 }

@@ -8,6 +8,7 @@ import { RatingStrip, RecordCard, TrendCard, SectionHeading, memberSince } from 
 import AvatarLightbox from "../shell/AvatarLightbox";
 import SafetySheet from "./SafetySheet";
 import { unblockUser } from "../../lib/supabase/safetyQueries";
+import { SkeletonScreen, SkeletonHero, SkeletonStats, SkeletonBlock } from "../shell/Skeleton";
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -119,7 +120,18 @@ export default function PublicProfilePage() {
     </div>
   );
 
-  if (loading) return <div className={shell}>{bar}<p className="text-[13px] text-warm-gray mt-16 text-center">Loading…</p></div>;
+  if (loading)
+    return (
+      <div className={shell}>
+        {bar}
+        <SkeletonScreen label="Loading this player">
+          <SkeletonHero className="mt-4 mb-7" />
+          <SkeletonStats className="mb-6" />
+          <SkeletonBlock h={150} className="mb-5" />
+          <SkeletonBlock h={140} />
+        </SkeletonScreen>
+      </div>
+    );
   if (notFound || !profile) return <div className={shell}>{bar}<p className="text-[13px] text-warm-gray mt-16 text-center">This player isn't available.</p></div>;
 
   const lastDelta = profile.ratingTrend.length > 0 ? profile.ratingTrend[profile.ratingTrend.length - 1].delta : 0;

@@ -68,7 +68,17 @@ export async function removePlayer(playerId: string): Promise<void> {
   if (error) throw error;
 }
 
-/** Excludes a player from every future round (already-played rounds/scores are untouched). */
+/**
+ * Takes a player out of the draw. Already-played rounds and scores are untouched.
+ *
+ * WHAT "FUTURE ROUND" MEANS DEPENDS ON THE FORMAT, and this used to claim more
+ * than it delivered. Mexicano and its relatives draw each round when asked and
+ * filter on status = 'active', so leaving takes effect on its own. Americano
+ * and the other pre-generated formats laid the entire schedule out at session
+ * start — those rounds already exist with this player written into them, and
+ * nothing here removes them. The host redraws the unplayed tail explicitly, via
+ * redrawRemainingRounds (Manage → Rounds not yet played).
+ */
 export async function markPlayerLeft(playerId: string): Promise<void> {
   const { error } = await supabase.from("players").update({ status: "left", left_at: new Date().toISOString() }).eq("id", playerId);
   if (error) throw error;

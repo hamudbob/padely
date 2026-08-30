@@ -1,7 +1,7 @@
 import PageHeader from "../shell/PageHeader";
 import ErrorNote from "../shell/ErrorNote";
 import { withFallback } from "../../lib/errors";
-import Sheet from "../shell/Sheet";
+import { BottomSheet } from "../shell/Sheet";
 import { useEffect, useState } from "react";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { StandingsRow } from "../../lib/supabase/standingsQueries";
@@ -325,15 +325,11 @@ export default function FinalSummaryPage() {
       {recapUrl && (
         // Portalled to <body> — nested here it would sit under the tab bar, the
         // same way the club invite sheet did. See features/shell/Sheet.tsx.
-        <Sheet>
-        <div className="fixed inset-0 z-50 flex items-end justify-center" role="dialog" aria-modal="true">
-          <div className="absolute inset-0 bg-graphite/55 anim-fade" onClick={() => setRecapUrl(null)} />
-          <div className="relative w-full max-w-sm bg-ivory rounded-t-[26px] px-5 pt-2.5 pb-7 anim-rise shadow-[0_-8px_40px_rgba(13,13,13,0.3)] max-h-[92vh] overflow-y-auto">
-            <div className="w-9 h-[5px] rounded-full bg-stone/70 mx-auto mb-3.5" />
-            <h4 className="font-serif text-[20px] font-semibold text-graphite text-center">Your recap</h4>
-            <p className="text-[12px] text-warm-gray text-center mt-1 mb-4">
-              Ready for WhatsApp or Stories — the QR opens the live view.
-            </p>
+        <BottomSheet
+          onClose={() => setRecapUrl(null)}
+          title="Your recap"
+          subtitle="Ready for WhatsApp or Stories — the QR opens the live view."
+        >
             <img
               src={recapUrl}
               alt="Session recap card"
@@ -357,9 +353,7 @@ export default function FinalSummaryPage() {
             >
               Done
             </button>
-          </div>
-        </div>
-        </Sheet>
+        </BottomSheet>
       )}
     </div>
   );

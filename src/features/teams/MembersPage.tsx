@@ -3,6 +3,7 @@ import { Link, useParams } from "react-router-dom";
 import { getTeam, getTeamMembers, Team, TeamMember } from "../../lib/supabase/teamQueries";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
+import { SkeletonScreen, SkeletonRows } from "../shell/Skeleton";
 
 export default function MembersPage() {
   const { teamId } = useParams();
@@ -41,7 +42,15 @@ export default function MembersPage() {
     </div>
   );
 
-  if (loading) return <div className={shell}>{backBar}<p className="text-[13px] text-warm-gray mt-16 text-center">Loading…</p></div>;
+  if (loading)
+    return (
+      <div className={shell}>
+        {backBar}
+        <SkeletonScreen label="Loading the members">
+          <SkeletonRows n={7} avatar />
+        </SkeletonScreen>
+      </div>
+    );
 
   return (
     <div className={shell}>

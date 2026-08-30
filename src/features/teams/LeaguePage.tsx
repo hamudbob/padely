@@ -6,6 +6,7 @@ import { useBackNav } from "../../lib/useBackNav";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { getTeam, getTeamMembers, updateTeam, Team } from "../../lib/supabase/teamQueries";
 import { getClubLeague, shiftPeriodReference, LeagueBoard, LeagueRow, LeaguePeriod } from "../../lib/supabase/leagueQueries";
+import { SkeletonScreen, SkeletonTable } from "../shell/Skeleton";
 
 type SortKey = "pointsPerSession" | "totalPoints" | "winsPerSession" | "clubScore" | "rating";
 
@@ -157,7 +158,9 @@ export default function LeaguePage() {
       </div>
 
       {boardLoading ? (
-        <p className="text-[13px] text-warm-gray mt-8 text-center">Loading…</p>
+        <SkeletonScreen label="Loading the league table">
+          <SkeletonTable n={8} className="mt-6" />
+        </SkeletonScreen>
       ) : sortedRows.length === 0 ? (
         <div className="rounded-2xl bg-surface px-4 py-6 text-center shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
           <p className="text-[13px] text-ink-2 font-semibold mb-1">No standings yet</p>

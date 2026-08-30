@@ -8,9 +8,12 @@ import {
   PublicEvent,
   RsvpResponse,
   EventAttendee,
+  addEventGuest,
+  removeEventGuest,
 } from "../../lib/supabase/eventQueries";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
+import { SkeletonScreen, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
 
 interface DateParts {
   weekday: string;
@@ -62,7 +65,22 @@ export default function EventPage() {
 
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  // Bringing someone who isn't on the app (0056).
+  const [guestName, setGuestName] = useState("");
+  const [guestGender, setGuestGender] = useState<"M" | "F">("M");
+  const [guestBusy, setGuestBusy] = useState(false);
 
+  // NOTE ON eventId vs ev.id, which is the bug this page shipped with.
+  //
+  // Since 0055 the URL carries a readable slug — /e/kemang-tuesday-night — and
+  // `eventId` here is whatever is in the path. That is the right thing to
+  // RESOLVE with and the right thing to put in a link, but it is not an id.
+  // Passing it to an RPC that declares `p_event_id uuid` fails in Postgres with
+  // "invalid input syntax for type uuid", which is what stopped people RSVPing
+  // from a shared link.
+  //
+  // The resolved row already carries the real one. So: `eventId` for reading
+  // and for links, `ev.id` for anything that writes.
   async function respond(response: RsvpResponse) {
     if (!eventId || !ev) return;
     setNote(null);
@@ -71,7 +89,7 @@ export default function EventPage() {
       // The server decides: asking to be "in" on a full night comes back as a
       // waitlist place, and the person needs telling — silently showing them
       // as waitlisted would read as a bug.
-      const result = await setRsvp(eventId, response);
+      const result = await setRsvp(ev.id, response);
       if (result.waitlisted) {
         setNote(
           result.position
@@ -85,13 +103,47 @@ export default function EventPage() {
     load();
   }
 
-  /** Host: promote off the waiting list, or take someone out. */
-  async function setFor(userId: string, response: RsvpResponse, who: string) {
-    if (!eventId) return;
+  async function addGuest() {
+    if (!ev || !guestName.trim()) return;
+    setGuestBusy(true);
+    setNote(null);
+    try {
+      const result = await addEventGuest(ev.id, guestName.trim(), guestGender);
+      setGuestName("");
+      setNote(
+        result.waitlisted
+          ? `${result.name} is on the waiting list — the session is full.`
+          : `${result.name} is in.`,
+      );
+      load();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "Couldn't add that guest.");
+    } finally {
+      setGuestBusy(false);
+    }
+  }
+
+  async function dropGuest(guestId: string, who: string) {
     setBusy(true);
     setNote(null);
     try {
-      await setMemberRsvp(eventId, userId, response);
+      await removeEventGuest(guestId);
+      setNote(`${who} is out.`);
+      load();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "Couldn't remove that guest.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /** Host: promote off the waiting list, or take someone out. */
+  async function setFor(userId: string, response: RsvpResponse, who: string) {
+    if (!ev) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      await setMemberRsvp(ev.id, userId, response);
       setNote(response === "in" ? `${who} is in.` : `${who} is out.`);
     } catch (e) {
       setNote(e instanceof Error ? e.message : "That didn't work.");
@@ -135,7 +187,17 @@ export default function EventPage() {
     </div>
   );
 
-  if (loading) return <div className={shell}>{bar}<p className="text-[13px] text-warm-gray mt-16 text-center">Loading…</p></div>;
+  if (loading)
+    return (
+      <div className={shell}>
+        {bar}
+        <SkeletonScreen label="Loading this session">
+          <SkeletonBlock h={286} className="mb-5" />
+          <SkeletonBlock h={64} className="mb-5" />
+          <SkeletonRows n={4} avatar />
+        </SkeletonScreen>
+      </div>
+    );
   if (notFound || !ev) return <div className={shell}>{bar}<p className="text-[13px] text-warm-gray mt-16 text-center">This session isn't available.</p></div>;
 
   const cancelled = ev.status === "cancelled";
@@ -308,6 +370,52 @@ export default function EventPage() {
         )}
       </div>
 
+      {/* Bringing someone who isn't on the app.
+          Any member can, not just the host — "we bring friends" is a thing
+          members do, and routing it through an admin would mean a WhatsApp
+          message every time. Who brought whom is recorded, and they're the one
+          who can take them out again. */}
+      {ev.isMember && !cancelled && !ev.session && (
+        <div className="mt-5 rounded-2xl border border-line bg-surface px-4 py-3.5">
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray">Bringing someone?</p>
+          <p className="text-[11.5px] text-warm-gray mt-1 leading-snug">
+            Add a friend who isn't on Padelier. They take a place like anyone else{full ? " — the session is full, so they'll join the waiting list." : "."}
+          </p>
+          <div className="flex gap-2 mt-2.5">
+            <input
+              value={guestName}
+              onChange={(e) => setGuestName(e.target.value)}
+              onKeyDown={(e) => {
+                if (e.key === "Enter") void addGuest();
+              }}
+              placeholder="Their name"
+              maxLength={40}
+              className="flex-1 min-w-0 rounded-full border border-line bg-surface-2 px-3.5 py-2 text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+            />
+            {/* Gender, because the Mix formats can't draw a round without it —
+                and asking here is the only moment anyone knows the answer. */}
+            <button
+              type="button"
+              onClick={() => setGuestGender((g) => (g === "M" ? "F" : "M"))}
+              aria-label={`Guest is ${guestGender === "M" ? "male" : "female"} — tap to change`}
+              className={`shrink-0 w-11 rounded-full border text-[13px] font-bold ${
+                guestGender === "M" ? "border-graphite bg-graphite text-ivory" : "border-gold bg-gold-soft text-gold-ink"
+              }`}
+            >
+              {guestGender}
+            </button>
+            <button
+              type="button"
+              onClick={() => void addGuest()}
+              disabled={guestBusy || guestName.trim().length === 0}
+              className="shrink-0 rounded-full bg-graphite text-ivory text-[13px] font-semibold px-4 active:scale-[0.99] transition-transform disabled:opacity-40"
+            >
+              {guestBusy ? "Adding…" : "Add"}
+            </button>
+          </div>
+        </div>
+      )}
+
       {/* Who's coming — tappable profiles. Going is alphabetical because it's a
           roster you scan for a name; the waiting list is in the order people
           asked, because there the order IS the information. */}
@@ -317,7 +425,9 @@ export default function EventPage() {
         accent="win"
         admin={ev.isAdmin && !cancelled}
         busy={busy}
+        myUserId={user?.id ?? null}
         onRemove={(p) => setFor(p.userId, "out", p.displayName)}
+        onRemoveGuest={cancelled ? undefined : (p) => dropGuest(p.guestId!, p.displayName)}
       />
       <AttendeeList
         title="Waiting list"
@@ -326,7 +436,9 @@ export default function EventPage() {
         numbered
         admin={ev.isAdmin && !cancelled}
         busy={busy}
+        myUserId={user?.id ?? null}
         onPromote={(p) => setFor(p.userId, "in", p.displayName)}
+        onRemoveGuest={cancelled ? undefined : (p) => dropGuest(p.guestId!, p.displayName)}
       />
       <AttendeeList
         title="Maybe"
@@ -388,6 +500,8 @@ function AttendeeList({
   busy,
   onPromote,
   onRemove,
+  onRemoveGuest,
+  myUserId,
 }: {
   title: string;
   people: EventAttendee[];
@@ -398,6 +512,12 @@ function AttendeeList({
   busy?: boolean;
   onPromote?: (p: EventAttendee) => void;
   onRemove?: (p: EventAttendee) => void;
+  /** Taking a guest out is a different call from changing a member's answer —
+   *  a guest has no RSVP row and no account to set one on. */
+  onRemoveGuest?: (p: EventAttendee) => void;
+  /** So the person who brought a guest can take them out again without being
+   *  a club admin. */
+  myUserId?: string | null;
 }) {
   if (people.length === 0) return null;
   const dot = accent === "win" ? "bg-win" : accent === "gold" ? "bg-gold" : "bg-stone";
@@ -414,16 +534,42 @@ function AttendeeList({
             {numbered && (
               <span className="font-mono tnum text-[12px] font-semibold text-warm-gray w-4 shrink-0">{i + 1}</span>
             )}
-            <Link to={`/u/${p.userId}`} className="flex items-center gap-3 flex-1 min-w-0 active:opacity-70">
-              <span className="w-[32px] h-[32px] rounded-full bg-graphite text-ivory flex items-center justify-center text-[12px] font-semibold overflow-hidden shrink-0">
-                {p.avatarUrl ? <img src={p.avatarUrl} alt="" className="w-full h-full object-cover" /> : p.displayName.charAt(0).toUpperCase()}
-              </span>
-              <span className="flex-1 min-w-0 text-[14px] font-semibold text-graphite truncate">{p.displayName}</span>
-            </Link>
+            {/* A guest has no profile to open, so their row isn't a link. The
+                chip is the whole explanation: a name with no account behind it
+                would otherwise look like a bug. */}
+            {p.isGuest ? (
+              <div className="flex items-center gap-3 flex-1 min-w-0">
+                <span className="w-[32px] h-[32px] rounded-full bg-stone/50 text-ink-2 flex items-center justify-center text-[12px] font-semibold shrink-0">
+                  {p.displayName.charAt(0).toUpperCase()}
+                </span>
+                <span className="flex-1 min-w-0 text-[14px] font-semibold text-graphite truncate">
+                  {p.displayName}
+                  <span className="ml-1.5 text-[9.5px] font-bold uppercase tracking-[0.1em] rounded-full px-1.5 py-0.5 bg-surface-2 text-warm-gray border border-line align-middle">
+                    Guest
+                  </span>
+                </span>
+              </div>
+            ) : (
+              <Link to={`/u/${p.userId}`} className="flex items-center gap-3 flex-1 min-w-0 active:opacity-70">
+                <span className="w-[32px] h-[32px] rounded-full bg-graphite text-ivory flex items-center justify-center text-[12px] font-semibold overflow-hidden shrink-0">
+                  {p.avatarUrl ? <img src={p.avatarUrl} alt="" className="w-full h-full object-cover" /> : p.displayName.charAt(0).toUpperCase()}
+                </span>
+                <span className="flex-1 min-w-0 text-[14px] font-semibold text-graphite truncate">{p.displayName}</span>
+              </Link>
+            )}
             {/* Host controls sit OUTSIDE the profile link — a mis-tap that
                 removes someone from Monday's session is not a mis-tap you get
                 to take back quietly. */}
-            {admin && onPromote && (
+            {p.isGuest && onRemoveGuest && (admin || (myUserId && p.invitedBy === myUserId)) && (
+              <button
+                onClick={() => onRemoveGuest(p)}
+                disabled={busy}
+                className="shrink-0 text-[11.5px] font-semibold text-warm-gray border border-line rounded-full px-2.5 py-1 active:opacity-70 disabled:opacity-40"
+              >
+                Remove
+              </button>
+            )}
+            {!p.isGuest && admin && onPromote && (
               <button
                 onClick={() => onPromote(p)}
                 disabled={busy}
@@ -432,7 +578,7 @@ function AttendeeList({
                 Move in
               </button>
             )}
-            {admin && onRemove && (
+            {!p.isGuest && admin && onRemove && (
               <button
                 onClick={() => onRemove(p)}
                 disabled={busy}
@@ -441,7 +587,7 @@ function AttendeeList({
                 Remove
               </button>
             )}
-            {!admin && (
+            {!admin && !p.isGuest && (
               <span className="text-stone text-[16px]" aria-hidden>
                 ›
               </span>

@@ -111,6 +111,51 @@ button {
   to { background-position: -200% 0; }
 }
 
+/* --- Launch: the handover from the native screen ------------------------ */
+/* The veil starts as an exact copy of the launch screen, so dismissing the
+   native one changes nothing on screen. Then both leave together: the ground
+   fades, and the mark grows slightly as it goes. Growing reads as opening;
+   shrinking would read as putting away. */
+.launch-veil {
+  position: fixed;
+  inset: 0;
+  z-index: 100; /* above the tab bar (60) and every sheet */
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background: #0d0d0d; /* graphite, the same ground as the launch image */
+}
+.launch-veil__mark {
+  width: 132px;
+  height: auto;
+  display: block;
+}
+.launch-veil.is-leaving {
+  /* The app underneath is already live — never let the exit swallow a tap. */
+  pointer-events: none;
+  animation: launch-ground 460ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+.launch-veil.is-leaving .launch-veil__mark {
+  animation: launch-mark 460ms cubic-bezier(0.22, 0.61, 0.36, 1) forwards;
+}
+@keyframes launch-ground {
+  from { opacity: 1; }
+  to   { opacity: 0; }
+}
+@keyframes launch-mark {
+  0%   { transform: scale(1);    opacity: 1; }
+  55%  {                          opacity: 0.7; }
+  100% { transform: scale(1.18); opacity: 0; }
+}
+/* Someone who has asked the system for less movement gets the cross-fade and
+   no scale at all — the handover still happens, it just doesn't travel. */
+@media (prefers-reduced-motion: reduce) {
+  .launch-veil.is-leaving,
+  .launch-veil.is-leaving .launch-veil__mark {
+    animation: launch-ground 220ms linear forwards;
+  }
+}
+
 /* --- v2 tab bar -------------------------------------------------------- */
 
 /* Translucent chrome: content scrolls *under* the bar rather than the bar
