@@ -1,6 +1,6 @@
 import { StatusBar, Style } from "@capacitor/status-bar";
 import { SplashScreen } from "@capacitor/splash-screen";
-import { Haptics, ImpactStyle } from "@capacitor/haptics";
+import { Haptics, ImpactStyle, NotificationType } from "@capacitor/haptics";
 import { isNative } from "./native";
 
 /**
@@ -68,4 +68,37 @@ export async function tap(weight: "light" | "medium" = "light"): Promise<void> {
   // Android browsers and desktop Chrome. Silent on iOS Safari, which has no
   // vibration API at all — nothing to be done there.
   navigator.vibrate?.(weight === "light" ? 8 : 18);
+}
+
+/**
+ * The other kind of haptic: an outcome, not a touch.
+ *
+ * `impact` is the feel of a button under your thumb. `notification` is iOS
+ * telling you how something turned out — success is two rising taps, warning
+ * is two falling ones, and people know the difference without being taught,
+ * because every native app on the phone uses them the same way.
+ *
+ * Kept deliberately scarce. A phone that buzzes at everything is a phone
+ * whose buzzing means nothing, and the score pad only earns its tap because
+ * you are looking at the court instead of the screen.
+ */
+export async function notify(kind: "success" | "warning" | "error" = "success"): Promise<void> {
+  if (isNative()) {
+    try {
+      await Haptics.notification({
+        type:
+          kind === "success"
+            ? NotificationType.Success
+            : kind === "warning"
+              ? NotificationType.Warning
+              : NotificationType.Error,
+      });
+      return;
+    } catch {
+      /* fall through */
+    }
+  }
+  // Android has no notification haptic, so approximate the shape: two short
+  // pulses rising, three for an error. Silent on iOS Safari either way.
+  navigator.vibrate?.(kind === "error" ? [12, 40, 12, 40, 12] : [10, 50, 16]);
 }

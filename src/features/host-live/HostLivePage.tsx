@@ -1,5 +1,5 @@
 import PageHeader from "../shell/PageHeader";
-import { tap } from "../../lib/nativeShell";
+import { tap, notify } from "../../lib/nativeShell";
 import ErrorNote from "../shell/ErrorNote";
 import { withFallback } from "../../lib/errors";
 import { useEffect, useRef, useState } from "react";
@@ -671,6 +671,7 @@ export default function HostLivePage() {
         setRoundError(
           `Waiting to sync ${remaining} score${remaining > 1 ? "s" : ""} — reconnect to the internet to start the next round.`,
         );
+        void notify("warning"); // refused, and the host may not be looking at the screen
         return;
       }
       await generateNextRound(sessionId);
@@ -679,6 +680,7 @@ export default function HostLivePage() {
       loadRoundHistory();
       if (tab === "standings" || isTeamSparring) loadStandings();
       notifyLiveUpdate(sessionId); // push the new round to spectators
+      void tap("medium"); // a new round exists — the biggest thing this screen does
     } catch (err) {
       setRoundError(withFallback(err, "Could not generate the next round."));
     } finally {
