@@ -3,6 +3,7 @@ import ErrorNote from "../shell/ErrorNote";
 import { withFallback } from "../../lib/errors";
 import { BottomSheet } from "../shell/Sheet";
 import { useEffect, useState } from "react";
+import { notify } from "../../lib/nativeShell";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { StandingsRow } from "../../lib/supabase/standingsQueries";
 import { getPublicSessionById, PublicSessionData } from "../../lib/supabase/publicSessionQueries";
@@ -75,6 +76,11 @@ export default function FinalSummaryPage() {
           return;
         }
         setData(d);
+        // The podium landing is the one moment in the app that deserves a
+        // flourish, and it is the only success haptic in the whole thing.
+        // Fired once, on arrival, not on every re-render — the effect is keyed
+        // to the session id.
+        void notify("success");
       })
       .catch((err) => setError(withFallback(err, "Couldn't load the results. Check your connection and try again.")))
       .finally(() => setLoading(false));

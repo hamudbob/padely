@@ -219,6 +219,17 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
     .in("event_id", eventIds);
   if (rsvpError) throw rsvpError;
 
+  // Guests (0056). WITHOUT THIS the club card and the event page disagree by
+  // exactly the number of guests: the card counted only club_event_rsvps while
+  // get_public_event counts members plus guests, so a night with one guest read
+  // 17/18 on the club page and 18/18 when you opened it. A count that changes
+  // depending on which screen you are looking at is worse than no count.
+  const { data: guests, error: guestError } = await supabase
+    .from("club_event_guests")
+    .select("event_id, display_name, response")
+    .in("event_id", eventIds);
+  if (guestError) throw guestError;
+
   // Linked sessions (started from an event) — so we can show a live one as
   // joinable and drop finished/past ones from the upcoming list.
   const sessionIds = [...new Set(rows.map((e) => e.session_id).filter((s): s is string => !!s))];
@@ -243,6 +254,15 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
     // A row with an unknown response would otherwise push onto undefined.
     if (resp in rec) rec[resp].push(nameOf(r.user_id));
     if (myId && r.user_id === myId) rec.mine = resp;
+  }
+  // Guests land in the same lists, so every count and the names line below get
+  // them for free. They are never `mine` — a guest has no account to answer
+  // with, and the RSVP toggle belongs to the member who brought them.
+  for (const g of guests ?? []) {
+    const rec = byEvent.get(g.event_id);
+    if (!rec) continue;
+    const resp = g.response as "in" | "waitlist";
+    if (resp in rec) rec[resp].push(g.display_name);
   }
 
   const startOfToday = new Date();
