@@ -11,6 +11,7 @@ import {
   sendPasswordReset,
   emailHasAccount,
   signInWithGoogle,
+  signInWithApple,
 } from "../../lib/supabase/auth";
 import { getMyProfile } from "../../lib/supabase/profileQueries";
 import { useAppSettings } from "../../lib/supabase/appSettings";
@@ -70,6 +71,7 @@ export default function LoginPage() {
   const [offerSignup, setOfferSignup] = useState(false);
   const [resetState, setResetState] = useState<"idle" | "sending" | "sent">("idle");
   const [googleBusy, setGoogleBusy] = useState(false);
+  const [appleBusy, setAppleBusy] = useState(false);
   const pwRef = useRef<HTMLInputElement | null>(null);
 
   const navigate = useNavigate();
@@ -126,6 +128,19 @@ export default function LoginPage() {
     } catch (err) {
       setGoogleBusy(false);
       setError(withFallback(err, "Couldn't reach Google just now. Try your email instead."));
+    }
+  }
+
+  /** Same shape as handleGoogle — leaves the page on success, so the busy flag
+   *  is only ever cleared on the way back from a failure. */
+  async function handleApple() {
+    setError(null);
+    setAppleBusy(true);
+    try {
+      await signInWithApple(`${window.location.origin}/login?next=${encodeURIComponent(next)}`);
+    } catch (err) {
+      setAppleBusy(false);
+      setError(withFallback(err, "Couldn't reach Apple just now. Try your email instead."));
     }
   }
 
@@ -356,6 +371,14 @@ export default function LoginPage() {
   // and never inside our filled graphite pill.
   const googleBtn =
     "w-full flex items-center justify-center gap-2.5 rounded-full px-4 py-3.5 font-semibold text-ink border border-line bg-surface active:scale-[0.99] transition-transform disabled:opacity-40 disabled:active:scale-100";
+  // Deliberately the same class as Google's, not a variant of it. Apple's
+  // guidance permits three treatments — black, white, or white with an outline
+  // — and this is the third; but the reason to make them identical is
+  // guideline 4.8, which asks that Sign in with Apple be offered on equal
+  // footing. Two buttons the same size, the same shape and the same weight is
+  // the plainest way to be obviously equal, and it also just looks better than
+  // a black pill next to a white one.
+  const appleBtn = googleBtn;
   const inputCls =
     "w-full rounded-2xl border border-line bg-surface px-3.5 py-2.5 text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55";
 
@@ -564,6 +587,19 @@ export default function LoginPage() {
               <path fill="#EA4335" d="M9 3.58c1.32 0 2.5.45 3.44 1.35l2.58-2.58C13.46.89 11.43 0 9 0A9 9 0 0 0 .96 4.95l3.01 2.33C4.68 5.16 6.66 3.58 9 3.58Z" />
             </svg>
             {googleBusy ? "Taking you to Google…" : "Continue with Google"}
+          </button>
+
+          {/* Apple below Google, because Google is the one people here
+              actually use and the order should reflect that. 4.8 asks for
+              equal prominence, not for Apple to go first. */}
+          <button type="button" onClick={handleApple} disabled={appleBusy} className={appleBtn}>
+            <svg width="16" height="16" viewBox="0 0 384 512" aria-hidden className="shrink-0 -mt-[2px]">
+              <path
+                fill="currentColor"
+                d="M318.7 268.7c-.2-36.7 16.4-64.4 50-84.8-18.8-26.9-47.2-41.7-84.7-44.6-35.5-2.8-74.3 20.7-88.5 20.7-15 0-49.4-19.7-76.4-19.7C63.3 141.2 4 184.8 4 273.5q0 39.3 14.4 81.2c12.8 36.7 59 126.7 107.2 125.2 25.2-.6 43-17.9 75.8-17.9 31.8 0 48.3 17.9 76.4 17.9 48.6-.7 90.4-82.5 102.6-119.3-65.2-30.7-61.7-90-61.7-91.9zm-56.6-164.2c27.3-32.4 24.8-61.9 24-72.5-24.1 1.4-52 16.4-67.9 34.9-17.5 19.8-27.8 44.3-25.6 71.9 26.1 2 49.9-11.4 69.5-34.3z"
+              />
+            </svg>
+            {appleBusy ? "Taking you to Apple…" : "Continue with Apple"}
           </button>
         </form>
       ) : (

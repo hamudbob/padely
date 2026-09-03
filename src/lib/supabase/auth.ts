@@ -57,6 +57,48 @@ export async function signInWithGoogle(redirectTo: string) {
   if (error) throw error;
 }
 
+/**
+ * Hand off to Apple. Same shape as Google above, and for the same reasons —
+ * a successful call ends in a navigation, so only an error returns here.
+ *
+ * WHY IT EXISTS. App Store guideline 4.8: an app offering a third-party
+ * sign-in must also offer Sign in with Apple. Google is already here, so this
+ * is not optional — the build gets rejected without it.
+ *
+ * NO `prompt` PARAMETER. Google needs `select_account` or it silently reuses
+ * whichever account the browser is signed into. Apple has no equivalent and
+ * rejects unknown parameters outright, so there is nothing to pass.
+ *
+ * TWO THINGS APPLE DOES THAT NOBODY ELSE DOES, both handled in 0057 rather
+ * than here, but worth knowing at the call site:
+ *
+ *   1. The name arrives ONCE — on the very first authorization, and never
+ *      again. Sign out and back in and Apple sends an email and nothing else.
+ *      So there is no "refresh the profile from the provider" to fall back on;
+ *      whatever we capture on that first insert is all we will ever get.
+ *   2. "Hide My Email" gives us a working but meaningless address like
+ *      b8k2m9x4@privaterelay.appleid.com. Mail sent there reaches them, so it
+ *      is a real address — but its local part must never become a display
+ *      name, which is what the old trigger would have done.
+ *
+ * On a phone this goes through the system browser like Google does. Apple
+ * would also accept the native ASAuthorizationController sheet, which looks
+ * nicer, but that needs another Capacitor plugin and a second code path; the
+ * web flow inside SFSafariViewController is fully compliant and ships today.
+ */
+export async function signInWithApple(redirectTo: string) {
+  if (isNative()) {
+    await startNativeOAuth("apple");
+    return;
+  }
+
+  const { error } = await supabase.auth.signInWithOAuth({
+    provider: "apple",
+    options: { redirectTo },
+  });
+  if (error) throw error;
+}
+
 /** True when the signed-in account has no password of its own — it exists only
  *  because of Google (or another provider). Settings uses this to hide "change
  *  password", which would otherwise ask for a current password that never
@@ -65,6 +107,37 @@ export async function hasPasswordIdentity(): Promise<boolean> {
   const { data } = await supabase.auth.getUser();
   const identities = data.user?.identities ?? [];
   return identities.some((i) => i.provider === "email");
+}
+
+/**
+ * How this account can actually be signed into.
+ *
+ * WHY THIS REPLACED A BOOLEAN. Settings used to ask only "is there a password?"
+ * and, when there wasn't, say "Signed in with Google" — which was true for as
+ * long as Google was the only provider we offered. The first Apple sign-in made
+ * it a lie, and a confident one: it told someone to go and change their
+ * password at myaccount.google.com, an account they may not even have.
+ *
+ * An account can hold more than one of these at once. Supabase links identities
+ * that share a verified email address, so someone who used Google in March and
+ * Apple in July has one account with both, and the honest answer is "both".
+ */
+export interface SignInMethods {
+  /** A Padelier password exists — "Change password" is meaningful. */
+  hasPassword: boolean;
+  /** Provider identities, in the order Supabase returns them. */
+  providers: ("google" | "apple" | "other")[];
+}
+
+export async function getSignInMethods(): Promise<SignInMethods> {
+  const { data } = await supabase.auth.getUser();
+  const identities = data.user?.identities ?? [];
+  return {
+    hasPassword: identities.some((i) => i.provider === "email"),
+    providers: identities
+      .filter((i) => i.provider !== "email")
+      .map((i) => (i.provider === "google" ? "google" : i.provider === "apple" ? "apple" : "other")),
+  };
 }
 
 /** Marks the caller's onboarding finished, so the router stops sending them to /welcome. */
@@ -278,7 +351,7 @@ export async function signOutHost() {
  * person stuck unable to delete their account because a storage call timed out
  * is worse, and the RPC clears avatar_url regardless so nothing points at it.
  */
-export async function deleteMyAccount(): Promise<{ avatarRemoved: boolean }> {
+export async function deleteMyAccount(): Promise<{ avatarRemoved: boolean; appleRevoked: boolean }> {
   const { data: userData } = await supabase.auth.getUser();
   const uid = userData.user?.id;
 
@@ -296,15 +369,33 @@ export async function deleteMyAccount(): Promise<{ avatarRemoved: boolean }> {
     }
   }
 
-  const { error } = await supabase.rpc("delete_my_account");
-  if (error) throw error;
+  // Through the Edge Function rather than straight to the RPC, because
+  // deleting an Apple account has a second half: App Store guideline 5.1.1(v)
+  // requires revoking the grant with Apple, and that call is signed with the
+  // Apple client secret, which can never be in a browser. The function does
+  // both, in that order, and reports whether Apple was actually told.
+  let appleRevoked = false;
+  const { data, error } = await supabase.functions.invoke("delete-account", { body: {} });
+
+  if (error) {
+    // The function is unreachable — not deployed yet, cold-start timeout, or
+    // simply down. Fall back to the RPC, because deletion is the person's
+    // right and must not depend on our infrastructure being healthy. The
+    // consequence is a stale entry in their Apple ID settings, which is
+    // recoverable by hand; refusing to delete is not.
+    console.warn("delete-account function unavailable, deleting directly:", error.message);
+    const { error: rpcError } = await supabase.rpc("delete_my_account");
+    if (rpcError) throw rpcError;
+  } else {
+    appleRevoked = (data as { appleRevoked?: boolean } | null)?.appleRevoked === true;
+  }
 
   // Best effort: the RPC has already deleted the server-side session, so this
   // is really just clearing the local token. Failing here must not look like a
   // failed deletion.
   await supabase.auth.signOut().catch(() => undefined);
 
-  return { avatarRemoved };
+  return { avatarRemoved, appleRevoked };
 }
 
 /** Updates the host's display name (stored on the auth user's metadata, the

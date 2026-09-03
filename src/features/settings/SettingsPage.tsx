@@ -7,7 +7,8 @@ import {
   signOutHost,
   deleteMyAccount,
   InvalidCredentialsError,
-  hasPasswordIdentity,
+  getSignInMethods,
+  SignInMethods,
 } from "../../lib/supabase/auth";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { amIAdmin } from "../../lib/supabase/adminQueries";
@@ -105,12 +106,43 @@ export default function SettingsPage() {
       .catch(() => setBlocks([]));
   }, []);
 
-  const [hasPassword, setHasPassword] = useState(true);
+  // Starts as "has a password" so the Change password row doesn't flicker into
+  // view and out again for the majority of accounts that do.
+  const [methods, setMethods] = useState<SignInMethods>({ hasPassword: true, providers: [] });
   useEffect(() => {
-    hasPasswordIdentity()
-      .then(setHasPassword)
+    getSignInMethods()
+      .then(setMethods)
       .catch(() => undefined);
   }, []);
+  const hasPassword = methods.hasPassword;
+
+  // What to say when there's no Padelier password. This used to be one
+  // hardcoded sentence about Google, which became wrong the day Apple was
+  // added — and wrong in the worst way, by confidently sending someone to
+  // manage a password on an account they might not have.
+  //
+  // An account can carry both. Someone who used Google in March and Apple in
+  // July has one account with two identities, and naming only one of them
+  // would leave them wondering what happened to the other.
+  const hasGoogle = methods.providers.includes("google");
+  const hasApple = methods.providers.includes("apple");
+  const signedInWithTitle = hasGoogle && hasApple
+    ? "Signed in with Google and Apple"
+    : hasApple
+      ? "Signed in with Apple"
+      : hasGoogle
+        ? "Signed in with Google"
+        : "No Padelier password";
+  const signedInWithBody = hasGoogle && hasApple
+    ? "There's no Padelier password on this account — either Google or Apple will sign you in, and both are managed where you already manage them."
+    : hasApple
+      ? "There's no Padelier password on this account — Apple handles it. Change it at appleid.apple.com and nothing here needs updating."
+      : hasGoogle
+        ? "There's no Padelier password on this account — Google handles it. Change it at myaccount.google.com and nothing here needs updating."
+        // The fallback exists because identities can be revoked. Rather than
+        // name a provider we can't see, say the true thing: use the sign-in
+        // page's forgotten-password route to set one.
+        : "This account has no password of its own. To add one, sign out and use \"Forgot password?\" on the sign-in screen.";
 
   useEffect(() => {
     getMyProfile()
@@ -495,11 +527,8 @@ export default function SettingsPage() {
 
         {!hasPassword && (
           <div className="px-4 py-3.5">
-            <p className="text-[14px] font-semibold text-graphite">Signed in with Google</p>
-            <p className="text-[12.5px] text-ink-2 mt-1 leading-relaxed">
-              There's no Padelier password on this account — Google handles it. Change it at
-              myaccount.google.com and nothing here needs updating.
-            </p>
+            <p className="text-[14px] font-semibold text-graphite">{signedInWithTitle}</p>
+            <p className="text-[12.5px] text-ink-2 mt-1 leading-relaxed">{signedInWithBody}</p>
           </div>
         )}
 

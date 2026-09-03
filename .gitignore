@@ -33,3 +33,10 @@ ios/App/build/
 ios/App/App/public/
 DerivedData/
 *.xcuserstate
+
+# Apple signing keys. Downloadable exactly once from Apple, and a
+# credential — never in the repo, public or not.
+*.p8
+
+# Supabase CLI link state — project ref and pooler details, machine-local.
+supabase/.temp/

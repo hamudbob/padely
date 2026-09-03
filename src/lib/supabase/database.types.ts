@@ -763,6 +763,20 @@ export interface Database {
         Args: Record<string, never>;
         Returns: undefined; // void
       };
+      /** 0058 — parks the caller's provider refresh token so account deletion
+       *  can revoke the grant with Apple. The row is always the caller's own;
+       *  there is deliberately no user-id argument. */
+      store_provider_refresh_token: {
+        Args: { p_provider: string; p_token: string };
+        Returns: undefined; // void
+      };
+      /** 0058 — drops the caller's stored token (ordinary sign-out tidiness).
+       *  The delete flow does NOT use this: the Edge Function removes the row
+       *  itself, and only after Apple has actually accepted the revocation. */
+      forget_provider_refresh_token: {
+        Args: Record<string, never>;
+        Returns: undefined; // void
+      };
       /** 0039 — spectator payload addressed by session id (the podium route). */
       get_public_session_by_id: {
         Args: { p_session_id: string };
