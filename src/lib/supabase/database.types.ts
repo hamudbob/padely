@@ -766,6 +766,17 @@ export interface Database {
       /** 0058 — parks the caller's provider refresh token so account deletion
        *  can revoke the grant with Apple. The row is always the caller's own;
        *  there is deliberately no user-id argument. */
+      /** 0059 — records the calling device for push. Unique on the token, so
+       *  signing in on a phone that belonged to someone else moves it. */
+      register_device_token: {
+        Args: { p_token: string; p_platform: string; p_environment: string; p_bundle_id: string };
+        Returns: undefined; // void
+      };
+      /** 0059 — drops this device's row, called on sign-out. */
+      unregister_device_token: {
+        Args: { p_token: string };
+        Returns: undefined; // void
+      };
       store_provider_refresh_token: {
         Args: { p_provider: string; p_token: string };
         Returns: undefined; // void

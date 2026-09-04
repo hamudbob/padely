@@ -20,6 +20,7 @@ import ProfilePage from "./features/profile/ProfilePage";
 import RequireHost from "./features/auth/RequireHost";
 import { useHostSession } from "./lib/supabase/useHostSession";
 import { useDeepLinks } from "./lib/useDeepLinks";
+import { usePushNotifications } from "./lib/usePushNotifications";
 import WatchPage from "./features/watch/WatchPage";
 import CreateSessionPage from "./features/create-session/CreateSessionPage";
 import HostLivePage from "./features/host-live/HostLivePage";
@@ -85,6 +86,10 @@ export default function App() {
   // return, and later a shared /e/<id> link tapped in a group chat. No-op in a
   // browser.
   useDeepLinks();
+  // Attaches the APNs listeners: the device token when it arrives or rotates,
+  // and taps. Does NOT ask for permission — that happens at the moments where
+  // saying yes makes sense (see lib/push.ts). No-op in a browser.
+  usePushNotifications();
   return (
     <>
       {/* First thing painted, and the only thing visible until it leaves.

@@ -1,5 +1,6 @@
 import { supabase } from "./client";
 import { getProfiles } from "./profileQueries";
+import { ensurePushRegistered } from "../push";
 
 /**
  * Scheduled club sessions ("events") + RSVPs (0020). Admins schedule; any
@@ -507,6 +508,25 @@ export async function setRsvp(eventId: string, response: RsvpResponse): Promise<
     p_response: response,
   });
   if (error) throw new Error(error.message);
+
+  // THE moment to ask for notification permission — and the only good one.
+  //
+  // iOS allows one prompt per install, ever. Someone who has just put
+  // themselves on a court, or joined a waiting list, has an obvious reason to
+  // say yes: we are going to tell them if the time moves or a spot opens.
+  // The same prompt at app launch is asked of a stranger and answered no.
+  //
+  // Only on "in" and "waitlist". After "out" there is nothing we would send
+  // them about this session, and spending the one prompt there would be
+  // spending it at the worst possible time.
+  //
+  // Fire-and-forget, deliberately not awaited: the RSVP is done and its
+  // result must reach the caller whatever the permission dialog does. On the
+  // web this returns "unsupported" immediately and nothing happens.
+  if (response === "in" || response === "waitlist") {
+    void ensurePushRegistered();
+  }
+
   return data as RsvpResult;
 }
 

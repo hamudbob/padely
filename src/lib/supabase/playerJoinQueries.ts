@@ -1,4 +1,5 @@
 import { supabase } from "./client";
+import { ensurePushRegistered } from "../push";
 
 /**
  * Player-side join-by-code, backed by the SECURITY DEFINER RPCs in
@@ -110,6 +111,13 @@ export async function requestJoin(input: RequestJoinInput): Promise<JoinRequestR
     p_email: input.email ?? null,
   });
   if (error) throw new Error(error.message);
+
+  // The other good moment. This request is PENDING a host's confirmation, so
+  // the single most useful thing we can do next is tell them when it lands —
+  // which is exactly what makes the permission prompt worth saying yes to.
+  // Not awaited: the join result must reach the screen regardless.
+  void ensurePushRegistered();
+
   const d = (data ?? {}) as { requestId: string; sessionId: string; sessionName: string; sessionStatus: "draft" | "live" };
   return { requestId: d.requestId, sessionId: d.sessionId, sessionName: d.sessionName, sessionStatus: d.sessionStatus };
 }

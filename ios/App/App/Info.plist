@@ -35,6 +35,17 @@
 	<string>$(CURRENT_PROJECT_VERSION)</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
+	<!-- Purpose strings. iOS does not ask politely without these: touching the
+	     camera with no NSCameraUsageDescription terminates the app on the spot,
+	     and every one of Padelier's four image pickers is an
+	     <input type="file" accept="image/*">, which offers "Take Photo".
+	     Apple also rejects vague strings, so each one names what it is for. -->
+	<key>NSCameraUsageDescription</key>
+	<string>Padelier uses the camera so you can take a photo for your profile picture or your club's logo.</string>
+	<key>NSPhotoLibraryUsageDescription</key>
+	<string>Padelier needs access to your photos so you can choose a profile picture or a club logo.</string>
+	<key>NSPhotoLibraryAddUsageDescription</key>
+	<string>Padelier saves session recap images to your photo library when you tap Save.</string>
 	<key>UILaunchStoryboardName</key>
 	<string>LaunchScreen</string>
 	<key>UIMainStoryboardFile</key>

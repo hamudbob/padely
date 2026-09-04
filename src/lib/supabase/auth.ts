@@ -1,5 +1,6 @@
 import { supabase } from "./client";
 import { isNative, startNativeOAuth } from "../native";
+import { unregisterThisDevice } from "../push";
 
 export interface HostCredentials {
   email: string;
@@ -334,6 +335,16 @@ export async function changePassword(currentPassword: string, newPassword: strin
 }
 
 export async function signOutHost() {
+  // Before the session goes, not after: unregister_device_token needs a
+  // signed-in caller. Without this the phone stays registered to the person
+  // who just left, so the next person to sign in on it gets THEIR session
+  // reminders on the lock screen until they happen to re-register.
+  //
+  // Never allowed to block the sign-out. Someone pressing Sign out has said
+  // what they want, and a push-notification bookkeeping failure is not a
+  // reason to keep them signed in.
+  await unregisterThisDevice().catch(() => undefined);
+
   const { error } = await supabase.auth.signOut();
   if (error) throw error;
 }
