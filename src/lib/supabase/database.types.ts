@@ -768,6 +768,13 @@ export interface Database {
        *  there is deliberately no user-id argument. */
       /** 0059 — records the calling device for push. Unique on the token, so
        *  signing in on a phone that belonged to someone else moves it. */
+      /** 0060 — creates a whole session (courts, players, pairs, rounds, rests,
+       *  matches, participants) from a device-built payload, in one
+       *  transaction. For sessions started with no signal. */
+      create_session_from_payload: {
+        Args: { p_payload: Record<string, unknown> };
+        Returns: unknown; // jsonb — { session_id, join_code, public_token, already_existed, code_changed }
+      };
       register_device_token: {
         Args: { p_token: string; p_platform: string; p_environment: string; p_bundle_id: string };
         Returns: undefined; // void

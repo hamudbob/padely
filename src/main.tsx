@@ -7,6 +7,7 @@ import { installErrorReporter } from "./lib/errorReporter";
 import { initNativeShell } from "./lib/nativeShell";
 import { startProviderTokenCapture } from "./lib/supabase/providerTokens";
 import { startCacheNamespace } from "./lib/cache/cacheStore";
+import { startLocalSessionSync } from "./lib/offline/localSessionSync";
 import "./index.css";
 
 // Before anything renders, so a crash during the first paint is still caught.
@@ -25,6 +26,13 @@ startProviderTokenCapture();
 // old behaviour — but a screen that read from a namespace set a moment too
 // late could show the previous user's clubs. See lib/cache/cacheStore.ts.
 startCacheNamespace();
+
+// Pushes any session started with no signal up to the server, and only then
+// prods the score queue — the queue addresses matches by id, and for an
+// offline session those rows don't exist server-side until the session lands.
+// Flushing scores first would fail every one of them and eventually park them
+// as un-syncable, losing an evening to the machinery meant to protect it.
+startLocalSessionSync();
 
 // Status bar styling, before the first paint so it never flashes wrong.
 // No-op in a browser.

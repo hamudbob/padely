@@ -27,6 +27,7 @@ import {
 import { supabase } from "../../lib/supabase/client";
 import { notifyLiveUpdate } from "../../lib/supabase/liveChannel";
 import { SkeletonScreen, SkeletonLine, SkeletonCourts } from "../shell/Skeleton";
+import { isLocalOnly } from "../../lib/offline/localSession";
 
 /**
  * Overlays any locally-queued (not-yet-synced) scores on top of the server's
@@ -244,7 +245,11 @@ export default function HostLivePage() {
         // and shared links land on too. `replace` so Back doesn't bounce here
         // and immediately forward again.
         if (snap?.session.status === "ended") {
-          navigate(`/session/${sessionId}/final`, { replace: true });
+          // Same reason as in the end handler: no server session, no podium.
+          // Without this the screen would bounce a local ended session into a
+          // page that cannot load, and the back button would bounce it
+          // straight back — a loop with no exit.
+          navigate(isLocalOnly(sessionId) ? "/play" : `/session/${sessionId}/final`, { replace: true });
           return;
         }
         setSnapshot(snap);
@@ -662,17 +667,27 @@ export default function HostLivePage() {
     setGeneratingRound(true);
     setRoundError(null);
     try {
-      // The next round's pairings are computed server-side FROM the scores, and
-      // the backend refuses to advance until every match is saved. So flush the
-      // offline queue first; if we're still offline, stop with a clear message
-      // rather than generating pairings from stale data.
-      const remaining = await flushAndCount(sessionId);
-      if (remaining > 0) {
-        setRoundError(
-          `Waiting to sync ${remaining} score${remaining > 1 ? "s" : ""} — reconnect to the internet to start the next round.`,
-        );
-        void notify("warning"); // refused, and the host may not be looking at the screen
-        return;
+      // A session started with no signal draws its next round from the LOCAL
+      // rows, and those already carry every score the host has entered — so
+      // there is nothing to wait for and this gate must not apply.
+      //
+      // Applying it was worse than merely unnecessary: for a local session
+      // the queued scores CANNOT sync until the session itself does, so the
+      // count never reaches zero and the host is told to reconnect in order
+      // to continue a session that was designed to need no connection. A
+      // dead end, on a court, mid-evening.
+      if (!isLocalOnly(sessionId)) {
+        // Online sessions still wait. The pairings are computed FROM the
+        // scores, and the rows the generator reads are the server's — so
+        // advancing with scores still queued would draw from stale data.
+        const remaining = await flushAndCount(sessionId);
+        if (remaining > 0) {
+          setRoundError(
+            `Waiting to sync ${remaining} score${remaining > 1 ? "s" : ""} — reconnect to the internet to start the next round.`,
+          );
+          void notify("warning"); // refused, and the host may not be looking at the screen
+          return;
+        }
       }
       await generateNextRound(sessionId);
       setViewedIndex(0); // jump to the newly created current round
@@ -903,9 +918,24 @@ export default function HostLivePage() {
     setEndingSession(true);
     setEndSessionError(null);
     try {
+      const wasLocal = isLocalOnly(sessionId);
       await endSession(sessionId);
-      notifyLiveUpdate(sessionId); // flip any watchers to the final/ended view
       setShowEndConfirm(false);
+
+      if (wasLocal) {
+        // The podium is built by get_public_session_by_id — a server RPC — so
+        // a session that hasn't synced has no podium to show yet. Sending the
+        // host there anyway is what produced an error screen with no way back
+        // to a session they had just correctly ended.
+        //
+        // Home instead. The session IS ended, it uploads itself, and the
+        // podium is waiting in their history once it has. Losing the flourish
+        // on a dead court is a fair trade for not losing the way out.
+        navigate("/play", { replace: true });
+        return;
+      }
+
+      notifyLiveUpdate(sessionId); // flip any watchers to the final/ended view
       navigate(`/session/${sessionId}/final`); // straight to the podium; rounds/standings stay reachable from there
     } catch (err) {
       setEndSessionError(withFallback(err, "Could not end this session."));
@@ -1746,34 +1776,19 @@ export default function HostLivePage() {
         </div>
       )}
 
-      {/* Offline-first sync status — a floating toast pinned to the bottom, so
-          it never pushes the round content up or down. Only appears when it
-          matters (something pending, or no connection); invisible on good
-          signal. pointer-events-none so it never blocks a tap underneath. */}
-      {(syncPending > 0 || !syncOnline) && (
-        <div
-          className="fixed inset-x-0 bottom-0 z-40 flex justify-center px-4 pointer-events-none anim-fade"
-          style={{ paddingBottom: "max(1rem, env(safe-area-inset-bottom))" }}
-        >
-          <div
-            className={`flex items-center gap-2 rounded-full border px-3.5 py-2 text-[11px] font-semibold shadow-[0_10px_30px_-10px_rgba(13,13,13,0.4)] ${
-              !syncOnline ? "border-gold-soft bg-gold-soft text-gold-ink" : "border-line bg-surface text-ink-2"
-            }`}
-          >
-            <span
-              className={`w-1.5 h-1.5 rounded-full shrink-0 ${!syncOnline ? "bg-gold-ink" : "bg-court-lime animate-pulse"}`}
-              aria-hidden
-            />
-            {!syncOnline
-              ? syncPending > 0
-                ? `Offline · ${syncPending} score${syncPending > 1 ? "s" : ""} saved here, will upload when you reconnect`
-                : "Offline · scores save here and upload when you reconnect"
-              : syncFlushing
-                ? `Syncing ${syncPending} score${syncPending > 1 ? "s" : ""}…`
-                : `${syncPending} score${syncPending > 1 ? "s" : ""} waiting to sync`}
-          </div>
-        </div>
-      )}
+      {/* The sync toast that used to live here is gone, deliberately.
+          It reported OUR plumbing: how many scores were queued, whether a
+          flush was running, whether the phone had a connection. None of that
+          is the host's problem. They tapped a score and the score is on the
+          screen; whether the row has reached Postgres yet is our job to get
+          right, not theirs to monitor. A status pill about it only teaches
+          someone to worry about something they cannot act on — and worse,
+          invites them to wait before doing the next thing.
+
+          What replaced it is not a quieter message: it is the work that makes
+          the message unnecessary. Scores save locally and upload themselves,
+          a session started offline runs and syncs itself, and every action on
+          this screen works with no signal. Nothing to report. */}
     </div>
   );
 }

@@ -1,4 +1,5 @@
 import { supabase } from "./client";
+import { localSessionIdForPlayer, setLocalPlayerStatus } from "../offline/localSession";
 
 /**
  * Mid-session host actions — the "Manage" menu on Host Live: rename a
@@ -80,12 +81,27 @@ export async function removePlayer(playerId: string): Promise<void> {
  * redrawRemainingRounds (Manage → Rounds not yet played).
  */
 export async function markPlayerLeft(playerId: string): Promise<void> {
+  // A session that hasn't synced has no server row for this player, so the
+  // update below would match nothing and report success. The host would mark
+  // someone as left, see nothing change, and find them back on court in the
+  // next round — the draw filters on status, and for a local session it reads
+  // the local array.
+  const localId = localSessionIdForPlayer(playerId);
+  if (localId) {
+    setLocalPlayerStatus(localId, playerId, "left");
+    return;
+  }
   const { error } = await supabase.from("players").update({ status: "left", left_at: new Date().toISOString() }).eq("id", playerId);
   if (error) throw error;
 }
 
 /** Undoes markPlayerLeft — the player is eligible again starting with the next generated round. */
 export async function restorePlayer(playerId: string): Promise<void> {
+  const localId = localSessionIdForPlayer(playerId);
+  if (localId) {
+    setLocalPlayerStatus(localId, playerId, "active");
+    return;
+  }
   const { error } = await supabase.from("players").update({ status: "active", left_at: null }).eq("id", playerId);
   if (error) throw error;
 }

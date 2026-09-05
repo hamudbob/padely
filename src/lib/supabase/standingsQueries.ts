@@ -7,6 +7,7 @@ import {
   StandingRow,
 } from "../scoring/standings";
 import { scoreRangeForFormat, ScoringFormat } from "../scoring/formats";
+import { getLocalSession } from "../offline/localSession";
 
 export interface StandingsRow extends StandingRow {
   playerName: string;
@@ -160,6 +161,48 @@ export function assembleStandings(input: StandingsInput): SessionStandings {
  * two screens can never disagree on who's actually winning.
  */
 export async function getSessionStandings(sessionId: string): Promise<SessionStandings> {
+  // A session started with no signal lives only on this phone until it syncs.
+  // Note what this branch does NOT do: it does not compute anything. It builds
+  // the same StandingsInput from local rows and hands it to the same
+  // assembleStandings — where compensation, Fixed-Partner collapsing and every
+  // tiebreaker live. One implementation, two sources. The board a host reads
+  // on a dead court is therefore the board that appears after it uploads,
+  // down to the tiebreaks; a second implementation here would eventually
+  // disagree, and nobody could say which was right.
+  //
+  // Adjustments are empty by construction: they are an admin action taken
+  // against a session on the server, which cannot have happened to one that
+  // has never been there.
+  const local = getLocalSession(sessionId);
+  if (local && !local.syncedAt) {
+    const finalMatches = local.matches.filter((m) => m.status === "final");
+    const finalIds = new Set(finalMatches.map((m) => m.id));
+    return assembleStandings({
+      session: {
+        ranking_basis: local.session.ranking_basis,
+        format: local.session.format,
+        fixed_partner_style: local.session.fixed_partner_style,
+        scoring_format: local.session.scoring_format,
+      },
+      players: local.players.map((p) => ({
+        id: p.id,
+        display_name: p.display_name,
+        team_side: p.team_side,
+        status: p.status,
+      })),
+      finalMatches: finalMatches.map((m) => ({
+        id: m.id,
+        score_a: m.score_a,
+        score_b: m.score_b,
+        outcome: m.outcome,
+        status: m.status,
+      })),
+      participants: local.participants.filter((mp) => finalIds.has(mp.match_id)) as StandingsInput["participants"],
+      adjustments: [] as StandingsInput["adjustments"],
+      pairs: local.pairs.map((pr) => ({ id: pr.id, player_a_id: pr.player_a_id, player_b_id: pr.player_b_id })),
+    } as StandingsInput);
+  }
+
   // session/players/rounds/adjustments are all independent of each other
   // (none needs another's result) — one parallel batch instead of four
   // sequential round trips. Fires after every score save and every

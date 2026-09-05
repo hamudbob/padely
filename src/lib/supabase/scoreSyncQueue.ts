@@ -1,6 +1,7 @@
 import { submitMatchScore } from "./scoreActions";
 import { notifyLiveUpdate } from "./liveChannel";
 import { ScoringFormat } from "../scoring/formats";
+import { isLocalOnly, setLocalMatchScore } from "../offline/localSession";
 
 /**
  * Offline-first score sync queue.
@@ -149,6 +150,15 @@ export function enqueueScore(item: Omit<PendingScore, "clientId" | "enqueuedAt">
   queue = queue.filter((q) => !(q.sessionId === item.sessionId && q.matchId === item.matchId));
   queue.push({ ...item, clientId: makeClientId(), enqueuedAt: Date.now() });
   persist();
+
+  // A session started with no signal has no server rows yet, so the queue
+  // alone would leave the standings and round history showing an unplayed
+  // match. Write it into the local graph too — that is what those screens
+  // read from until the session syncs.
+  if (isLocalOnly(item.sessionId)) {
+    setLocalMatchScore(item.sessionId, item.matchId, item.scoreA, item.scoreB);
+  }
+
   emit();
   void flush();
 }
@@ -198,6 +208,19 @@ export async function flush(): Promise<void> {
       // enqueue, or already parked.
       const current = queue.find((q) => q.clientId === item.clientId);
       if (!current || (current.attempts ?? 0) >= MAX_ATTEMPTS) continue;
+
+      // Skip scores belonging to a session that hasn't reached the server yet.
+      //
+      // THIS GUARD PREVENTS A REAL DATA LOSS. The match id exists only on this
+      // phone until the session syncs, so submitMatchScore would come back
+      // "match not found" — which isPermanentError classifies as permanent,
+      // because normally it is. Five of those and the item is PARKED: an
+      // evening's scores discarded by the machinery that exists to protect
+      // them, silently, before the session had any chance to upload.
+      //
+      // localSessionSync flushes this queue itself once the session lands, so
+      // nothing here is waiting on a timer.
+      if (isLocalOnly(item.sessionId)) continue;
       try {
         await submitMatchScore({
           matchId: item.matchId,

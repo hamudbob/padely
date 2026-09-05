@@ -25,6 +25,7 @@ import {
 } from "../scheduling/types";
 import { computeStandings, CompletedMatchResult } from "../scoring/standings";
 import { scoreRangeForFormat, ScoringFormat } from "../scoring/formats";
+import { getLocalSession, saveLocalSession, localUuid } from "../offline/localSession";
 
 export interface GenerateNextRoundResult {
   roundId: string;
@@ -45,12 +46,34 @@ export interface GenerateNextRoundResult {
  * playable courts rather than silently saving an empty one.
  */
 export async function generateNextRound(sessionId: string, seedOverride?: number, forceRandom = false): Promise<GenerateNextRoundResult> {
-  const { data: session, error: sessionError } = await supabase
-    .from("sessions")
-    .select("id, format, scoring_format, ranking_basis, scheduling_seed, status, fixed_partner_style")
-    .eq("id", sessionId)
-    .single();
-  if (sessionError) throw sessionError;
+  // A session started with no signal. Everything this function does after the
+  // fetches — choosing who plays, who rests, and against whom — is already
+  // pure computation on the device; only the rows come from somewhere else.
+  //
+  // This matters most for Mexicano and rank-based Fixed Partner, which draw
+  // each round FROM THE CURRENT STANDINGS rather than laying the whole
+  // schedule out at the start. Americano and round-robin already have every
+  // round in the local graph and never reach this function offline.
+  //
+  // There is a tempting shortcut — pre-generate the whole schedule for
+  // offline sessions whatever the format — and it is wrong. A Mexicano whose
+  // draw doesn't respond to standings is an Americano wearing its name, and
+  // the difference would show up over the night with nobody able to say why.
+  const local = getLocalSession(sessionId);
+  const useLocal = Boolean(local && !local.syncedAt);
+
+  let session: { id: string; format: string; scoring_format: string; ranking_basis: string; scheduling_seed: number; status: string; fixed_partner_style: string | null } | null = null;
+  if (useLocal && local) {
+    session = local.session;
+  } else {
+    const { data, error: sessionError } = await supabase
+      .from("sessions")
+      .select("id, format, scoring_format, ranking_basis, scheduling_seed, status, fixed_partner_style")
+      .eq("id", sessionId)
+      .single();
+    if (sessionError) throw sessionError;
+    session = data;
+  }
   if (!session) throw new Error("Session not found.");
 
   // "fixed_partner" is kept here only for backward compatibility with any
@@ -78,22 +101,41 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
     return { data: data ?? [], error };
   }
 
-  const [courtsResult, playersResult, roundsResult, pairsResult] = await Promise.all([
-    supabase.from("courts").select("id, ordinal, available").eq("session_id", sessionId).eq("available", true).order("ordinal", { ascending: true }),
-    // Ordered so activePlayerIds has a STABLE order — the seeded RNG consumes
-    // it positionally, so an unordered fetch could make "Refresh" (same seed)
-    // draw differently just because DB row order shifted after an edit.
-    supabase.from("players").select("id, status, team_side, gender, preferred_side").eq("session_id", sessionId).eq("status", "active").order("joined_at", { ascending: true }).order("id", { ascending: true }),
-    supabase.from("rounds").select("id, sequence, status").eq("session_id", sessionId).order("sequence", { ascending: true }),
-    fetchPairs(),
-  ]);
-  if (courtsResult.error) throw courtsResult.error;
-  if (playersResult.error) throw playersResult.error;
-  if (roundsResult.error) throw roundsResult.error;
-  if (pairsResult.error) throw pairsResult.error;
+  let availableCourts: { id: string; ordinal: number; available: boolean }[] = [];
+  let playerRows: { id: string; status: string; team_side: string | null; gender: string; preferred_side: string | null }[] = [];
+  let roundRows: { id: string; sequence: number; status: string }[] = [];
+  let pairRows: { id: string; player_a_id: string; player_b_id: string }[] = [];
 
-  const availableCourts = courtsResult.data ?? [];
-  const playerRows = playersResult.data ?? [];
+  if (useLocal && local) {
+    availableCourts = local.courts.filter((c) => c.available).sort((a, b) => a.ordinal - b.ordinal);
+    // The same ordering the query specifies, and for the same reason: the
+    // seeded RNG consumes this list positionally, so an unstable order would
+    // make "Refresh" draw differently on the same seed.
+    playerRows = local.players
+      .filter((p) => p.status === "active")
+      .slice()
+      .sort((a, b) => a.joined_at.localeCompare(b.joined_at) || a.id.localeCompare(b.id));
+    roundRows = local.rounds.slice().sort((a, b) => a.sequence - b.sequence);
+    pairRows = needsPairs ? local.pairs : [];
+  } else {
+    const [courtsResult, playersResult, roundsResult, pairsResult] = await Promise.all([
+      supabase.from("courts").select("id, ordinal, available").eq("session_id", sessionId).eq("available", true).order("ordinal", { ascending: true }),
+      // Ordered so activePlayerIds has a STABLE order — the seeded RNG consumes
+      // it positionally, so an unordered fetch could make "Refresh" (same seed)
+      // draw differently just because DB row order shifted after an edit.
+      supabase.from("players").select("id, status, team_side, gender, preferred_side").eq("session_id", sessionId).eq("status", "active").order("joined_at", { ascending: true }).order("id", { ascending: true }),
+      supabase.from("rounds").select("id, sequence, status").eq("session_id", sessionId).order("sequence", { ascending: true }),
+      fetchPairs(),
+    ]);
+    if (courtsResult.error) throw courtsResult.error;
+    if (playersResult.error) throw playersResult.error;
+    if (roundsResult.error) throw roundsResult.error;
+    if (pairsResult.error) throw pairsResult.error;
+    availableCourts = courtsResult.data ?? [];
+    playerRows = playersResult.data ?? [];
+    roundRows = roundsResult.data ?? [];
+    pairRows = pairsResult.data ?? [];
+  }
   const activePlayerIds: PlayerId[] = playerRows.map((p) => p.id);
   // Team Sparring only — the roster split needed to keep every match a
   // Team A pair vs a Team B pair, same as the upfront schedule generation.
@@ -117,37 +159,52 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
   // Fixed Partner only — pairs are formed once at session creation and
   // never re-formed here; pairId is the REAL pairs.id (not the tempId-space
   // key sessionActions.ts uses before persistence).
-  const pairs: Pair[] = (pairsResult.data ?? []).map((p) => ({ pairId: p.id, playerA: p.player_a_id, playerB: p.player_b_id }));
+  const pairs: Pair[] = pairRows.map((p) => ({ pairId: p.id, playerA: p.player_a_id, playerB: p.player_b_id }));
 
-  const rounds = roundsResult.data;
-  if (!rounds || rounds.length === 0) throw new Error("This session has no rounds yet.");
+  const rounds = roundRows;
+  if (rounds.length === 0) throw new Error("This session has no rounds yet.");
 
   const latestRound = rounds[rounds.length - 1];
   const roundIds = rounds.map((r) => r.id);
 
   // matches and rests both only depend on roundIds (not on each other) —
   // fetch together.
-  const [matchesResult, restsResult] = await Promise.all([
-    supabase.from("matches").select("id, round_id, court_id, score_a, score_b, outcome, status, pair_a_id, pair_b_id").in("round_id", roundIds),
-    supabase.from("round_rests").select("round_id, player_id").in("round_id", roundIds),
-  ]);
-  if (matchesResult.error) throw matchesResult.error;
-  if (restsResult.error) throw restsResult.error;
-  const matches = matchesResult.data ?? [];
-  const allRests = restsResult.data;
+  let matches: { id: string; round_id: string; court_id: string; score_a: number | null; score_b: number | null; outcome: string | null; status: string; pair_a_id: string | null; pair_b_id: string | null }[] = [];
+  let allRests: { round_id: string; player_id: string }[] = [];
+  // side is narrowed here: the column has a CHECK constraint and the local
+  // store is built from the same union, so both sources satisfy it.
+  let participants: { match_id: string; player_id: string; side: "A" | "B" }[] = [];
+
+  if (useLocal && local) {
+    const ids = new Set(roundIds);
+    matches = local.matches.filter((m) => ids.has(m.round_id));
+    allRests = local.rests.filter((r) => ids.has(r.round_id));
+    const mids = new Set(matches.map((m) => m.id));
+    participants = local.participants.filter((mp) => mids.has(mp.match_id));
+  } else {
+    const [matchesResult, restsResult] = await Promise.all([
+      supabase.from("matches").select("id, round_id, court_id, score_a, score_b, outcome, status, pair_a_id, pair_b_id").in("round_id", roundIds),
+      supabase.from("round_rests").select("round_id, player_id").in("round_id", roundIds),
+    ]);
+    if (matchesResult.error) throw matchesResult.error;
+    if (restsResult.error) throw restsResult.error;
+    matches = matchesResult.data ?? [];
+    allRests = restsResult.data ?? [];
+
+    const allMatchIds = matches.map((m) => m.id);
+    const { data: allParticipants, error: participantsError } =
+      allMatchIds.length > 0
+        ? await supabase.from("match_participants").select("match_id, player_id, side").in("match_id", allMatchIds)
+        : { data: [], error: null };
+    if (participantsError) throw participantsError;
+    participants = (allParticipants ?? []) as typeof participants;
+  }
 
   const latestMatches = matches.filter((m) => m.round_id === latestRound.id);
   if (latestMatches.length === 0 || latestMatches.some((m) => m.status !== "final")) {
     throw new Error("Finish scoring every match in this round before generating the next one.");
   }
 
-  const allMatchIds = matches.map((m) => m.id);
-  const { data: allParticipants, error: participantsError } =
-    allMatchIds.length > 0
-      ? await supabase.from("match_participants").select("match_id, player_id, side").in("match_id", allMatchIds)
-      : { data: [], error: null };
-  if (participantsError) throw participantsError;
-  const participants = allParticipants ?? [];
 
   // --- Fairness stats: matchesPlayed = every match a player has been
   // assigned to across every past round (assignment counts, same definition
@@ -429,6 +486,57 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
     throw new Error(result.explanation);
   }
 
+  // ── Local-only session: write into the on-device graph ─────────────────
+  //
+  // Same computation above, same shape below — only the destination differs.
+  // The ids are generated here exactly as they were at session start, which
+  // is what lets 0060 accept the whole graph verbatim later: every reference
+  // inside it already resolves, so the server does no remapping at all.
+  if (useLocal && local) {
+    const newRoundId = localUuid();
+    const now = new Date().toISOString();
+    const pairByPlayerIdLocal = needsPairs ? buildPairByPlayerId(pairs) : new Map<string, string>();
+
+    const prior = local.rounds.find((r) => r.id === latestRound.id);
+    if (prior) prior.status = "scored";
+
+    local.rounds.push({
+      id: newRoundId,
+      session_id: sessionId,
+      sequence: newSequence,
+      status: "in_progress",
+      generation_reason: `Round ${newSequence} generated automatically after Round ${latestRound.sequence} was fully scored.`,
+      seed_used: roundSeed,
+      generated_at: now,
+    });
+
+    for (const match of result.matches) {
+      const matchId = localUuid();
+      const pairAId = pairByPlayerIdLocal.get(match.teamA[0]) ?? null;
+      const pairBId = pairByPlayerIdLocal.get(match.teamB[0]) ?? null;
+      local.matches.push({
+        id: matchId,
+        round_id: newRoundId,
+        court_id: availableCourts[match.courtIndex].id,
+        pair_a_id: pairAId && pairBId ? pairAId : null,
+        pair_b_id: pairAId && pairBId ? pairBId : null,
+        score_a: null,
+        score_b: null,
+        outcome: null,
+        status: "not_started",
+      });
+      for (const playerId of match.teamA) local.participants.push({ match_id: matchId, player_id: playerId, side: "A" });
+      for (const playerId of match.teamB) local.participants.push({ match_id: matchId, player_id: playerId, side: "B" });
+    }
+
+    for (const playerId of result.restingIds) {
+      local.rests.push({ round_id: newRoundId, player_id: playerId, consecutive_rest_count: 0 });
+    }
+
+    saveLocalSession(local);
+    return { roundId: newRoundId, sequence: newSequence };
+  }
+
   // Mark the round that was just completed as scored, and persist the new
   // one, in parallel — neither write depends on the other's result (the new
   // round doesn't reference the old round's status).
@@ -526,12 +634,19 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
  * with no rounds at all).
  */
 async function loadLatestTwoRounds(sessionId: string): Promise<{ latestId: string; latestSeq: number; prevId: string }> {
-  const { data: rounds, error } = await supabase
-    .from("rounds")
-    .select("id, sequence")
-    .eq("session_id", sessionId)
-    .order("sequence", { ascending: true });
-  if (error) throw error;
+  const localForRounds = getLocalSession(sessionId);
+  let rounds: { id: string; sequence: number }[] | null;
+  if (localForRounds && !localForRounds.syncedAt) {
+    rounds = localForRounds.rounds.slice().sort((a, b) => a.sequence - b.sequence);
+  } else {
+    const { data, error } = await supabase
+      .from("rounds")
+      .select("id, sequence")
+      .eq("session_id", sessionId)
+      .order("sequence", { ascending: true });
+    if (error) throw error;
+    rounds = data;
+  }
   if (!rounds || rounds.length === 0) throw new Error("This session has no rounds yet.");
   if (rounds.length < 2) {
     throw new Error("This is the first round — there's nothing before it to fall back to. Add or remove players and it'll apply on the next round.");
@@ -558,6 +673,25 @@ export async function swapRoundPlayers(roundId: string, playerA: string, playerB
 
 export async function deleteCurrentRound(sessionId: string): Promise<void> {
   const { latestId, prevId } = await loadLatestTwoRounds(sessionId);
+
+  // Local session: delete the round and everything hanging off it by hand.
+  // The database does this with ON DELETE CASCADE; here the cascade is ours
+  // to perform, and forgetting one of these three tables would leave orphan
+  // rows that 0060 would happily upload — matches pointing at a round that
+  // no longer exists.
+  const local = getLocalSession(sessionId);
+  if (local && !local.syncedAt) {
+    const doomed = new Set(local.matches.filter((m) => m.round_id === latestId).map((m) => m.id));
+    local.matches = local.matches.filter((m) => m.round_id !== latestId);
+    local.participants = local.participants.filter((mp) => !doomed.has(mp.match_id));
+    local.rests = local.rests.filter((r) => r.round_id !== latestId);
+    local.rounds = local.rounds.filter((r) => r.id !== latestId);
+    const prev = local.rounds.find((r) => r.id === prevId);
+    if (prev) prev.status = "in_progress";
+    saveLocalSession(local);
+    return;
+  }
+
   const { error: deleteError } = await supabase.from("rounds").delete().eq("id", latestId);
   if (deleteError) throw deleteError;
   const { error: reopenError } = await supabase.from("rounds").update({ status: "in_progress" }).eq("id", prevId);
@@ -574,6 +708,32 @@ export async function deleteCurrentRound(sessionId: string): Promise<void> {
  * to fill at least one court.
  */
 async function assertRegenerable(sessionId: string): Promise<void> {
+  // Local session: the same three checks, against the local rows. Skipping
+  // this branch made every guard here read an empty result — no courts, no
+  // active players — so Randomize refused with "No courts are available" on a
+  // session that had two.
+  const local = getLocalSession(sessionId);
+  if (local && !local.syncedAt) {
+    const courts = local.courts.filter((c) => c.available);
+    const active = local.players.filter((p) => p.status === "active");
+    if (courts.length === 0) {
+      throw new Error("No courts are available — turn at least one back on before redrawing this round.");
+    }
+    if (active.length < 4) {
+      throw new Error("A round needs at least 4 active players. Add someone back before redrawing.");
+    }
+    const ordered = local.rounds.slice().sort((a, b) => a.sequence - b.sequence);
+    const prevRound = ordered[ordered.length - 2];
+    if (!prevRound) return;
+    const prevMatchList = local.matches.filter((m) => m.round_id === prevRound.id);
+    if (prevMatchList.length === 0 || prevMatchList.some((m) => m.status !== "final")) {
+      throw new Error(
+        "The round before this one isn't fully scored yet, so there's nothing to redraw from. Score it first.",
+      );
+    }
+    return;
+  }
+
   const [roundsResult, courtsResult, playersResult] = await Promise.all([
     supabase.from("rounds").select("id, sequence").eq("session_id", sessionId).order("sequence", { ascending: true }),
     supabase.from("courts").select("id").eq("session_id", sessionId).eq("available", true),
@@ -629,8 +789,23 @@ export async function regenerateCurrentRound(sessionId: string, opts: { randomiz
   // left the round deleted and nothing to put in its place. One tap, one round
   // gone, permanently, with only an error toast to show for it.
   await assertRegenerable(sessionId);
-  const { error: deleteError } = await supabase.from("rounds").delete().eq("id", latestId);
-  if (deleteError) throw deleteError;
+
+  // Local session: the same delete, done by hand with its cascade. Without
+  // this branch Randomize hit the server, matched no rows, reported success,
+  // and then generateNextRound refused because the round it was meant to
+  // replace was still sitting there — so the button did nothing at all.
+  const localForRegen = getLocalSession(sessionId);
+  if (localForRegen && !localForRegen.syncedAt) {
+    const doomed = new Set(localForRegen.matches.filter((m) => m.round_id === latestId).map((m) => m.id));
+    localForRegen.matches = localForRegen.matches.filter((m) => m.round_id !== latestId);
+    localForRegen.participants = localForRegen.participants.filter((mp) => !doomed.has(mp.match_id));
+    localForRegen.rests = localForRegen.rests.filter((r) => r.round_id !== latestId);
+    localForRegen.rounds = localForRegen.rounds.filter((r) => r.id !== latestId);
+    saveLocalSession(localForRegen);
+  } else {
+    const { error: deleteError } = await supabase.from("rounds").delete().eq("id", latestId);
+    if (deleteError) throw deleteError;
+  }
   // A large, non-negative integer seed keeps mulberry32 well-distributed. Vary
   // it only for randomize; refresh reuses generateNextRound's deterministic seed.
   const randomSeed = opts.randomize ? Math.floor(Math.random() * 2_000_000_000) : undefined;

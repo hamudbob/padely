@@ -4,6 +4,8 @@ import { applySessionResults } from "./resultActions";
 import type { Database } from "./database.types";
 import type { RoundResult } from "../scheduling/types";
 import { Pair, buildPairByPlayerId, pairLabel } from "../scheduling/fixedPartner";
+import { isLocalOnly, setLocalSessionEnded } from "../offline/localSession";
+import { syncLocalSessions } from "../offline/localSessionSync";
 
 type SessionFormat = Database["public"]["Tables"]["sessions"]["Row"]["format"];
 type ScoringFormat = Database["public"]["Tables"]["sessions"]["Row"]["scoring_format"];
@@ -86,9 +88,22 @@ export interface CreateLobbyInput {
 }
 
 export async function createLobby(input: CreateLobbyInput): Promise<StartSessionResult> {
-  const { data: userData, error: userError } = await supabase.auth.getUser();
-  if (userError || !userData.user) throw new Error("Your session expired — please log in again.");
-  const user = userData.user;
+  // getSession(), NOT getUser().
+  //
+  // getUser() asks the server who you are, so it needs a network. With no
+  // signal it fails, and this function used to report ANY failure as "your
+  // session expired — please log in again" — advice that is not merely wrong
+  // but harmful: a host on a court with no bars cannot log in, and trying
+  // would throw away the roster they just typed. getSession() reads the
+  // stored session from disk and answers offline.
+  //
+  // The security difference is nil here. A stored session's JWT is signed;
+  // every write below is still checked by RLS against that token, so a forged
+  // local session buys nothing. getUser() only adds a liveness check we don't
+  // need at this point in the flow.
+  const { data: sessionData } = await supabase.auth.getSession();
+  const user = sessionData.session?.user;
+  if (!user) throw new Error("Your session expired — please log in again.");
 
   const { data: teamRow, error: teamError } = await supabase.from("teams").select("id").eq("owner_id", user.id).limit(1).single();
   if (teamError || !teamRow) throw new Error("Could not find your team — try logging out and back in.");
@@ -279,6 +294,23 @@ export async function finalizeAndStart(
  * remaining fully reopenable from the home page's session list.
  */
 export async function endSession(sessionId: string): Promise<void> {
+  // A session that hasn't reached the server has nothing here to update, so
+  // this used to fail and the host could not finish their own evening. End it
+  // locally, then try to sync — if there's signal now, the whole session
+  // uploads already ended, and ratings and league results are applied by the
+  // pass below on a later launch.
+  //
+  // Ratings and league results are deliberately NOT attempted here for a local
+  // session: both are server-side and both are guarded as idempotent
+  // (ratings_applied / results_applied), so the correct place for them is
+  // after the session exists. Trying now would fail, and swallowing that
+  // failure is how a league quietly misses a night.
+  if (isLocalOnly(sessionId)) {
+    setLocalSessionEnded(sessionId);
+    void syncLocalSessions();
+    return;
+  }
+
   const { error } = await supabase
     .from("sessions")
     .update({ status: "ended", ended_at: new Date().toISOString() })

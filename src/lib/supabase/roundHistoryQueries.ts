@@ -1,4 +1,5 @@
 import { supabase } from "./client";
+import { getLocalSession } from "../offline/localSession";
 
 export interface RoundHistoryMatch {
   id: string;
@@ -38,50 +39,81 @@ export interface RoundHistoryEntry {
  * sequential round trips. Only participants (needs matchIds) stays after.
  */
 export async function getRoundHistory(sessionId: string): Promise<RoundHistoryEntry[]> {
-  const [
-    { data: courts, error: courtsError },
-    { data: players, error: playersError },
-    { data: rounds, error: roundsError },
-  ] = await Promise.all([
-    supabase.from("courts").select("id, display_name, ordinal").eq("session_id", sessionId),
-    supabase.from("players").select("id, display_name").eq("session_id", sessionId),
-    supabase.from("rounds").select("id, sequence, status").eq("session_id", sessionId).order("sequence", { ascending: false }),
-  ]);
-  if (courtsError) throw courtsError;
-  if (playersError) throw playersError;
-  if (roundsError) throw roundsError;
+  // Local-only session: same shaping below, different source. See
+  // lib/offline/localSession.ts.
+  const local = getLocalSession(sessionId);
+  const useLocal = Boolean(local && !local.syncedAt);
 
-  const courtNameById = new Map((courts ?? []).map((c) => [c.id, c.display_name]));
-  const courtOrdinalById = new Map((courts ?? []).map((c) => [c.id, c.ordinal]));
-  const playerNameById = new Map((players ?? []).map((p) => [p.id, p.display_name]));
-  const roundList = rounds ?? [];
+  let courts: { id: string; display_name: string; ordinal: number }[] = [];
+  let players: { id: string; display_name: string }[] = [];
+  let rounds: { id: string; sequence: number; status: string }[] = [];
+
+  if (useLocal && local) {
+    courts = local.courts;
+    players = local.players;
+    rounds = local.rounds.slice().sort((a, b) => b.sequence - a.sequence);
+  } else {
+    const [
+      { data: courtsData, error: courtsError },
+      { data: playersData, error: playersError },
+      { data: roundsData, error: roundsError },
+    ] = await Promise.all([
+      supabase.from("courts").select("id, display_name, ordinal").eq("session_id", sessionId),
+      supabase.from("players").select("id, display_name").eq("session_id", sessionId),
+      supabase.from("rounds").select("id, sequence, status").eq("session_id", sessionId).order("sequence", { ascending: false }),
+    ]);
+    if (courtsError) throw courtsError;
+    if (playersError) throw playersError;
+    if (roundsError) throw roundsError;
+    courts = courtsData ?? [];
+    players = playersData ?? [];
+    rounds = roundsData ?? [];
+  }
+
+  const courtNameById = new Map(courts.map((c) => [c.id, c.display_name]));
+  const courtOrdinalById = new Map(courts.map((c) => [c.id, c.ordinal]));
+  const playerNameById = new Map(players.map((p) => [p.id, p.display_name]));
+  const roundList = rounds;
   const roundIds = roundList.map((r) => r.id);
 
-  const [
-    { data: matchRows, error: matchesError },
-    { data: rests, error: restsError },
-  ] =
-    roundIds.length > 0
-      ? await Promise.all([
-          supabase
-            .from("matches")
-            .select("id, round_id, court_id, score_a, score_b, status, outcome")
-            .in("round_id", roundIds),
-          supabase.from("round_rests").select("round_id, player_id").in("round_id", roundIds),
-        ])
-      : [{ data: [], error: null }, { data: [], error: null }];
-  if (matchesError) throw matchesError;
-  if (restsError) throw restsError;
-  const matches = matchRows ?? [];
+  let matches: { id: string; round_id: string; court_id: string; score_a: number | null; score_b: number | null; status: string; outcome: string | null }[] = [];
+  let rests: { round_id: string; player_id: string }[] = [];
+  let participants: { match_id: string; player_id: string; side: "A" | "B" }[] = [];
 
-  const matchIds = matches.map((m) => m.id);
-  const { data: participants, error: participantsError } =
-    matchIds.length > 0
-      ? await supabase.from("match_participants").select("match_id, player_id, side").in("match_id", matchIds)
-      : { data: [], error: null };
-  if (participantsError) throw participantsError;
+  if (useLocal && local) {
+    matches = local.matches;
+    rests = local.rests;
+    participants = local.participants;
+  } else {
+    const [
+      { data: matchRows, error: matchesError },
+      { data: restRows, error: restsError },
+    ] =
+      roundIds.length > 0
+        ? await Promise.all([
+            supabase
+              .from("matches")
+              .select("id, round_id, court_id, score_a, score_b, status, outcome")
+              .in("round_id", roundIds),
+            supabase.from("round_rests").select("round_id, player_id").in("round_id", roundIds),
+          ])
+        : [{ data: [], error: null }, { data: [], error: null }];
+    if (matchesError) throw matchesError;
+    if (restsError) throw restsError;
+    matches = matchRows ?? [];
+    rests = restRows ?? [];
+
+    const matchIds = matches.map((m) => m.id);
+    const { data: participantRows, error: participantsError } =
+      matchIds.length > 0
+        ? await supabase.from("match_participants").select("match_id, player_id, side").in("match_id", matchIds)
+        : { data: [], error: null };
+    if (participantsError) throw participantsError;
+    participants = (participantRows ?? []) as typeof participants;
+  }
+
   const participantsByMatch = new Map<string, { player_id: string; side: "A" | "B" }[]>();
-  for (const p of participants ?? []) {
+  for (const p of participants) {
     const list = participantsByMatch.get(p.match_id) ?? [];
     list.push({ player_id: p.player_id, side: p.side });
     participantsByMatch.set(p.match_id, list);
