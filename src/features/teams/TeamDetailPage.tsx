@@ -19,6 +19,8 @@ import {
 import { useBackNav } from "../../lib/useBackNav";
 import { BottomSheet } from "../shell/Sheet";
 import { SkeletonScreen, SkeletonHero, SkeletonStats, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
+import { useCachedQuery, invalidateQuery } from "../../lib/cache/useCachedQuery";
+import OfflineNote from "../shell/OfflineNote";
 
 const ROLE_LABEL: Record<TeamRole, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -29,21 +31,102 @@ function roleLine(role: TeamRole | undefined): string {
   return "";
 }
 
+/** Local `YYYY-MM-DDTHH:mm`, which is the only format <input
+ *  type="datetime-local"> accepts. Shifting by the offset first is what stops
+ *  every value moving by the timezone when it round-trips. */
+function toLocalInput(d: Date): string {
+  return new Date(d.getTime() - d.getTimezoneOffset() * 60000).toISOString().slice(0, 16);
+}
+
+/**
+ * A sensible starting value for a new session's date and time.
+ *
+ * WHY THIS EXISTS. The field used to open empty. An empty datetime-local on
+ * some phones resolves to *now* the moment it is touched, which is how a
+ * session got created at 10:26 PM on a Sunday — and then didn't appear on the
+ * club page, because by the time anyone looked it was already in the past. The
+ * bug cost an evening of looking for a fault in the RSVP code that was never
+ * there.
+ *
+ * A club plays on the same night, at the same time, most weeks. So the default
+ * is the club's OWN rhythm: take the most recent session, keep its weekday and
+ * time, and roll it forward to the next time that comes around. Schedule the
+ * Tuesday session on a Wednesday and the form already says next Tuesday, 19:00.
+ *
+ * With no history to go on it falls back to the next 19:00 — early evening is
+ * when padel is played, and a wrong-but-plausible default is still better than
+ * an empty field that can silently mean "now".
+ */
+function defaultWhen(events: ClubEvent[]): string {
+  const now = new Date();
+
+  const latest = events
+    .map((e) => new Date(e.scheduledAt))
+    .filter((d) => !Number.isNaN(d.getTime()))
+    .sort((a, b) => b.getTime() - a.getTime())[0];
+
+  const next = new Date(now);
+  if (latest) {
+    next.setHours(latest.getHours(), latest.getMinutes(), 0, 0);
+    // Same weekday as the club's last session. 0 days ahead means today —
+    // allowed, but only if that time hasn't already gone.
+    const daysAhead = (latest.getDay() - now.getDay() + 7) % 7;
+    next.setDate(next.getDate() + daysAhead);
+    if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 7);
+  } else {
+    next.setHours(19, 0, 0, 0);
+    if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 1);
+  }
+  return toLocalInput(next);
+}
+
 export default function TeamDetailPage() {
   const { teamId } = useParams();
   const navigate = useNavigate();
   const back = useBackNav("/teams");
   const { user } = useHostSession();
 
-  const [team, setTeam] = useState<Team | null>(null);
-  const [members, setMembers] = useState<TeamMember[]>([]);
-  const [past, setPast] = useState<TeamSession[]>([]);
+  // ── Cached reads ────────────────────────────────────────────────────────
+  //
+  // The club header, its members and its stats all come from disk first. The
+  // visible symptom before this: open a club, go into the league, come back,
+  // and the upcoming-sessions block renders EMPTY for a beat before the fetch
+  // lands — which reads as "my sessions have disappeared", not as "loading".
+  // An empty state and a not-yet-loaded state look identical, and that is the
+  // whole reason this flash was worse than a skeleton.
+  const teamQ = useCachedQuery(teamId ? `club:${teamId}` : null, () => getTeam(teamId!));
+  const membersQ = useCachedQuery(teamId ? `club:${teamId}:members` : null, () => getTeamMembers(teamId!));
+  const statsQ = useCachedQuery(teamId ? `club:${teamId}:stats` : null, () => getClubStats(teamId!));
+  // Ended sessions only — a live one is already on the Play tab and at the top
+  // of Upcoming, and showing it twice invites a tap that goes somewhere else.
+  const pastQ = useCachedQuery(
+    teamId ? `club:${teamId}:past` : null,
+    async () => (await getTeamSessions(teamId!)).filter((x) => x.status === "ended"),
+  );
+
+  const team = teamQ.data;
+  const members = membersQ.data ?? [];
+  const stats = statsQ.data;
+  const past = pastQ.data ?? [];
+  const loading = teamQ.loading;
+  const membersLoaded = !membersQ.loading;
+  const clubStale = teamQ.stale || membersQ.stale || statsQ.stale || pastQ.stale;
+
+  // Not-found is a real answer, not a failure: getTeam resolving to null means
+  // the club is gone or was never visible to us. A network error is different
+  // and must NOT show "no such club" — that would tell someone their club had
+  // been deleted because their train went into a tunnel.
+  const notFound = !teamQ.loading && !teamQ.error && teamQ.data === null;
+
+  function loadMembers() {
+    if (!teamId) return;
+    invalidateQuery(`club:${teamId}:members`);
+    membersQ.refresh();
+  }
+
+
   const [showAllPast, setShowAllPast] = useState(false);
-  const [membersLoaded, setMembersLoaded] = useState(false);
   const [requests, setRequests] = useState<JoinRequestItem[]>([]);
-  const [stats, setStats] = useState<ClubStats | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [notFound, setNotFound] = useState(false);
   const [error, setError] = useState<unknown>(null);
   const [busyReq, setBusyReq] = useState<string | null>(null);
 
@@ -69,35 +152,12 @@ export default function TeamDetailPage() {
   // The club's own history. Ended sessions only — a live one is already on the
   // Play tab and at the top of Upcoming, and showing it twice invites a tap
   // that goes to the wrong place.
-  useEffect(() => {
-    if (!teamId) return;
-    getTeamSessions(teamId)
-      .then((all) => setPast(all.filter((x) => x.status === "ended")))
-      .catch(() => setPast([]));
-  }, [teamId]);
 
-  function loadMembers() {
-    if (!teamId) return;
-    getTeamMembers(teamId)
-      .then(setMembers)
-      .catch(() => setMembers([]))
-      .finally(() => setMembersLoaded(true));
-  }
   function loadRequests() {
     if (!teamId) return;
     getClubJoinRequests(teamId).then(setRequests).catch(() => setRequests([]));
   }
 
-  useEffect(() => {
-    if (!teamId) return;
-    setLoading(true);
-    getTeam(teamId)
-      .then((t) => (t ? setTeam(t) : setNotFound(true)))
-      .catch(() => setNotFound(true))
-      .finally(() => setLoading(false));
-    loadMembers();
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [teamId]);
 
   useEffect(() => {
     if (isAdmin) loadRequests();
@@ -106,10 +166,7 @@ export default function TeamDetailPage() {
 
   // Club stats strip (0027) — member-gated RPC, so it quietly no-ops for
   // non-members (whose view never renders the strip anyway).
-  useEffect(() => {
-    if (!teamId) return;
-    getClubStats(teamId).then(setStats).catch(() => setStats(null));
-  }, [teamId]);
+
 
   async function copyCode() {
     if (!team) return;
@@ -195,7 +252,9 @@ export default function TeamDetailPage() {
     setError(null);
     try {
       const url = await uploadClubLogo(teamId, file);
-      setTeam((t) => (t ? { ...t, logoUrl: url } : t));
+      // Straight into the cached copy, so the new logo survives navigating
+      // away and back before the refetch lands.
+      teamQ.mutate((t) => (t ? { ...t, logoUrl: url } : t));
     } catch (err) {
       setError(withFallback(err, "Couldn't upload the logo."));
     } finally {
@@ -277,6 +336,14 @@ export default function TeamDetailPage() {
   return (
     <div className={shell}>
       {backBar}
+      <OfflineNote
+        show={clubStale}
+        at={teamQ.cachedAt}
+        onRetry={() => {
+          teamQ.refresh(); membersQ.refresh(); statsQ.refresh(); pastQ.refresh();
+        }}
+        className="mb-1"
+      />
       <input ref={logoInputRef} type="file" accept="image/*" onChange={handleLogoPick} className="hidden" />
 
       {/* Identity */}
@@ -564,7 +631,6 @@ function InviteSheet(props: {
 // ---------------------------------------------------------------------------
 function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }) {
   const navigate = useNavigate();
-  const [events, setEvents] = useState<ClubEvent[]>([]);
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
   const [when, setWhen] = useState("");
@@ -630,10 +696,32 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
     }
   }
 
+  // The block that visibly blinked. `.catch(() => setEvents([]))` also meant a
+  // failed fetch rendered as "no upcoming sessions" — indistinguishable from a
+  // club that genuinely has none, which is how a network error got mistaken
+  // for a bug in RSVPs once already.
+  const eventsQ = useCachedQuery(clubId ? `club:${clubId}:events` : null, () => getClubEvents(clubId));
+  const events = eventsQ.data ?? [];
+
   function load() {
-    getClubEvents(clubId).then(setEvents).catch(() => setEvents([]));
+    // Scheduling, editing or cancelling changes this list, so drop the cached
+    // copy before refetching.
+    invalidateQuery(`club:${clubId}:events`);
+    eventsQ.refresh();
   }
-  useEffect(load, [clubId]);
+
+  // Fill the date only as the form opens, and only if it is still untouched —
+  // so reopening after a cancel offers a fresh suggestion, but typing is never
+  // overwritten underneath the person doing it.
+  useEffect(() => {
+    if (showForm && !when) setWhen(defaultWhen(events));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showForm]);
+
+  // Recomputed each render rather than stored: it is a pure function of the
+  // field, and a second piece of state would only be another thing to keep in
+  // step with it.
+  const whenIsPast = Boolean(when) && new Date(when).getTime() < Date.now();
 
   async function submit(e: FormEvent) {
     e.preventDefault();
@@ -667,7 +755,12 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
   }
 
   async function rsvp(eventId: string, response: RsvpResponse) {
-    setEvents((prev) => prev.map((e) => (e.id === eventId ? { ...e, myResponse: response } : e)));
+    // Optimistic, and written through to the cache — otherwise leaving the
+    // club page and coming back before the server answers would show the old
+    // response from disk, which looks exactly like the tap not registering.
+    eventsQ.mutate((prev) =>
+      (prev ?? []).map((e) => (e.id === eventId ? { ...e, myResponse: response } : e)),
+    );
     try {
       await setRsvp(eventId, response);
     } catch {
@@ -680,7 +773,7 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
     if (!confirm("Cancel this scheduled session?")) return;
     try {
       await cancelEvent(eventId);
-      setEvents((prev) => prev.filter((e) => e.id !== eventId));
+      eventsQ.mutate((prev) => (prev ?? []).filter((e) => e.id !== eventId));
     } catch {
       load();
     }
@@ -732,6 +825,20 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
         <form onSubmit={submit} className="rounded-2xl bg-surface p-3.5 mb-2.5 space-y-2 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Session title" maxLength={80} className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
           <input value={when} onChange={(e) => setWhen(e.target.value)} type="datetime-local" className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
+
+          {/* A warning, not a block. Recording a session that has already
+              happened is unusual but legitimate, and a form that refuses is
+              worse than one that asks. What it must NOT do is stay silent:
+              a past session is accepted by the database, gets a working share
+              link, and never appears on the club page — which reads exactly
+              like a broken club page rather than a mistyped date. Naming that
+              symptom here is the whole point of the message. */}
+          {whenIsPast && (
+            <p className="text-[12px] text-gold-ink bg-gold-soft border border-line rounded-xl px-3 py-2 leading-relaxed">
+              That's in the past — {new Date(when).toLocaleString([], { weekday: "long", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" })}.
+              A session with a past date won't show on the club page, though its share link still works.
+            </p>
+          )}
           <input value={location} onChange={(e) => setLocation(e.target.value)} placeholder="Location (optional)" maxLength={120} className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
 
           {/* The four questions the group chat asks within a minute of the

@@ -1,6 +1,7 @@
 import PageHeader from "../shell/PageHeader";
 import ErrorNote from "../shell/ErrorNote";
 import { withFallback } from "../../lib/errors";
+import { shareOrSaveImage } from "../../lib/recapShare";
 import { BottomSheet } from "../shell/Sheet";
 import { useEffect, useState } from "react";
 import { notify } from "../../lib/nativeShell";
@@ -134,29 +135,28 @@ export default function FinalSummaryPage() {
 
   const recapFileName = `padelier-${(data?.session.name ?? "session").toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "")}.png`;
 
+  /**
+   * One route out, because on a phone there is only one.
+   *
+   * This used to be two functions behind two buttons — "Share image" via
+   * navigator.share, and "Save to photos" via an <a download>. Neither worked
+   * in the native shell: a WKWebView has no downloads at all, and its support
+   * for sharing FILES through navigator.share is unreliable. Both buttons did
+   * nothing, silently, which is the worst way for a button to fail.
+   *
+   * The iOS share sheet is where saving to Photos actually lives, alongside
+   * WhatsApp and Messages, so there is one destination and now one button.
+   * See lib/recapShare.ts.
+   */
   async function shareRecap() {
     if (!recapBlob) return;
-    const file = new File([recapBlob], recapFileName, { type: "image/png" });
-    const nav = navigator as Navigator & { canShare?: (d: { files?: File[] }) => boolean };
-    if (nav.canShare?.({ files: [file] }) && navigator.share) {
-      try {
-        await navigator.share({ files: [file], title: data?.session.name ?? "Padelier" });
-        return;
-      } catch {
-        return; // user dismissed the sheet — not an error worth surfacing
-      }
+    setRecapError(null);
+    const outcome = await shareOrSaveImage(recapBlob, recapFileName, data?.session.name ?? "Padelier");
+    // "dismissed" is someone changing their mind. Saying anything about it
+    // would be scolding them for using a Cancel button.
+    if (outcome === "failed") {
+      setRecapError(new Error("Couldn't open the share sheet. Try again, or screenshot the card."));
     }
-    downloadRecap();
-  }
-
-  function downloadRecap() {
-    if (!recapUrl) return;
-    const a = document.createElement("a");
-    a.href = recapUrl;
-    a.download = recapFileName;
-    document.body.appendChild(a);
-    a.click();
-    a.remove();
   }
 
   const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-10 text-center safe-top safe-bottom anim-fade";
@@ -341,17 +341,15 @@ export default function FinalSummaryPage() {
               alt="Session recap card"
               className="w-full rounded-2xl border border-line shadow-[0_1px_2px_rgba(13,13,13,0.06)]"
             />
+            {/* One button. The sheet it opens contains "Save Image" as well as
+                every app you might send this to, so a separate "Save to
+                photos" would promise a second destination that doesn't
+                exist. */}
             <button
               onClick={shareRecap}
               className="w-full mt-4 rounded-full px-4 py-3.5 font-semibold text-ivory bg-graphite active:scale-[0.99] transition-transform"
             >
-              Share image
-            </button>
-            <button
-              onClick={downloadRecap}
-              className="w-full mt-2.5 rounded-full px-4 py-3 font-semibold text-[14px] border-[1.5px] border-line text-ink-2 bg-surface active:scale-[0.99] transition-transform"
-            >
-              Save to photos
+              Share or save
             </button>
             <button
               onClick={() => setRecapUrl(null)}

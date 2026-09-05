@@ -1,4 +1,4 @@
-import { useEffect } from "react";
+import { useEffect, useRef } from "react";
 import { Routes, Route, Navigate, useLocation, useNavigate } from "react-router-dom";
 import HomePage from "./features/home/HomePage";
 import LoginPage from "./features/auth/LoginPage";
@@ -21,6 +21,7 @@ import RequireHost from "./features/auth/RequireHost";
 import { useHostSession } from "./lib/supabase/useHostSession";
 import { useDeepLinks } from "./lib/useDeepLinks";
 import { usePushNotifications } from "./lib/usePushNotifications";
+import { useEdgeSwipeBack } from "./lib/useEdgeSwipeBack";
 import WatchPage from "./features/watch/WatchPage";
 import CreateSessionPage from "./features/create-session/CreateSessionPage";
 import HostLivePage from "./features/host-live/HostLivePage";
@@ -90,6 +91,13 @@ export default function App() {
   // and taps. Does NOT ask for permission — that happens at the moments where
   // saying yes makes sense (see lib/push.ts). No-op in a browser.
   usePushNotifications();
+
+  // Drag from the left edge to go back, with the screen following your thumb.
+  // The wrapper below is what moves; nothing else in the tree knows about it.
+  // See lib/useEdgeSwipeBack.ts for why this isn't WKWebView's own gesture.
+  const swipeRef = useRef<HTMLDivElement>(null);
+  useEdgeSwipeBack(swipeRef);
+
   return (
     <>
       {/* First thing painted, and the only thing visible until it leaves.
@@ -99,6 +107,7 @@ export default function App() {
           the signed-out ones. Renders nothing at all when there's no message,
           which is its normal state. */}
       <AppNotice />
+      <div ref={swipeRef}>
       <Routes>
       <Route path="/" element={<RootRoute />} />
       <Route path="/login" element={<LoginPage />} />
@@ -234,6 +243,7 @@ export default function App() {
           state — never a blank screen. */}
         <Route path="*" element={<Navigate to="/" replace />} />
       </Routes>
+      </div>
     </>
   );
 }

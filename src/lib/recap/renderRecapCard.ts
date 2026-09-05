@@ -1,4 +1,3 @@
-import { encodeQr } from "./qr";
 
 /**
  * Renders the shareable session recap card ("Podium" design) to a 1080×1920
@@ -390,45 +389,34 @@ export async function renderRecapCard(data: RecapData): Promise<Blob> {
   ctx.fillStyle = hair;
   ctx.fillRect(PAD, hairY, W - PAD * 2, 2);
 
-  // ── QR + call to action ────────────────────────────────────────────────────
-  const qrBox = 196;
-  const qrX = PAD;
-  const qrY = 1448;
-  ctx.fillStyle = "#FFFFFF";
-  roundRect(ctx, qrX, qrY, qrBox, qrBox, 24);
-  ctx.fill();
-
-  try {
-    const qr = encodeQr(data.liveUrl, "M");
-    const inner = qrBox - 40;
-    const cell = inner / qr.size;
-    ctx.fillStyle = "#0A0908";
-    for (let r = 0; r < qr.size; r++) {
-      for (let c = 0; c < qr.size; c++) {
-        if (!qr.modules[r][c]) continue;
-        // +1 on the size closes hairline seams between cells after rounding.
-        ctx.fillRect(qrX + 20 + c * cell, qrY + 20 + r * cell, cell + 0.6, cell + 0.6);
-      }
-    }
-  } catch {
-    ctx.fillStyle = "#8A8A8A";
-    ctx.font = '600 20px "Inter", sans-serif';
-    ctx.textAlign = "center";
-    ctx.fillText("padelier.id", qrX + qrBox / 2, qrY + qrBox / 2);
-  }
-
-  const textX = qrX + qrBox + 30;
+  // ── Call to action ─────────────────────────────────────────────────────────
+  //
+  // THERE WAS A QR CODE HERE, and it did not scan. Two reasons, both from the
+  // same cause — it was drawn too small to survive being photographed off a
+  // phone screen. At 196px including a 20px quiet zone, a version-5 code left
+  // modules under 5px, and the +0.6px overdraw that closed the hairline seams
+  // between cells also bled dark modules into light ones. A recap gets shared
+  // to WhatsApp, which recompresses it, and by then there was nothing left to
+  // decode.
+  //
+  // It could have been rescued — a bigger box, error correction at Q or H, no
+  // overdraw — but a QR aimed at a live session has a short life anyway, and a
+  // code that fails once teaches people not to try again. The wordmark is a
+  // promise the card can keep. (lib/recap/qr.ts is now unused; it is in git
+  // history if this ever comes back.)
+  const ctaY = 1500;
   ctx.textAlign = "left";
-  ctx.font = '600 32px "Inter", sans-serif';
+  ctx.font = '600 34px "Inter", sans-serif';
   ctx.fillStyle = IVORY;
-  ctx.fillText("Scan to watch it back", textX, qrY + 74);
-  ctx.font = '400 25px "Inter", sans-serif';
+  ctx.fillText("Watch it back", PAD, ctaY);
+
+  ctx.font = '400 26px "Inter", sans-serif';
   ctx.fillStyle = "rgba(247,245,242,0.5)";
-  const sub = wrap(ctx, "Full standings and every round on padelier.id", W - PAD - textX, 2);
-  let sy = qrY + 116;
+  const sub = wrap(ctx, "Full standings and every round on padelier.id", W - PAD * 2, 2);
+  let sy = ctaY + 46;
   for (const line of sub) {
-    ctx.fillText(line, textX, sy);
-    sy += 34;
+    ctx.fillText(line, PAD, sy);
+    sy += 36;
   }
 
   return new Promise<Blob>((resolve, reject) => {
