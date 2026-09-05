@@ -22,6 +22,7 @@ import { useHostSession } from "./lib/supabase/useHostSession";
 import { useDeepLinks } from "./lib/useDeepLinks";
 import { usePushNotifications } from "./lib/usePushNotifications";
 import { useEdgeSwipeBack } from "./lib/useEdgeSwipeBack";
+import { useScrollRestoration } from "./lib/useScrollRestoration";
 import WatchPage from "./features/watch/WatchPage";
 import CreateSessionPage from "./features/create-session/CreateSessionPage";
 import HostLivePage from "./features/host-live/HostLivePage";
@@ -97,6 +98,11 @@ export default function App() {
   // See lib/useEdgeSwipeBack.ts for why this isn't WKWebView's own gesture.
   const swipeRef = useRef<HTMLDivElement>(null);
   useEdgeSwipeBack(swipeRef);
+
+  // New screens start at the top; going back returns you to where you were.
+  // React Router does neither on its own — it leaves the window's scroll
+  // offset alone, which is why the league table used to open halfway down.
+  useScrollRestoration();
 
   return (
     <>
