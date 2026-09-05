@@ -20,6 +20,8 @@ import { getMyProfile, updateMyProfile, uploadAvatar, Profile } from "../../lib/
 import { getPlayerInsights, getRatingHistory, PlayerInsights, RatingPoint } from "../../lib/supabase/insightsQueries";
 import RecordSheet from "./RecordSheet";
 import TierSheet from "./TierSheet";
+import { useCachedQuery, invalidateQuery } from "../../lib/cache/useCachedQuery";
+import OfflineNote from "../shell/OfflineNote";
 
 const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
@@ -57,14 +59,11 @@ export default function ProfilePage() {
   const { user } = useHostSession();
   const navigate = useNavigate();
 
-  const [sessions, setSessions] = useState<HostSessionSummary[] | null>(null);
-  const [sessionsLoading, setSessionsLoading] = useState(false);
   // Multi-select delete for the host-sessions tab.
   const [selectMode, setSelectMode] = useState(false);
   const [selectedIds, setSelectedIds] = useState<Set<string>>(new Set());
   const [deletingSessions, setDeletingSessions] = useState(false);
   const [deleteError, setDeleteError] = useState<unknown>(null);
-  const [playerSessions, setPlayerSessions] = useState<PlayerSession[] | null>(null);
   const [tab, setTab] = useState<RoleTab>("host");
   const [recordOpen, setRecordOpen] = useState(false);
   const [tierOpen, setTierOpen] = useState(false);
@@ -77,9 +76,6 @@ export default function ProfilePage() {
 
 
   // Phase 1: profile (avatar + global rating), insights, and rating trend.
-  const [profile, setProfile] = useState<Profile | null>(null);
-  const [insights, setInsights] = useState<PlayerInsights | null>(null);
-  const [history, setHistory] = useState<RatingPoint[]>([]);
   const [avatarBusy, setAvatarBusy] = useState(false);
   const [avatarError, setAvatarError] = useState<unknown>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -94,11 +90,11 @@ export default function ProfilePage() {
 
 
   function reloadSessions() {
-    setSessionsLoading(true);
-    listHostSessions()
-      .then(setSessions)
-      .catch(() => setSessions([]))
-      .finally(() => setSessionsLoading(false));
+    // Deleting sessions changes the cached list, so drop it rather than
+    // letting a failed refresh fall back to a list still showing what was
+    // just deleted.
+    if (uid) invalidateQuery(`profile:hosted:${uid}`);
+    hostQ.refresh();
   }
   function toggleSelected(id: string) {
     setSelectedIds((prev) => {
@@ -150,8 +146,11 @@ export default function ProfilePage() {
         if (!firstError) firstError = err instanceof Error ? err.message : String(err);
       }
     }
-    // Optimistically drop the ones that really deleted, then reconcile from server.
-    if (removed.size > 0) setSessions((prev) => (prev ? prev.filter((s) => !removed.has(s.id)) : prev));
+    // The optimistic filter that used to live here is gone with the local
+    // state. reloadSessions() runs a few lines below and invalidates the
+    // cached list first, so the server's answer is what lands — a beat slower
+    // than an optimistic splice, and incapable of disagreeing with the server
+    // about what was actually deleted.
     if (failed > 0) {
       setDeleteError(
         firstError
@@ -166,30 +165,37 @@ export default function ProfilePage() {
     reloadSessions();
   }
 
+  // ── Cached reads ────────────────────────────────────────────────────────
+  //
+  // The best cache candidates in the app. Insights and rating history are the
+  // most expensive queries here and the slowest to change — your record
+  // against a given opponent does not move between two visits to this tab —
+  // so refetching them from scratch on every mount was pure cost.
+  //
+  // Everything is keyed by user id as well as being namespaced by it, so
+  // nothing survives an account switch in either direction.
+  const uid = user?.id ?? null;
+  const hostQ = useCachedQuery(uid ? `profile:hosted:${uid}` : null, listHostSessions);
+  const playedQ = useCachedQuery(uid ? `profile:played:${uid}` : null, getMyPlayerSessions);
+  const profileQ = useCachedQuery(uid ? `profile:me:${uid}` : null, getMyProfile);
+  const insightsQ = useCachedQuery(uid ? `profile:insights:${uid}` : null, () => getPlayerInsights(uid!));
+  const historyQ = useCachedQuery(uid ? `profile:rating:${uid}` : null, () => getRatingHistory(uid!));
+
+  const sessions = hostQ.data;
+  const playerSessions = playedQ.data;
+  const profile = profileQ.data;
+  const insights = insightsQ.data;
+  const history = historyQ.data ?? [];
+  const sessionsLoading = hostQ.loading;
+  const profileStale =
+    hostQ.stale || playedQ.stale || profileQ.stale || insightsQ.stale || historyQ.stale;
+
+  // The name field follows the fetched profile, but must never be yanked out
+  // from under someone mid-edit.
   useEffect(() => {
-    if (!user) return;
-    setSessionsLoading(true);
-    listHostSessions()
-      .then(setSessions)
-      .catch(() => setSessions([]))
-      .finally(() => setSessionsLoading(false));
-    getMyPlayerSessions()
-      .then(setPlayerSessions)
-      .catch(() => setPlayerSessions([]));
-    getMyProfile()
-      .then((p) => {
-        setProfile(p);
-        if (p && !editingName) setDisplayName(p.displayName);
-      })
-      .catch(() => setProfile(null));
-    getPlayerInsights(user.id)
-      .then(setInsights)
-      .catch(() => setInsights(null));
-    getRatingHistory(user.id)
-      .then(setHistory)
-      .catch(() => setHistory([]));
+    if (profile && !editingName) setDisplayName(profile.displayName);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [user?.id]);
+  }, [profile?.displayName]);
 
   const hostedSessions = sessions ?? [];
   const liveCount = hostedSessions.filter((s) => s.status === "live").length;
@@ -206,7 +212,10 @@ export default function ProfilePage() {
     setNameError(null);
     try {
       const updated = await updateMyProfile({ displayName: trimmed });
-      setProfile(updated);
+      // The cached profile is now wrong; drop it and refetch so every screen
+      // reading `profile:me` sees the new name rather than the old one.
+      if (uid) invalidateQuery(`profile:me:${uid}`);
+      profileQ.refresh();
       setDisplayName(updated.displayName);
       setEditingName(false);
     } catch (err) {
@@ -223,8 +232,9 @@ export default function ProfilePage() {
     setAvatarBusy(true);
     setAvatarError(null);
     try {
-      const url = await uploadAvatar(file);
-      setProfile((p) => (p ? { ...p, avatarUrl: url } : p));
+      await uploadAvatar(file);
+      if (uid) invalidateQuery(`profile:me:${uid}`);
+      profileQ.refresh();
     } catch (err) {
       setAvatarError(withFallback(err, "Couldn't upload that photo."));
     } finally {
@@ -247,6 +257,15 @@ export default function ProfilePage() {
 
   return (
     <div className="px-5 anim-fade">
+      <OfflineNote
+        show={profileStale}
+        at={profileQ.cachedAt}
+        onRetry={() => {
+          hostQ.refresh(); playedQ.refresh(); profileQ.refresh();
+          insightsQ.refresh(); historyQ.refresh();
+        }}
+        className="mt-3"
+      />
       <div className="-mx-5">
         <TabHeader
           trailing={

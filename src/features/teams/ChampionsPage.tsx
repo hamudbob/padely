@@ -4,6 +4,8 @@ import { getClubChampions, ClubChampions } from "../../lib/supabase/championsQue
 import { getTeam } from "../../lib/supabase/teamQueries";
 import { useBackNav } from "../../lib/useBackNav";
 import { SkeletonScreen, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
+import { useCachedQuery } from "../../lib/cache/useCachedQuery";
+import OfflineNote from "../shell/OfflineNote";
 
 function shortDate(iso: string): string {
   const d = new Date(iso);
@@ -24,20 +26,16 @@ const MEDAL = ["🥇", "🥈", "🥉"];
 export default function ChampionsPage() {
   const { teamId } = useParams();
   const back = useBackNav(teamId ? `/teams/${teamId}` : "/teams");
-  const [data, setData] = useState<ClubChampions | null>(null);
-  const [teamName, setTeamName] = useState<string>("");
-  const [loading, setLoading] = useState(true);
-  const [notAllowed, setNotAllowed] = useState(false);
+  const championsQ = useCachedQuery(teamId ? `club:${teamId}:champions` : null, () => getClubChampions(teamId!));
+  const teamQ = useCachedQuery(teamId ? `club:${teamId}` : null, () => getTeam(teamId!));
 
-  useEffect(() => {
-    if (!teamId) return;
-    setLoading(true);
-    getClubChampions(teamId)
-      .then(setData)
-      .catch(() => setNotAllowed(true))
-      .finally(() => setLoading(false));
-    getTeam(teamId).then((t) => t && setTeamName(t.name)).catch(() => {});
-  }, [teamId]);
+  const data = championsQ.data;
+  const teamName = teamQ.data?.name ?? "";
+  const loading = championsQ.loading;
+  // Only a real refusal counts. This used to catch EVERY failure into
+  // "not allowed", so losing signal told a member they had no permission to
+  // see their own club's champions — an accusation, from a dropped request.
+  const notAllowed = Boolean(championsQ.error) && !championsQ.stale;
 
   const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-6 safe-top safe-bottom anim-fade";
   const topBar = (
@@ -54,6 +52,7 @@ export default function ChampionsPage() {
     return (
       <div className={shell}>
         {topBar}
+      <OfflineNote show={championsQ.stale || teamQ.stale} at={championsQ.cachedAt} onRetry={() => { championsQ.refresh(); teamQ.refresh(); }} className="mb-2" />
         <SkeletonScreen label="Loading the champions">
           <SkeletonBlock h={184} className="mb-6" />
           <SkeletonRows n={5} avatar />

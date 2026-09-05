@@ -6,6 +6,7 @@ import ErrorBoundary from "./features/shell/ErrorBoundary";
 import { installErrorReporter } from "./lib/errorReporter";
 import { initNativeShell } from "./lib/nativeShell";
 import { startProviderTokenCapture } from "./lib/supabase/providerTokens";
+import { startCacheNamespace } from "./lib/cache/cacheStore";
 import "./index.css";
 
 // Before anything renders, so a crash during the first paint is still caught.
@@ -17,6 +18,13 @@ installErrorReporter();
 // complete before any component has mounted, and a listener attached from a
 // hook would miss it. See lib/supabase/providerTokens.ts.
 startProviderTokenCapture();
+
+// Ties the read cache to whoever is signed in, and ERASES it on sign-out.
+// Before render for the same reason as above: a screen that mounts before the
+// namespace is known simply misses the cache and fetches, which is only the
+// old behaviour — but a screen that read from a namespace set a moment too
+// late could show the previous user's clubs. See lib/cache/cacheStore.ts.
+startCacheNamespace();
 
 // Status bar styling, before the first paint so it never flashes wrong.
 // No-op in a browser.

@@ -4,27 +4,24 @@ import { getTeam, getTeamMembers, Team, TeamMember } from "../../lib/supabase/te
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
 import { SkeletonScreen, SkeletonRows } from "../shell/Skeleton";
+import { useCachedQuery } from "../../lib/cache/useCachedQuery";
+import OfflineNote from "../shell/OfflineNote";
 
 export default function MembersPage() {
   const { teamId } = useParams();
   const back = useBackNav(teamId ? `/teams/${teamId}` : "/teams");
   const { user } = useHostSession();
-  const [team, setTeam] = useState<Team | null>(null);
-  const [members, setMembers] = useState<TeamMember[]>([]);
-  const [loading, setLoading] = useState(true);
   const [query, setQuery] = useState("");
 
-  useEffect(() => {
-    if (!teamId) return;
-    setLoading(true);
-    Promise.all([getTeam(teamId), getTeamMembers(teamId)])
-      .then(([t, m]) => {
-        setTeam(t);
-        setMembers(m);
-      })
-      .catch(() => setMembers([]))
-      .finally(() => setLoading(false));
-  }, [teamId]);
+  // The SAME keys the club page uses, deliberately. Arriving here from a club
+  // you were just looking at means both are already warm, so this screen has
+  // no loading state at all in the ordinary case — and a member list that
+  // changes while you walk between two screens is not a thing that happens.
+  const teamQ = useCachedQuery(teamId ? `club:${teamId}` : null, () => getTeam(teamId!));
+  const membersQ = useCachedQuery(teamId ? `club:${teamId}:members` : null, () => getTeamMembers(teamId!));
+  const team = teamQ.data;
+  const members = membersQ.data ?? [];
+  const loading = teamQ.loading || membersQ.loading;
 
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => (q ? members.filter((m) => m.displayName.toLowerCase().includes(q)) : members), [members, q]);
@@ -46,6 +43,7 @@ export default function MembersPage() {
     return (
       <div className={shell}>
         {backBar}
+      <OfflineNote show={teamQ.stale || membersQ.stale} at={membersQ.cachedAt} onRetry={() => { teamQ.refresh(); membersQ.refresh(); }} className="mb-2" />
         <SkeletonScreen label="Loading the members">
           <SkeletonRows n={7} avatar />
         </SkeletonScreen>

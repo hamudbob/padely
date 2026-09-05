@@ -178,3 +178,96 @@ annoying to retrofit:
   in which are gold.
 - **Housekeeping on the Mac:** `_to_delete/` and `_git_stale_locks/` in the repo
   folder. Git wouldn't let me remove them.
+
+---
+
+# Added 4 Sep 2026
+
+## Shipped this session
+
+- **Sign in with Apple** — Services ID `id.padelier.web`, provider configured,
+  `signInWithApple()`, the button, and 0057 so Apple's two-part name object and
+  its private-relay addresses never become someone's display name. Guideline 4.8
+  is satisfied.
+- **Apple token revocation on account delete** (guideline 5.1.1(v)). 0058 parks
+  the provider refresh token; the `delete-account` Edge Function deletes first,
+  then revokes, then drops the token. Verified end to end: Padelier disappeared
+  from appleid.apple.com after a delete.
+- **Camera crash fixed.** `NSCameraUsageDescription` and the two photo-library
+  strings were absent while four screens offer an image picker. Touching the
+  camera without the string terminates the app; it did, and now it doesn't.
+- **Push notifications, delivery half.** 0059 `device_tokens`, permission asked
+  at RSVP rather than launch, tap routing, and the `send-push` Edge Function
+  talking to APNs directly (no Firebase). Proven on a real iPhone.
+
+## Still open from that work
+
+- **v2 is seven migrations behind** (0053–0059). Run
+  `./scripts/apply-migrations.sh --from 0053`.
+- **Nothing sends automatically yet.** The seven notification types — session
+  reminder −2h, session started, results are in, slot open, join request, RSVP,
+  call off — still need their triggers and webhooks. The sender works; only the
+  "when" is missing.
+- **"Save to photos" is dead in the native shell.** `downloadRecap()` uses
+  `<a download>`, which does nothing in a WKWebView. Route it through the share
+  sheet on native.
+- **The `ios` branch should be retired.** It predates PKCE, so a build from it
+  has broken native Google sign-in.
+- **Three database passwords pasted into a chat need rotating.**
+
+---
+
+## Paid status on a club RSVP
+
+Track who has actually paid for a session. Tracking, not collecting — no money
+moves through the app, which also keeps it clear of Apple's in-app purchase
+rules (a real-world service booked and paid outside the app is explicitly not
+IAP territory).
+
+Four things to settle first, because each is painful to change later:
+
+- **Who marks it.** Admin-marks is the only version that's trustworthy —
+  self-declared payment is a promise, not a record. But it puts the whole
+  evening's bookkeeping on one person's phone at the end of a session, which is
+  exactly when they least want to do admin.
+- **Boolean, or an amount.** "Paid ✓" is enough for a club that splits evenly
+  and much cheaper to build. An amount opens up different rates for guests and
+  members, part-payments, and someone covering a friend — real, but a different
+  feature.
+- **Guests belong to their inviter.** 0056 lets a member bring up to three
+  guests. A guest has no account and cannot be chased, so the debt is the
+  member's. Anything that shows a guest as separately unpaid will produce
+  arguments the app caused.
+- **Who can see it.** Admin-only is safe. Visible to everyone turns the going
+  list into a scoreboard of who owes money — which some clubs will love as
+  gentle pressure and others will find humiliating. This should probably be a
+  club setting, and it is far easier to add as one now than to change the
+  default after people have used it.
+
+## Season league, and club settings that drive it
+
+A club settings screen holding: **league sort order**, **season length**, and
+**club visibility in search**.
+
+Two of those three are cheap. Sort order is display-only — points, win rate,
+rating or games played, computed from rows that already exist. Search visibility
+is a boolean on the club plus a filter in the search query.
+
+**Season length is not cheap, and it's the one to think about before building
+anything.** Today the league table is every result the club has ever recorded;
+`apply_session_results` is once-only, so those rows cannot be regenerated. A
+season means:
+
+- a `club_seasons` row with a start and end, and every league row keyed to one;
+- a backfill assigning all existing history to "Season 1", because a league that
+  starts empty the day this ships erases a club's record as far as its members
+  are concerned;
+- a decision on what happens at a rollover — does the table reset to zero and
+  the old season stay readable, and does anything carry across (a champion, a
+  starting rating)?
+- and a decision on ratings, which are currently global and continuous. If a
+  season resets the league but not the rating, that needs saying on the screen,
+  or people will assume both reset and be confused when they don't.
+
+Worth doing. Worth doing with the backfill written at the same time as the
+schema, not after.

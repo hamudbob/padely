@@ -7,6 +7,8 @@ import { useHostSession } from "../../lib/supabase/useHostSession";
 import { getTeam, getTeamMembers, updateTeam, Team } from "../../lib/supabase/teamQueries";
 import { getClubLeague, shiftPeriodReference, LeagueBoard, LeagueRow, LeaguePeriod } from "../../lib/supabase/leagueQueries";
 import { SkeletonScreen, SkeletonTable } from "../shell/Skeleton";
+import { useCachedQuery } from "../../lib/cache/useCachedQuery";
+import OfflineNote from "../shell/OfflineNote";
 
 type SortKey = "pointsPerSession" | "totalPoints" | "winsPerSession" | "clubScore" | "rating";
 
@@ -39,39 +41,42 @@ export default function LeaguePage() {
   const { teamId } = useParams();
   const back = useBackNav(teamId ? `/teams/${teamId}` : "/teams");
   const { user } = useHostSession();
-  const [team, setTeam] = useState<Team | null>(null);
-  const [board, setBoard] = useState<LeagueBoard | null>(null);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [loading, setLoading] = useState(true);
-  const [boardLoading, setBoardLoading] = useState(false);
-  const [error, setError] = useState<unknown>(null);
   const [sortKey, setSortKey] = useState<SortKey>("pointsPerSession");
   const [periodOffset, setPeriodOffset] = useState(0);
   const [showSort, setShowSort] = useState(false);
   const [savedDefault, setSavedDefault] = useState(false);
+  const [error, setError] = useState<unknown>(null);
+
+  // Shared keys with the club page — arriving from a club, these are warm.
+  const teamQ = useCachedQuery(teamId ? `club:${teamId}` : null, () => getTeam(teamId!));
+  const membersQ = useCachedQuery(teamId ? `club:${teamId}:members` : null, () => getTeamMembers(teamId!));
+  const team = teamQ.data;
+  const loading = teamQ.loading;
+  const isAdmin = (membersQ.data ?? []).some(
+    (m) => m.userId === user?.id && (m.role === "owner" || m.role === "admin"),
+  );
+
+  // The board is keyed by the PERIOD as well as the club, so paging back
+  // through months caches each one separately — and paging back to a month
+  // you already looked at is then instant, which is the whole reason anyone
+  // pages back and forth.
+  const boardQ = useCachedQuery(
+    teamId && team ? `club:${teamId}:league:${team.leaguePeriod}:${periodOffset}` : null,
+    () => getClubLeague(teamId!, shiftPeriodReference(team!.leaguePeriod as LeaguePeriod, new Date(), periodOffset)),
+  );
+  const board = boardQ.data;
+  const boardLoading = boardQ.loading;
+
+  // The club's saved default sort, applied once the club itself is known.
+  useEffect(() => {
+    if (!team) return;
+    setSortKey((SORTS.some((s) => s.key === team.defaultSort) ? team.defaultSort : "pointsPerSession") as SortKey);
+  }, [team?.defaultSort]);
 
   useEffect(() => {
-    if (!teamId) return;
-    setLoading(true);
-    Promise.all([getTeam(teamId), getTeamMembers(teamId)])
-      .then(([t, members]) => {
-        setTeam(t);
-        if (t) setSortKey((SORTS.some((s) => s.key === t.defaultSort) ? t.defaultSort : "pointsPerSession") as SortKey);
-        setIsAdmin(members.some((m) => m.userId === user?.id && (m.role === "owner" || m.role === "admin")));
-      })
-      .catch((e) => setError(withFallback(e, "Couldn't load the league.")))
-      .finally(() => setLoading(false));
-  }, [teamId, user?.id]);
-
-  useEffect(() => {
-    if (!teamId || !team) return;
-    setBoardLoading(true);
-    const reference = shiftPeriodReference(team.leaguePeriod as LeaguePeriod, new Date(), periodOffset);
-    getClubLeague(teamId, reference)
-      .then(setBoard)
-      .catch((e) => setError(withFallback(e, "Couldn't load the league.")))
-      .finally(() => setBoardLoading(false));
-  }, [teamId, team, periodOffset]);
+    const e = teamQ.error ?? boardQ.error;
+    if (e) setError(withFallback(e, "Couldn't load the league."));
+  }, [teamQ.error, boardQ.error]);
 
   const sortedRows = useMemo(() => {
     if (!board) return [];
@@ -84,7 +89,10 @@ export default function LeaguePage() {
     if (!teamId) return;
     try {
       await updateTeam(teamId, { defaultSort: sortKey });
-      setTeam((t) => (t ? { ...t, defaultSort: sortKey } : t));
+      // Written through to the cached club, so the new default survives
+      // leaving this screen — and so the club page, which reads the same key,
+      // doesn't keep serving the old one.
+      teamQ.mutate((t) => (t ? { ...t, defaultSort: sortKey } : t));
       setSavedDefault(true);
       setTimeout(() => setSavedDefault(false), 1600);
     } catch {
@@ -110,6 +118,7 @@ export default function LeaguePage() {
   return (
     <div className={shell}>
       {backBar}
+      <OfflineNote show={teamQ.stale || boardQ.stale} at={boardQ.cachedAt} onRetry={() => { teamQ.refresh(); membersQ.refresh(); boardQ.refresh(); }} className="mb-2" />
 
       <div className="pt-2">
         <h1 className="font-serif text-[28px] font-semibold text-graphite tracking-tight">League</h1>

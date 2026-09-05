@@ -5,6 +5,8 @@ import { Link, useNavigate } from "react-router-dom";
 import { getMyTeams, createTeam, MyTeam } from "../../lib/supabase/teamQueries";
 import { searchClubs, requestToJoin, joinByCode, ClubSearchResult } from "../../lib/supabase/clubJoinQueries";
 import TabHeader from "../shell/TabHeader";
+import { useCachedQuery, invalidateQuery } from "../../lib/cache/useCachedQuery";
+import OfflineNote from "../shell/OfflineNote";
 
 /**
  * Club — search at the top, your clubs below, create at the bottom.
@@ -31,8 +33,6 @@ function looksLikeCode(q: string): boolean {
 
 export default function TeamsPage() {
   const navigate = useNavigate();
-  const [teams, setTeams] = useState<MyTeam[] | null>(null);
-
   const [query, setQuery] = useState("");
   const [results, setResults] = useState<ClubSearchResult[]>([]);
   const [searching, setSearching] = useState(false);
@@ -49,10 +49,25 @@ export default function TeamsPage() {
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState<unknown>(null);
 
+  // Your clubs, from disk first. This tab is one of the three you bounce
+  // between constantly, and a club list that redraws itself every time you
+  // come back from a club page is the most visible version of the problem
+  // this cache exists to solve.
+  //
+  // Search results are deliberately NOT cached: a search is a question about
+  // the world right now, and answering it from disk would show clubs that have
+  // since gone private or been renamed.
+  const teamsQ = useCachedQuery("teams:mine", getMyTeams);
+  const teams = teamsQ.data;
+  const teamsStale = teamsQ.stale;
+
   function loadTeams() {
-    getMyTeams().then(setTeams).catch(() => setTeams([]));
+    // After creating or joining a club the cached list is wrong by definition,
+    // so drop it before refetching — otherwise a failed refresh would fall
+    // back to a list that is missing the club you just joined.
+    invalidateQuery("teams:mine");
+    teamsQ.refresh();
   }
-  useEffect(loadTeams, []);
 
   // Debounced search — unchanged from v1.
   useEffect(() => {
@@ -132,6 +147,12 @@ export default function TeamsPage() {
       <TabHeader />
 
       <div className="px-5 anim-fade">
+        <OfflineNote
+          show={teamsStale}
+          at={teamsQ.cachedAt}
+          onRetry={teamsQ.refresh}
+          className="mt-3"
+        />
         <h1 className="font-serif text-[26px] font-medium tracking-tight text-graphite mb-3.5">Club</h1>
 
         {/* ── Search: always here, always a field ────────────────────────── */}

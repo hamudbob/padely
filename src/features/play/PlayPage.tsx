@@ -7,8 +7,10 @@ import { getHostHomeSummary, HostHomeSession } from "../../lib/supabase/hostHome
 import { getResumableLobbies, sweepStaleDrafts, deleteSession, ResumableLobby } from "../../lib/supabase/sessionActions";
 import { getMyUpcomingEvents, UpcomingEvent } from "../../lib/supabase/upcomingQueries";
 import TabHeader from "../shell/TabHeader";
+import OfflineNote from "../shell/OfflineNote";
 import FeatureCarousel from "../discover/FeatureCarousel";
 import { reportHandledError } from "../../lib/errorReporter";
+import { useCachedQuery } from "../../lib/cache/useCachedQuery";
 
 /**
  * Play — "what do I do now?", in one screen and in priority order.
@@ -72,33 +74,57 @@ function eventWhen(iso: string): string {
 
 export default function PlayPage() {
   const { user } = useHostSession();
-  const [sessions, setSessions] = useState<HostHomeSession[] | null>(null);
-  const [error, setError] = useState<unknown>(null);
-  const [loading, setLoading] = useState(false);
-  const [drafts, setDrafts] = useState<ResumableLobby[]>([]);
-  const [upcoming, setUpcoming] = useState<UpcomingEvent[]>([]);
   const [discarding, setDiscarding] = useState<string | null>(null);
+  const [error, setError] = useState<unknown>(null);
+
+  // ── Cached reads ────────────────────────────────────────────────────────
+  //
+  // This screen is the first thing anyone sees after signing in, and until now
+  // it showed a loading state EVERY time — including when you had just come
+  // back from a club page two seconds earlier. Now the skeleton appears once,
+  // on a genuinely first visit, and after that home renders instantly from
+  // what we last saw while the refresh happens underneath.
+  //
+  // Keys are per-user by construction: cacheStore namespaces everything by the
+  // signed-in user id, so `home:sessions` cannot leak between accounts on a
+  // shared phone.
+  const homeQ = useCachedQuery(
+    user ? "home:sessions" : null,
+    async () => (await getHostHomeSummary()).sessions,
+  );
+  const upcomingQ = useCachedQuery(
+    user ? "home:upcoming" : null,
+    () => getMyUpcomingEvents(3),
+  );
+
+  const sessions = homeQ.data;
+  const upcoming = upcomingQ.data ?? [];
+  const loading = homeQ.loading;
+  // Cached data that couldn't be refreshed — almost always no signal.
+  const showingLastKnown = homeQ.stale || upcomingQ.stale;
 
   useEffect(() => {
+    // Reported as well as shown: this branch is what someone sees when their
+    // home screen is broken, and it used to leave no trace anywhere. Only a
+    // real error counts — falling back to cache is not a failure worth logging.
+    if (homeQ.error) {
+      reportHandledError(homeQ.error, "PlayPage.getHostHomeSummary");
+      setError(withFallback(homeQ.error, "Could not load your sessions."));
+    }
+  }, [homeQ.error]);
+
+  // Drafts stay UNCACHED, on purpose. A resumable lobby is a thing you are
+  // about to act on, and the sweep that expires stale ones has to run against
+  // the server anyway — showing a draft from disk that the sweep has since
+  // deleted would offer a Resume button that fails.
+  const [drafts, setDrafts] = useState<ResumableLobby[]>([]);
+  useEffect(() => {
     if (!user) return;
-    setLoading(true);
-    setError(null);
-    getHostHomeSummary()
-      .then((s) => setSessions(s.sessions))
-      .catch((e) => {
-        // Report it as well as showing it. This exact branch is what a user
-        // sees when their home screen is broken, and until now it left no
-        // trace anywhere.
-        reportHandledError(e, "PlayPage.getHostHomeSummary");
-        setError(withFallback(e, "Could not load your sessions."));
-      })
-      .finally(() => setLoading(false));
     sweepStaleDrafts(10)
       .catch(() => 0)
       .then(() => getResumableLobbies())
       .then(setDrafts)
       .catch(() => setDrafts([]));
-    getMyUpcomingEvents(3).then(setUpcoming).catch(() => setUpcoming([]));
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
@@ -187,6 +213,13 @@ export default function PlayPage() {
             <div className="h-[56px] rounded-full skeleton" />
           </div>
         )}
+        <OfflineNote
+          show={showingLastKnown && !loading}
+          at={homeQ.cachedAt}
+          onRetry={() => { homeQ.refresh(); upcomingQ.refresh(); }}
+          className="mx-5 mt-3"
+        />
+
         <ErrorNote error={error} where="PlayPage.getHostHomeSummary" />
 
         {/* ── The live session ────────────────────────────────────────
