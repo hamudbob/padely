@@ -771,6 +771,12 @@ export interface Database {
       /** 0060 — creates a whole session (courts, players, pairs, rounds, rests,
        *  matches, participants) from a device-built payload, in one
        *  transaction. For sessions started with no signal. */
+      /** 0061 — replicates a locally-owned live session and returns players
+       *  the device hasn't seen (code joiners). Upsert only; never deletes. */
+      sync_session_state: {
+        Args: { p_payload: Record<string, unknown> };
+        Returns: unknown; // jsonb — { synced_at, new_players }
+      };
       create_session_from_payload: {
         Args: { p_payload: Record<string, unknown> };
         Returns: unknown; // jsonb — { session_id, join_code, public_token, already_existed, code_changed }

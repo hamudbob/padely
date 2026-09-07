@@ -7,6 +7,8 @@ import {
   forgetSyncedSessions,
   toSyncPayload,
   getLocalSession,
+  saveLocalSession,
+  onLocalSessionChange,
 } from "./localSession";
 import { flush as flushPendingScores } from "../supabase/scoreSyncQueue";
 import { applySessionRatings } from "../supabase/ratingActions";
@@ -51,6 +53,13 @@ export interface SyncOutcome {
 
 export async function syncLocalSessions(): Promise<SyncOutcome> {
   if (flushing) return { synced: 0, failed: 0, codeChanges: [] };
+  // With no connection every request below would sit until it times out, and
+  // this runs at startup — which is how a launch in Airplane Mode ended up
+  // slower than a launch with signal. The `online` and `visibilitychange`
+  // listeners bring us straight back the moment there is a network.
+  if (typeof navigator !== "undefined" && "onLine" in navigator && !navigator.onLine) {
+    return { synced: 0, failed: 0, codeChanges: [] };
+  }
   flushing = true;
 
   const outcome: SyncOutcome = { synced: 0, failed: 0, codeChanges: [] };
@@ -144,6 +153,7 @@ export function startLocalSessionSync(): () => void {
   const attempt = () => void syncLocalSessions();
 
   attempt();
+  const stopReplication = startReplication();
   const onOnline = () => attempt();
   const onVisible = () => {
     if (document.visibilityState === "visible") attempt();
@@ -156,6 +166,7 @@ export function startLocalSessionSync(): () => void {
   const timer = window.setInterval(attempt, 60_000);
 
   return () => {
+    stopReplication();
     window.removeEventListener("online", onOnline);
     document.removeEventListener("visibilitychange", onVisible);
     window.clearInterval(timer);
@@ -167,4 +178,114 @@ export function localSyncState(sessionId: string): { local: boolean; error: stri
   const s: LocalSession | null = getLocalSession(sessionId);
   if (!s || s.syncedAt) return { local: false, error: null };
   return { local: true, error: s.lastError };
+}
+
+
+/* ── Replication of a session the server already has ─────────────────────── */
+
+/**
+ * Push the current state of a live session, and merge back anything only the
+ * server could know.
+ *
+ * WHY THIS EXISTS SEPARATELY FROM syncLocalSessions. That one CREATES a
+ * session the server has never seen. This one keeps an existing one current —
+ * every round drawn, every score, every player marked as left after the first
+ * upload. Without it, a session that synced early and then ran for two more
+ * hours would leave everything after the first push on the phone alone.
+ *
+ * Debounced, because a host tapping through a round produces a burst of
+ * mutations and the server only needs the settled result. Short, because
+ * local-first must not become "sync later": with signal the server should be
+ * seconds behind, so a lost phone costs seconds rather than an evening.
+ */
+const DEBOUNCE_MS = 1500;
+const timers = new Map<string, number>();
+const inFlight = new Set<string>();
+
+export async function replicateSession(sessionId: string): Promise<void> {
+  if (typeof navigator !== "undefined" && "onLine" in navigator && !navigator.onLine) return;
+  const local = getLocalSession(sessionId);
+  // Nothing to push if it has never been created server-side; syncLocalSessions
+  // owns that case and will call back here afterwards.
+  if (!local || !local.syncedAt) return;
+  if (inFlight.has(sessionId)) return;
+  inFlight.add(sessionId);
+
+  try {
+    const { data, error } = await supabase.rpc("sync_session_state", {
+      p_payload: toSyncPayload(local) as never,
+    });
+    if (error) throw error;
+
+    const result = (data ?? {}) as { new_players?: Record<string, unknown>[] };
+    const incoming = result.new_players ?? [];
+    if (incoming.length > 0) {
+      // Players who joined by code. They wrote to the server from their own
+      // phone, so this device has never seen them — and they must appear in
+      // the roster before the next draw, or they will not be picked.
+      const fresh = getLocalSession(sessionId);
+      if (fresh) {
+        const known = new Set(fresh.players.map((p) => p.id));
+        for (const row of incoming) {
+          const id = String(row.id ?? "");
+          if (!id || known.has(id)) continue;
+          fresh.players.push({
+            id,
+            session_id: sessionId,
+            display_name: String(row.display_name ?? "Player"),
+            gender: String(row.gender ?? "M"),
+            linked_user_id: (row.linked_user_id as string | null) ?? null,
+            team_side: (row.team_side as string | null) ?? null,
+            preferred_side: (row.preferred_side as string | null) ?? null,
+            status: (row.status as "active" | "late" | "left") ?? "active",
+            matches_played: 0,
+            rests: 0,
+            joined_at: String(row.joined_at ?? new Date().toISOString()),
+          });
+        }
+        saveLocalSession(fresh);
+      }
+    }
+
+    // A session ended locally owes two server-side things: each player's
+    // global rating, and the club league row. Both were already handled for a
+    // session created by syncLocalSessions — but a session that synced EARLY
+    // and ended later comes through here instead, and without this its league
+    // row would never be written. The night would score correctly on every
+    // screen and quietly never reach the table.
+    //
+    // Both are idempotent server-side (ratings_applied / results_applied), so
+    // firing them on every replication of an ended session cannot double-count.
+    if (local.session.status === "ended") {
+      await applySessionRatings(sessionId).catch((e: unknown) =>
+        console.warn("Rating update deferred for", sessionId, e),
+      );
+      await applySessionResults(sessionId).catch((e: unknown) =>
+        console.warn("League results deferred for", sessionId, e),
+      );
+    }
+  } catch (err) {
+    // Never surfaced. A failed replication is invisible to the host by design:
+    // the session on their screen is correct and complete, and the next
+    // mutation — or the periodic sweep — pushes again. Telling them would be
+    // reporting our plumbing.
+    console.warn("Session replication deferred:", err instanceof Error ? err.message : err);
+  } finally {
+    inFlight.delete(sessionId);
+  }
+}
+
+/** Register the debounced replicate. Called once, from startLocalSessionSync. */
+function startReplication(): () => void {
+  return onLocalSessionChange((sessionId) => {
+    const existing = timers.get(sessionId);
+    if (existing) window.clearTimeout(existing);
+    timers.set(
+      sessionId,
+      window.setTimeout(() => {
+        timers.delete(sessionId);
+        void replicateSession(sessionId);
+      }, DEBOUNCE_MS),
+    );
+  });
 }

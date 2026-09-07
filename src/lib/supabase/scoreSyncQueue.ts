@@ -1,7 +1,7 @@
 import { submitMatchScore } from "./scoreActions";
 import { notifyLiveUpdate } from "./liveChannel";
 import { ScoringFormat } from "../scoring/formats";
-import { isLocalOnly, setLocalMatchScore } from "../offline/localSession";
+import { isLocalOnly, hasLocalSession, setLocalMatchScore } from "../offline/localSession";
 
 /**
  * Offline-first score sync queue.
@@ -155,7 +155,16 @@ export function enqueueScore(item: Omit<PendingScore, "clientId" | "enqueuedAt">
   // alone would leave the standings and round history showing an unplayed
   // match. Write it into the local graph too — that is what those screens
   // read from until the session syncs.
-  if (isLocalOnly(item.sessionId)) {
+  // hasLocalSession, NOT isLocalOnly — and this distinction broke a live
+  // session mid-evening. Keyed to "unsynced", the local write stopped the
+  // moment the session uploaded, while the READS kept coming from the local
+  // graph. So the rounds on screen had no scores in them, and Next Round
+  // refused with "finish scoring every match in this round" about a round the
+  // host had just finished scoring.
+  //
+  // The rule is one rule: if this device holds the session, every write lands
+  // locally first. Replication follows.
+  if (hasLocalSession(item.sessionId)) {
     setLocalMatchScore(item.sessionId, item.matchId, item.scoreA, item.scoreB);
   }
 

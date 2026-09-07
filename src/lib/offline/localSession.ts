@@ -154,9 +154,43 @@ function readAll(): Record<string, LocalSession> {
   }
 }
 
+/**
+ * Fired after every local mutation, so replication can follow it.
+ *
+ * A callback registry rather than importing the sync module directly: this
+ * file must not depend on Supabase, or the store and the syncer become a
+ * cycle. The syncer registers itself at startup.
+ */
+type ChangeListener = (sessionId: string) => void;
+const changeListeners: ChangeListener[] = [];
+
+export function onLocalSessionChange(fn: ChangeListener): () => void {
+  changeListeners.push(fn);
+  return () => {
+    const i = changeListeners.indexOf(fn);
+    if (i >= 0) changeListeners.splice(i, 1);
+  };
+}
+
+function announce(all: Record<string, LocalSession>): void {
+  // Announce every session present; the syncer debounces and only pushes the
+  // ones that are live. Cheap, and it cannot miss a mutation the way naming a
+  // single id at each call site eventually would.
+  for (const id of Object.keys(all)) {
+    for (const fn of changeListeners) {
+      try {
+        fn(id);
+      } catch {
+        /* a listener must never break a save */
+      }
+    }
+  }
+}
+
 function writeAll(all: Record<string, LocalSession>): void {
   try {
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
+    announce(all);
   } catch (err) {
     // A full disk here is not a cosmetic failure — it is a session that will
     // not survive the app being killed. Loud, so the caller can refuse to
@@ -169,10 +203,34 @@ export function getLocalSession(sessionId: string): LocalSession | null {
   return readAll()[sessionId] ?? null;
 }
 
-/** True while the session exists ONLY here. The reads branch on this. */
+/**
+ * True while the server has NO copy of this session yet.
+ *
+ * Use this only for things that genuinely need a server row to exist: the
+ * score queue (its match ids don't exist yet), ending (nothing to update),
+ * and the podium (a server-composed view).
+ */
 export function isLocalOnly(sessionId: string): boolean {
   const s = readAll()[sessionId];
   return Boolean(s && !s.syncedAt);
+}
+
+/**
+ * True while this device holds the session's rows at all — synced or not.
+ *
+ * THIS IS THE ONE THE READS AND THE LIVE ACTIONS BRANCH ON, and the
+ * distinction cost an evening to find. `syncedAt` used to mean two things at
+ * once: "the server has a copy" and "stop using local". So a session started
+ * offline, played, and then reconnected would be handed back to the
+ * server-only path the moment it uploaded — and going offline again left it
+ * with no local rows and a Next Round gate it could never satisfy. The host
+ * was locked out of a session running in front of them.
+ *
+ * They are separate facts. The server having a copy does not stop this phone
+ * from being the one running the session; it just means the copy is safe.
+ */
+export function hasLocalSession(sessionId: string): boolean {
+  return Boolean(readAll()[sessionId]);
 }
 
 export function listUnsyncedSessions(): LocalSession[] {
@@ -216,7 +274,11 @@ export function forgetSyncedSessions(): void {
   const cutoff = Date.now() - 24 * 60 * 60 * 1000;
   let changed = false;
   for (const [id, s] of Object.entries(all)) {
-    if (s.syncedAt && s.syncedAt < cutoff) {
+    // ENDED and synced, not merely synced. A live session's rows are what the
+    // live screen reads; dropping them a day into a long-running session
+    // would take the app offline-hostile again for the very session that is
+    // still being played.
+    if (s.session.status === "ended" && s.syncedAt && s.syncedAt < cutoff) {
       delete all[id];
       changed = true;
     }
@@ -259,8 +321,16 @@ export function buildLocalSession(
   draft: SessionDraft,
   previewRounds: RoundResult[],
   schedulingSeed: number,
+  /**
+   * When the wizard already minted a draft session server-side — it does, on
+   * the Players step, so people can join by code before Start — reuse that
+   * identity rather than inventing a new one. `alreadyOnServer` then sends it
+   * down the REPLICATE path (upsert the missing children) instead of the
+   * CREATE path, which would refuse a session that already exists.
+   */
+  existing?: { sessionId: string; joinCode: string; publicToken: string; alreadyOnServer: boolean },
 ): LocalSession {
-  const sessionId = localUuid();
+  const sessionId = existing?.sessionId ?? localUuid();
   const now = new Date().toISOString();
 
   const courts: LocalCourtRow[] = draft.courts.map((c, i) => ({
@@ -358,8 +428,8 @@ export function buildLocalSession(
       scoring_format: draft.scoringFormat,
       ranking_basis: draft.rankingBasis,
       status: "live",
-      join_code: randomJoinCode(),
-      public_token: randomPublicToken(),
+      join_code: existing?.joinCode ?? randomJoinCode(),
+      public_token: existing?.publicToken ?? randomPublicToken(),
       scheduling_seed: schedulingSeed,
       min_players_per_court: 4,
       team_score_mode: draft.teamScoreMode ?? null,
@@ -376,7 +446,7 @@ export function buildLocalSession(
     matches,
     participants,
     rests,
-    syncedAt: null,
+    syncedAt: existing?.alreadyOnServer ? Date.now() : null,
     lastError: null,
   };
 }
@@ -473,7 +543,6 @@ export function setLocalPlayerStatus(
 /** Which local session owns this player, if any. Manage acts on a player id. */
 export function localSessionIdForPlayer(playerId: string): string | null {
   for (const s of Object.values(readAll())) {
-    if (s.syncedAt) continue;
     if (s.players.some((p) => p.id === playerId)) return s.session.id;
   }
   return null;

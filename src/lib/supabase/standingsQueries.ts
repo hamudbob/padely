@@ -174,7 +174,7 @@ export async function getSessionStandings(sessionId: string): Promise<SessionSta
   // against a session on the server, which cannot have happened to one that
   // has never been there.
   const local = getLocalSession(sessionId);
-  if (local && !local.syncedAt) {
+  if (local) {
     const finalMatches = local.matches.filter((m) => m.status === "final");
     const finalIds = new Set(finalMatches.map((m) => m.id));
     return assembleStandings({

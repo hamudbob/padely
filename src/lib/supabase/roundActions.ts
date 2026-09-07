@@ -60,7 +60,7 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
   // draw doesn't respond to standings is an Americano wearing its name, and
   // the difference would show up over the night with nobody able to say why.
   const local = getLocalSession(sessionId);
-  const useLocal = Boolean(local && !local.syncedAt);
+  const useLocal = Boolean(local);
 
   let session: { id: string; format: string; scoring_format: string; ranking_basis: string; scheduling_seed: number; status: string; fixed_partner_style: string | null } | null = null;
   if (useLocal && local) {
@@ -636,7 +636,7 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
 async function loadLatestTwoRounds(sessionId: string): Promise<{ latestId: string; latestSeq: number; prevId: string }> {
   const localForRounds = getLocalSession(sessionId);
   let rounds: { id: string; sequence: number }[] | null;
-  if (localForRounds && !localForRounds.syncedAt) {
+  if (localForRounds) {
     rounds = localForRounds.rounds.slice().sort((a, b) => a.sequence - b.sequence);
   } else {
     const { data, error } = await supabase
@@ -680,7 +680,7 @@ export async function deleteCurrentRound(sessionId: string): Promise<void> {
   // rows that 0060 would happily upload — matches pointing at a round that
   // no longer exists.
   const local = getLocalSession(sessionId);
-  if (local && !local.syncedAt) {
+  if (local) {
     const doomed = new Set(local.matches.filter((m) => m.round_id === latestId).map((m) => m.id));
     local.matches = local.matches.filter((m) => m.round_id !== latestId);
     local.participants = local.participants.filter((mp) => !doomed.has(mp.match_id));
@@ -713,7 +713,7 @@ async function assertRegenerable(sessionId: string): Promise<void> {
   // active players — so Randomize refused with "No courts are available" on a
   // session that had two.
   const local = getLocalSession(sessionId);
-  if (local && !local.syncedAt) {
+  if (local) {
     const courts = local.courts.filter((c) => c.available);
     const active = local.players.filter((p) => p.status === "active");
     if (courts.length === 0) {
@@ -795,7 +795,7 @@ export async function regenerateCurrentRound(sessionId: string, opts: { randomiz
   // and then generateNextRound refused because the round it was meant to
   // replace was still sitting there — so the button did nothing at all.
   const localForRegen = getLocalSession(sessionId);
-  if (localForRegen && !localForRegen.syncedAt) {
+  if (localForRegen) {
     const doomed = new Set(localForRegen.matches.filter((m) => m.round_id === latestId).map((m) => m.id));
     localForRegen.matches = localForRegen.matches.filter((m) => m.round_id !== latestId);
     localForRegen.participants = localForRegen.participants.filter((mp) => !doomed.has(mp.match_id));

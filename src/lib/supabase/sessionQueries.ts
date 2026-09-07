@@ -81,7 +81,8 @@ export async function getHostLiveSnapshot(sessionId: string): Promise<HostLiveSn
   // we have, so an offline session and a synced one can never disagree.
   // See lib/offline/localSession.ts.
   const local = getLocalSession(sessionId);
-  const useLocal = Boolean(local && !local.syncedAt);
+  // Whenever this device holds the rows — synced or not. See hasLocalSession.
+  const useLocal = Boolean(local);
 
   let session: {
     id: string; name: string; format: string; scoring_format: string; join_code: string;

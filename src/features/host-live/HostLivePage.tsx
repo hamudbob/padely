@@ -27,7 +27,7 @@ import {
 import { supabase } from "../../lib/supabase/client";
 import { notifyLiveUpdate } from "../../lib/supabase/liveChannel";
 import { SkeletonScreen, SkeletonLine, SkeletonCourts } from "../shell/Skeleton";
-import { isLocalOnly } from "../../lib/offline/localSession";
+import { isLocalOnly, hasLocalSession } from "../../lib/offline/localSession";
 
 /**
  * Overlays any locally-queued (not-yet-synced) scores on top of the server's
@@ -249,7 +249,7 @@ export default function HostLivePage() {
           // Without this the screen would bounce a local ended session into a
           // page that cannot load, and the back button would bounce it
           // straight back — a loop with no exit.
-          navigate(isLocalOnly(sessionId) ? "/play" : `/session/${sessionId}/final`, { replace: true });
+          navigate(podiumReachable(sessionId) ? `/session/${sessionId}/final` : "/play", { replace: true });
           return;
         }
         setSnapshot(snap);
@@ -662,6 +662,20 @@ export default function HostLivePage() {
     enqueueScore({ sessionId, matchId, format, scoreA, scoreB: finalB, editedBy: hostUserId });
   }
 
+  /**
+   * Can the podium actually load right now.
+   *
+   * It is composed by a server RPC, so it needs BOTH a server copy of the
+   * session and a network to fetch it with. Keyed only to "has a server copy",
+   * a session started online and ended in Airplane Mode was sent there anyway
+   * — and the fetch failed with a bare "load failed" on a session that had, in
+   * fact, ended perfectly well.
+   */
+  function podiumReachable(id: string): boolean {
+    const online = typeof navigator === "undefined" || !("onLine" in navigator) || navigator.onLine;
+    return online && !isLocalOnly(id);
+  }
+
   async function handleNextRound() {
     if (!sessionId) return;
     setGeneratingRound(true);
@@ -676,7 +690,7 @@ export default function HostLivePage() {
       // count never reaches zero and the host is told to reconnect in order
       // to continue a session that was designed to need no connection. A
       // dead end, on a court, mid-evening.
-      if (!isLocalOnly(sessionId)) {
+      if (!hasLocalSession(sessionId)) {
         // Online sessions still wait. The pairings are computed FROM the
         // scores, and the rows the generator reads are the server's — so
         // advancing with scores still queued would draw from stale data.
@@ -918,11 +932,11 @@ export default function HostLivePage() {
     setEndingSession(true);
     setEndSessionError(null);
     try {
-      const wasLocal = isLocalOnly(sessionId);
+      const canShowPodium = podiumReachable(sessionId);
       await endSession(sessionId);
       setShowEndConfirm(false);
 
-      if (wasLocal) {
+      if (!canShowPodium) {
         // The podium is built by get_public_session_by_id — a server RPC — so
         // a session that hasn't synced has no podium to show yet. Sending the
         // host there anyway is what produced an error screen with no way back

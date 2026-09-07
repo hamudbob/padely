@@ -42,7 +42,7 @@ export async function getRoundHistory(sessionId: string): Promise<RoundHistoryEn
   // Local-only session: same shaping below, different source. See
   // lib/offline/localSession.ts.
   const local = getLocalSession(sessionId);
-  const useLocal = Boolean(local && !local.syncedAt);
+  const useLocal = Boolean(local);
 
   let courts: { id: string; display_name: string; ordinal: number }[] = [];
   let players: { id: string; display_name: string }[] = [];

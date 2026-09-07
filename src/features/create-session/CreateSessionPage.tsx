@@ -21,13 +21,17 @@ import {
   generateFixedPartnerRankedRound,
 } from "../../lib/scheduling/fixedPartner";
 import { generateInitialRounds } from "../../lib/scheduling/initialSchedule";
-import { createLobby, finalizeAndStart, deleteSession, saveLobbyState, getResumableLobbies, DraftCourt, DraftPlayer } from "../../lib/supabase/sessionActions";
+// finalizeAndStart is gone from this screen: Start is local-first now, and
+// the server session is created by the sync path instead. createLobby stays
+// — it still mints the draft on the Players step so people can join by code
+// before Start.
+import { createLobby, deleteSession, saveLobbyState, getResumableLobbies, DraftCourt, DraftPlayer } from "../../lib/supabase/sessionActions";
 import { listJoinRequests, acknowledgeJoinRequest, rejectJoinRequest, JoinRequest } from "../../lib/supabase/joinRequestQueries";
 import { getMyTeams, MyTeam } from "../../lib/supabase/teamQueries";
 import { getEventGoing, linkEventSession } from "../../lib/supabase/eventQueries";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { buildLocalSession, saveLocalSession } from "../../lib/offline/localSession";
-import { syncLocalSessions } from "../../lib/offline/localSessionSync";
+import { syncLocalSessions, replicateSession } from "../../lib/offline/localSessionSync";
 
 type SessionFormat = Database["public"]["Tables"]["sessions"]["Row"]["format"];
 type ScoringFormat = Database["public"]["Tables"]["sessions"]["Row"]["scoring_format"];
@@ -762,22 +766,6 @@ export default function CreateSessionPage() {
   // roster — typed players plus everyone who joined by code — and its computed
   // round preview, then goes live. Falls back to minting the draft here if the
   // Players-step effect never ran (e.g. it failed earlier).
-  /**
-   * Does this error mean "no connection" rather than "no".
-   *
-   * A fetch that never reached a server throws a TypeError with no status and
-   * no Postgres code; a refusal from the server carries one. The distinction
-   * matters because falling back to a LOCAL session on a genuine refusal —
-   * an expired token, a validation failure — would hide the real problem and
-   * queue a session that can never sync.
-   */
-  function isLikelyOffline(err: unknown): boolean {
-    if (typeof navigator !== "undefined" && "onLine" in navigator && !navigator.onLine) return true;
-    if ((err as { code?: string } | null)?.code) return false; // the server answered
-    const message = (err instanceof Error ? err.message : String(err)).toLowerCase();
-    return /failed to fetch|network|timeout|offline|load failed/.test(message);
-  }
-
   async function handleStart() {
     if (previewRounds.length === 0) return;
     setStarting(true);
@@ -797,81 +785,58 @@ export default function CreateSessionPage() {
       countsForLeague: clubId ? countsForLeague : undefined,
     };
 
-    // ── No signal: start it on the phone ───────────────────────────────────
+    // ── Start is local-first, always ───────────────────────────────────────
     //
-    // Everything a live session needs is already computed here — the roster,
-    // the courts, the whole round preview. The only thing the server was ever
-    // providing was row ids, so the device makes those too and the session
-    // runs locally until it can be uploaded whole (0060).
+    // This used to branch: offline built the session on the phone, online did
+    // six dependent inserts and waited for each one's ids. That split was the
+    // cause of two bugs and one complaint. A session started ONLINE got no
+    // local graph at all, so switching to Airplane Mode mid-evening left it
+    // with nothing to read and every action refusing; and every action that
+    // did work cost ten round trips, which is why online felt slow while
+    // offline felt instant.
     //
-    // navigator.onLine is a weak signal — it means "an interface is up", not
-    // "the internet answers" — so it is used only to skip a doomed round trip,
-    // never to decide the session is unsyncable. A start that FAILS on the
-    // network below falls into the same path, which is the case that actually
-    // catches a court with one bar.
-    if (typeof navigator !== "undefined" && "onLine" in navigator && !navigator.onLine) {
-      try {
-        const localSession = buildLocalSession(draft, previewRounds, schedulingSeed);
-        saveLocalSession(localSession);
-        startedRef.current = true;
-        setJoinCode(localSession.session.join_code);
-        navigate(`/session/${localSession.session.id}/host`, { replace: true });
-        return;
-      } catch (err) {
-        setStartError(withFallback(err, "Could not start the session on this device."));
-        setStarting(false);
-        return;
-      }
-    }
-
+    // Nothing here needs a server. The draw, the roster, the courts and the
+    // whole round preview are already computed on this device — the database
+    // was only ever handing back row ids, and now the phone makes those too.
+    // So: build it, save it, go. Replication follows on its own.
     try {
-      let sid = lobbyId;
-      if (!sid) {
-        const created = await createLobby({
-          name: name.trim(),
-          format,
-          scoringFormat,
-          rankingBasis,
-          teamScoreMode: isTeamSparring ? teamScoreMode : undefined,
-          fixedPartnerStyle: isFixedPartner ? fixedPartnerStyle : undefined,
-          clubId,
-        });
-        sid = created.sessionId;
-        setLobbyId(sid);
-        setJoinCode(created.joinCode);
-      }
-      await finalizeAndStart(sid, draft, previewRounds, schedulingSeed);
-      startedRef.current = true; // it's live now — don't let the unmount cleanup delete it
-      if (eventId) void linkEventSession(eventId, sid).catch(() => {}); // best-effort event↔session link
+      const localSession = buildLocalSession(
+        draft,
+        previewRounds,
+        schedulingSeed,
+        // The wizard mints a draft session on the Players step so people can
+        // join by code before Start. When it did, keep that identity — the
+        // join code is already in a group chat — and replicate into it.
+        lobbyId
+          ? { sessionId: lobbyId, joinCode, publicToken: "", alreadyOnServer: true }
+          : undefined,
+      );
+      saveLocalSession(localSession);
+      startedRef.current = true;
+      setJoinCode(localSession.session.join_code);
+
+      const sid = localSession.session.id;
+      if (eventId) void linkEventSession(eventId, sid).catch(() => {});
+
+      // Not awaited. The session is running; getting it onto the server is our
+      // problem, not something the host waits at a spinner for.
+      void syncLocalSessions();
+      void replicateSession(sid);
+
       // REPLACE, not push. The wizard is finished the moment the session is
       // live, and leaving it in history meant a host who backed out of the live
       // screen mid-session landed on "Create session" — which reads like the
-      // night they are running has vanished. Replacing sends them back to
-      // wherever they started from instead: Play, or the club page.
+      // night they are running has vanished.
       navigate(`/session/${sid}/host`, { replace: true });
+      return;
     } catch (err) {
-      // The network failed part-way. This is the case navigator.onLine misses:
-      // one bar, a request that times out, a captive portal. Rather than leave
-      // a host holding a full roster and an error, start it locally and let it
-      // sync itself — the same path as a clean offline start.
-      if (isLikelyOffline(err)) {
-        try {
-          const localSession = buildLocalSession(draft, previewRounds, schedulingSeed);
-          saveLocalSession(localSession);
-          startedRef.current = true;
-          setJoinCode(localSession.session.join_code);
-          void syncLocalSessions();
-          navigate(`/session/${localSession.session.id}/host`, { replace: true });
-          return;
-        } catch {
-          /* fall through to the error below */
-        }
-      }
       setStartError(withFallback(err, "Could not start the session."));
-    } finally {
       setStarting(false);
+      return;
     }
   }
+
+
 
   return (
     <div className="mx-auto max-w-sm min-h-screen bg-ivory px-5 py-8 safe-top safe-bottom">

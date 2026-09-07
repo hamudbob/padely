@@ -4,8 +4,8 @@ import { applySessionResults } from "./resultActions";
 import type { Database } from "./database.types";
 import type { RoundResult } from "../scheduling/types";
 import { Pair, buildPairByPlayerId, pairLabel } from "../scheduling/fixedPartner";
-import { isLocalOnly, setLocalSessionEnded } from "../offline/localSession";
-import { syncLocalSessions } from "../offline/localSessionSync";
+import { isLocalOnly, hasLocalSession, setLocalSessionEnded } from "../offline/localSession";
+import { syncLocalSessions, replicateSession } from "../offline/localSessionSync";
 
 type SessionFormat = Database["public"]["Tables"]["sessions"]["Row"]["format"];
 type ScoringFormat = Database["public"]["Tables"]["sessions"]["Row"]["scoring_format"];
@@ -305,9 +305,18 @@ export async function endSession(sessionId: string): Promise<void> {
   // (ratings_applied / results_applied), so the correct place for them is
   // after the session exists. Trying now would fail, and swallowing that
   // failure is how a league quietly misses a night.
-  if (isLocalOnly(sessionId)) {
+  if (hasLocalSession(sessionId)) {
+    // End it locally, always and first. Keyed to isLocalOnly this ran only
+    // for a session the server had never seen — so a session that had synced
+    // was ended on the server while the local copy, which is what the live
+    // screen reads, stayed "live" forever. The host could not finish their
+    // own evening.
     setLocalSessionEnded(sessionId);
-    void syncLocalSessions();
+    // Push it. syncLocalSessions creates the session if the server has never
+    // seen it and then flushes; replicateSession updates one it already has.
+    // Both run ratings and league results once the ended session is up there.
+    if (isLocalOnly(sessionId)) void syncLocalSessions();
+    else void replicateSession(sessionId);
     return;
   }
 

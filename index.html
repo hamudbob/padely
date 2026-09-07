@@ -22,10 +22,29 @@
     <!-- Padelier brand type: Fraunces (headlines), Inter (interface), Space Grotesk (scores), Lora (wordmark) -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <!-- Loaded NON-BLOCKING, and that is the whole point.
+         A plain <link rel="stylesheet"> is render-blocking: the browser paints
+         nothing until it resolves. On a court with no signal that request has
+         to time out first, so the app sat on a blank screen for seconds before
+         showing anything — the fonts were never the problem, waiting for them
+         was. `media="print"` makes it non-blocking, and the onload flips it to
+         all once it arrives; text renders immediately in the fallback stack
+         either way (display=swap).
+         The real fix is self-hosting these four families, which also removes a
+         third party from the critical path — that is in docs/BACKLOG.md. This
+         is the one-line version of it. -->
     <link
       href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Lora:wght@500;600;700&display=swap"
       rel="stylesheet"
+      media="print"
+      onload="this.media='all'"
     />
+    <noscript>
+      <link
+        href="https://fonts.googleapis.com/css2?family=Fraunces:ital,opsz,wght@0,9..144,400;0,9..144,500;0,9..144,600;1,9..144,500&family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@400;500;600;700&family=Lora:wght@500;600;700&display=swap"
+        rel="stylesheet"
+      />
+    </noscript>
   </head>
   <body>
     <div id="root"></div>
