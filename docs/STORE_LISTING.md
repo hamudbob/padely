@@ -150,11 +150,20 @@ tracking throughout.
 | Contacts | No | — | — |
 | Identifiers for advertising | No | — | — |
 | Usage data | No | — | — |
-| Diagnostics | Yes | No | App functionality (crash and error reports, not linked to an identity) |
+| Diagnostics | Yes | **Yes** | App functionality (crash and error reports, attributed to the signed-in user) |
 
 The last row is the error reporter — client errors are recorded so a failure
-that a screen catches still reaches the admin console. It stores the message
-and the route, not who was on it.
+that a screen catches still reaches the admin console.
+
+CORRECTED 8 Sep 2026, mid-submission. This used to claim the reporter stores
+"the message and the route, not who was on it". It does not: errorReporter.ts
+reads the signed-in user's access token out of local storage and sends it, so
+the row lands attributed to the person it happened to, and is null only on
+public pages and the sign-in screen. Diagnostics are therefore LINKED to the
+user, like everything else. Declaring them unlinked would have been a label
+that contradicts the database — precisely the 5.1.1 discrepancy Apple checks
+for. The privacy policy said nothing about error reports at all; an "Error
+reports" section was added to legalContent.ts the same day.
 
 ---
 

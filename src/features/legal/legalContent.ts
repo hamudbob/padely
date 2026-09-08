@@ -267,6 +267,20 @@ export const PRIVACY: Doc = {
             id: "Saat Anda meminta masuk atau mengecek apakah sebuah email sudah terdaftar, kami mencatat sebentar alamat IP asal permintaan agar aplikasi ini tidak bisa dipakai untuk menguji ribuan alamat. Catatan tersebut dihapus otomatis setelah satu jam. Netlify, penyedia hosting kami, menyimpan log server standar.",
           },
         },
+        {
+          // Added 8 Sep 2026. The App Store privacy label declares Crash Data
+          // and Other Diagnostic Data as LINKED to the user, because
+          // errorReporter.ts sends the signed-in user's access token so a
+          // report is attributed to the person it happened to. This page did
+          // not mention error reports at all, so the label disclosed more than
+          // the policy — which is the wrong way round, and the kind of gap
+          // that costs a review cycle. Keep the two in step.
+          t: { en: "Error reports", id: "Laporan kesalahan" },
+          d: {
+            en: "When something goes wrong in the app, we record what failed — the error message, which screen you were on, and your browser and device type — so we can fix it. If you are signed in, that record is attached to your account, because a fault nobody can trace to a person is a fault nobody can follow up. We never record what you typed.",
+            id: "Saat terjadi kesalahan di aplikasi, kami mencatat apa yang gagal — pesan kesalahannya, halaman yang sedang Anda buka, serta jenis peramban dan perangkat Anda — agar bisa kami perbaiki. Jika Anda sedang masuk, catatan itu terhubung ke akun Anda, karena kesalahan yang tidak bisa ditelusuri ke seseorang tidak bisa ditindaklanjuti. Kami tidak pernah mencatat apa yang Anda ketik.",
+          },
+        },
       ],
     },
     {
