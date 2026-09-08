@@ -33,6 +33,12 @@
 	</array>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<key>ITSAppUsesNonExemptEncryption</key>
+	<!-- Padelier uses HTTPS and nothing else, which is the standard exemption.
+	     Declaring it here stops App Store Connect asking the same question on
+	     every single upload — and a wrong answer there is a compliance
+	     statement, not a form field. -->
+	<false/>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<!-- Purpose strings. iOS does not ask politely without these: touching the

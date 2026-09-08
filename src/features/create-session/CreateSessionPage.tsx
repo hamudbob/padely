@@ -32,6 +32,7 @@ import { getEventGoing, linkEventSession } from "../../lib/supabase/eventQueries
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { buildLocalSession, saveLocalSession } from "../../lib/offline/localSession";
 import { syncLocalSessions, replicateSession } from "../../lib/offline/localSessionSync";
+import { publicUrl } from "../../lib/shareLink";
 
 type SessionFormat = Database["public"]["Tables"]["sessions"]["Row"]["format"];
 type ScoringFormat = Database["public"]["Tables"]["sessions"]["Row"]["scoring_format"];
@@ -589,7 +590,7 @@ export default function CreateSessionPage() {
 
   async function copyJoinLink() {
     try {
-      await navigator.clipboard.writeText(`${window.location.origin}/join?code=${joinCode}`);
+      await navigator.clipboard.writeText(publicUrl(`/join?code=${joinCode}`));
       setCopiedLink(true);
       window.setTimeout(() => setCopiedLink(false), 1800);
     } catch {

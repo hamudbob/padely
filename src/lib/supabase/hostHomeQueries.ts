@@ -2,6 +2,7 @@ import { supabase } from "./client";
 import { assembleStandings, StandingsInput } from "./standingsQueries";
 import { RankingBasis } from "../scoring/standings";
 import { HostSessionSummary } from "./hostSessionsQueries";
+import { listAllLocalSessions } from "../offline/localSession";
 
 /**
  * Home-screen data in ONE batched pass. listHostSessions gives the bare session
@@ -260,5 +261,32 @@ export async function getHostHomeSummary(): Promise<HostHomeSummary> {
     gamesPlayed,
   };
 
-  return { sessions: enriched, stats };
+  // Sessions this device holds that the server has not answered with — a
+  // session started or ended with no signal. Without this, ending a session on
+  // a court made it VANISH: gone from the live screen, absent from Play, and
+  // only reappearing once it uploaded. The evening looked deleted.
+  //
+  // Merged rather than replaced, and only where the id is missing, so a synced
+  // session is always represented by the server's richer row.
+  const seen = new Set(enriched.map((s) => s.id));
+  const localOnly = listAllLocalSessions()
+    .filter((l) => !seen.has(l.session.id))
+    .map((l) => ({
+      id: l.session.id,
+      name: l.session.name,
+      format: l.session.format,
+      status: l.session.status,
+      created_at: l.session.created_at,
+      started_at: l.session.started_at,
+      ended_at: l.session.ended_at,
+      public_token: l.session.public_token,
+      join_code: l.session.join_code,
+      playerCount: l.players.length,
+      roundCount: l.rounds.length,
+      fieldSize: l.players.length,
+      myRank: null,
+      myGames: 0,
+    })) as unknown as typeof enriched;
+
+  return { sessions: [...enriched, ...localOnly], stats };
 }

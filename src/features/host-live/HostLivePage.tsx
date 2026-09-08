@@ -28,6 +28,7 @@ import { supabase } from "../../lib/supabase/client";
 import { notifyLiveUpdate } from "../../lib/supabase/liveChannel";
 import { SkeletonScreen, SkeletonLine, SkeletonCourts } from "../shell/Skeleton";
 import { isLocalOnly, hasLocalSession } from "../../lib/offline/localSession";
+import { publicUrl } from "../../lib/shareLink";
 
 /**
  * Overlays any locally-queued (not-yet-synced) scores on top of the server's
@@ -672,6 +673,10 @@ export default function HostLivePage() {
    * fact, ended perfectly well.
    */
   function podiumReachable(id: string): boolean {
+    // If this device holds the session, the podium builds from local rows —
+    // no network, no server copy needed. Otherwise it is the RPC's job, which
+    // needs both.
+    if (hasLocalSession(id)) return true;
     const online = typeof navigator === "undefined" || !("onLine" in navigator) || navigator.onLine;
     return online && !isLocalOnly(id);
   }
@@ -818,7 +823,7 @@ export default function HostLivePage() {
   }
 
   async function handleCopyJoinLink() {
-    const link = `${window.location.origin}/join?code=${snapshot?.session.joinCode ?? ""}`;
+    const link = publicUrl(`/join?code=${snapshot?.session.joinCode ?? ""}`);
     try {
       await navigator.clipboard.writeText(link);
       setCopiedLink(true);
@@ -949,7 +954,12 @@ export default function HostLivePage() {
         return;
       }
 
-      notifyLiveUpdate(sessionId); // flip any watchers to the final/ended view
+      // Spectators only exist if the session is on the server and we have a
+      // network to tell them with. Offline this would throw, and there is
+      // nobody watching a session that has never left the phone.
+      if (typeof navigator === "undefined" || !("onLine" in navigator) || navigator.onLine) {
+        notifyLiveUpdate(sessionId); // flip any watchers to the final/ended view
+      }
       navigate(`/session/${sessionId}/final`); // straight to the podium; rounds/standings stay reachable from there
     } catch (err) {
       setEndSessionError(withFallback(err, "Could not end this session."));

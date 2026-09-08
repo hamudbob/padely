@@ -9,6 +9,7 @@ import AvatarLightbox from "../shell/AvatarLightbox";
 import SafetySheet from "./SafetySheet";
 import { unblockUser } from "../../lib/supabase/safetyQueries";
 import { SkeletonScreen, SkeletonHero, SkeletonStats, SkeletonBlock } from "../shell/Skeleton";
+import { publicUrl } from "../../lib/shareLink";
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -84,7 +85,7 @@ export default function PublicProfilePage() {
 
   async function share() {
     try {
-      await navigator.clipboard.writeText(window.location.href);
+      await navigator.clipboard.writeText(publicUrl(window.location.pathname));
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     } catch {

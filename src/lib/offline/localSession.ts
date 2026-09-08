@@ -547,3 +547,10 @@ export function localSessionIdForPlayer(playerId: string): string | null {
   }
   return null;
 }
+
+/** Every session this device holds, newest first. For merging into Play. */
+export function listAllLocalSessions(): LocalSession[] {
+  return Object.values(readAll()).sort((a, b) =>
+    b.session.started_at.localeCompare(a.session.started_at),
+  );
+}

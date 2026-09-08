@@ -1,6 +1,7 @@
 import { supabase } from "./client";
 import { assembleStandings, StandingsInput, StandingsRow } from "./standingsQueries";
 import { RankingBasis } from "../scoring/standings";
+import { getLocalSession, LocalSession } from "../offline/localSession";
 
 /**
  * Read-only wrapper around the `get_public_session(p_public_token)` RPC
@@ -72,6 +73,77 @@ interface RawPublicSession {
   }[];
 }
 
+
+/**
+ * The same payload, built from the rows this device already holds.
+ *
+ * WHY IT RETURNS A *RAW* PAYLOAD RATHER THAN A PublicSessionData. Because then
+ * it goes through mapPublicSession — the identical mapper the RPC's answer
+ * goes through — which in turn calls assembleStandings, the identical
+ * assembler the host's Standings tab and the spectator board use.
+ *
+ * So there is ONE podium. Not an online podium and an offline podium: one
+ * page, one shaper, one standings implementation, fed from two sources. The
+ * board on a dead court is the board that appears after it syncs, tiebreaks
+ * and all, because it is produced by the same code.
+ *
+ * TWO FIELDS THE SERVER KNOWS AND THIS DOES NOT. Avatars live on profiles, and
+ * the club's name lives on clubs — neither is in a session's own rows. They
+ * resolve to null here, and the app already falls back to initials for anyone
+ * without a photo. So an offline podium looks like a podium for players who
+ * haven't uploaded pictures, not like a broken one.
+ */
+function localToRawPublicSession(local: LocalSession): RawPublicSession {
+  const courtNameById = new Map(local.courts.map((c) => [c.id, c.display_name]));
+  const nameById = new Map(local.players.map((p) => [p.id, p.display_name]));
+  const sequenceByRoundId = new Map(local.rounds.map((r) => [r.id, r.sequence]));
+
+  return {
+    session: {
+      id: local.session.id,
+      name: local.session.name,
+      format: local.session.format,
+      scoring_format: local.session.scoring_format,
+      ranking_basis: local.session.ranking_basis as RankingBasis,
+      fixed_partner_style: local.session.fixed_partner_style,
+      status: local.session.status,
+    },
+    players: local.players.map((p) => ({
+      id: p.id,
+      display_name: p.display_name,
+      status: p.status,
+      team_side: (p.team_side as "A" | "B" | null) ?? null,
+      avatar_url: null,
+    })),
+    public_token: local.session.public_token,
+    club_name: null,
+    session_date: local.session.started_at,
+    rounds: local.rounds
+      .slice()
+      .sort((a, b) => a.sequence - b.sequence)
+      .map((r) => ({ id: r.id, sequence: r.sequence, status: r.status })),
+    // An adjustment is an admin action taken against a session on the server,
+    // which cannot have happened to one this device is still running.
+    adjustments: [],
+    pairs: local.pairs.map((pr) => ({ id: pr.id, player_a_id: pr.player_a_id, player_b_id: pr.player_b_id })),
+    matches: local.matches.map((m) => {
+      const mine = local.participants.filter((mp) => mp.match_id === m.id);
+      return {
+        id: m.id,
+        round_sequence: sequenceByRoundId.get(m.round_id) ?? 0,
+        court_name: courtNameById.get(m.court_id) ?? "Court",
+        status: m.status,
+        outcome: m.outcome,
+        score_a: m.score_a,
+        score_b: m.score_b,
+        team_a: mine.filter((mp) => mp.side === "A").map((mp) => nameById.get(mp.player_id) ?? "?"),
+        team_b: mine.filter((mp) => mp.side === "B").map((mp) => nameById.get(mp.player_id) ?? "?"),
+        participants: mine.map((mp) => ({ player_id: mp.player_id, side: mp.side })),
+      };
+    }),
+  };
+}
+
 export async function getPublicSession(publicToken: string): Promise<PublicSessionData | null> {
   const { data, error } = await supabase.rpc("get_public_session", { p_public_token: publicToken });
   if (error) throw error;
@@ -89,6 +161,17 @@ export async function getPublicSession(publicToken: string): Promise<PublicSessi
  * while the host saw the real thing on the same URL.
  */
 export async function getPublicSessionById(sessionId: string): Promise<PublicSessionData | null> {
+  // If this device holds the session, the podium is built from those rows —
+  // through the SAME mapper and the SAME standings assembler the RPC's answer
+  // goes through. That is what makes it one podium rather than two: the page,
+  // the recap image and the share path never learn where the data came from.
+  //
+  // It also means the podium works with no signal, which is where a session
+  // that was just played actually ends: on a court, with everyone waiting to
+  // see who won.
+  const local = getLocalSession(sessionId);
+  if (local) return mapPublicSession(localToRawPublicSession(local));
+
   const { data, error } = await supabase.rpc("get_public_session_by_id", { p_session_id: sessionId });
   if (error) throw error;
   if (!data) return null; // null for an unknown id, or a session still in draft.

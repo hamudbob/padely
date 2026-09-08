@@ -9,6 +9,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { StandingsRow } from "../../lib/supabase/standingsQueries";
 import { getPublicSessionById, PublicSessionData } from "../../lib/supabase/publicSessionQueries";
 import { renderRecapCard } from "../../lib/recap/renderRecapCard";
+import { publicUrl, PUBLIC_ORIGIN } from "../../lib/shareLink";
 
 const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
@@ -88,7 +89,7 @@ export default function FinalSummaryPage() {
   }, [sessionId]);
 
   function handleShare() {
-    const url = `${window.location.origin}/session/${sessionId ?? ""}/final`;
+    const url = publicUrl(`/session/${sessionId ?? ""}/final`);
     if (typeof navigator !== "undefined" && navigator.share) {
       navigator.share({ url }).catch(() => {});
     } else if (typeof navigator !== "undefined" && navigator.clipboard) {
@@ -120,8 +121,8 @@ export default function FinalSummaryPage() {
           avatarUrl: data.avatarByPlayerId?.get(r.subjectId) ?? null,
         })),
         liveUrl: data.publicToken
-          ? `${window.location.origin}/live/${data.publicToken}`
-          : window.location.origin,
+          ? publicUrl(`/live/${data.publicToken}`)
+          : PUBLIC_ORIGIN,
       });
       if (recapUrl) URL.revokeObjectURL(recapUrl);
       setRecapBlob(blob);
