@@ -100,7 +100,7 @@ plural. Don't use a competitor's name.
 |---|---|
 | Primary category | Sports |
 | Secondary category | Utilities |
-| Age rating | 17+ — see below |
+| Age rating | 13+ (override; Apple calculates 4+) — see below |
 | Price | Free |
 | In-app purchases | None |
 | Support URL | https://padelier.id/about |
@@ -108,11 +108,26 @@ plural. Don't use a competitor's name.
 | Privacy policy URL | https://padelier.id/privacy |
 | Copyright | 2026 Padelier |
 
-**Age rating.** The terms say 18 and over, so the questionnaire has to reflect
-it rather than claim 4+. The reason is user-generated content, not anything in
-the app itself: profiles carry a photo and free text that other people see.
-Answer the questionnaire honestly — "Infrequent/Mild" for nothing, and declare
-user-generated content — and it lands at 17+.
+**Age rating.** Answer the content questionnaire honestly and it calculates
+**4+** — nothing in the app's own content is objectionable, and declaring
+user-generated content no longer raises the rating on its own now that report
+and block ship (0053, 0054). Content answers: None to every category; No to
+parental controls, age assurance, unrestricted web access, social media,
+messaging, advertising; **Yes** to user-generated content only.
+
+Then **override to 13+**. Not because of content, but because the terms and
+the privacy policy set a minimum age, and a store listing that disagrees with
+your own published legal text is a contradiction you chose. The terms were
+lowered from 18 to 13 on 8 Sep 2026 for the same reason — clubs have junior
+members and excluding them was never deliberate. Below 13 is a different app:
+a name, a photo and a free-text bio from a child brings COPPA and its
+equivalents with it.
+
+Change the age in all three places together or not at all:
+`src/features/legal/legalContent.ts` (terms and privacy, EN and ID),
+`src/features/auth/LoginPage.tsx` (the sign-up footnote), and the App Store
+Connect override. The legal text is bundled into the binary, so changing it
+needs a new build as well as a web deploy.
 
 ---
 

@@ -258,7 +258,7 @@ Use a **third throwaway account** for this — it's irreversible.
 1. As a **stranger**, open `/privacy` and `/terms` ✅ both render without an account.
 2. ✅ the language toggle switches EN ⇄ ID and ✅ survives a reload.
 3. ✅ the choice is shared with `/about` — switch on one, the other follows.
-4. ✅ Settings → Legal links to both; ✅ sign-up shows the 18+ and consent line;
+4. ✅ Settings → Legal links to both; ✅ sign-up shows the 13+ and consent line;
    ✅ the logged-out home footer has Privacy · Terms.
 5. ✅ the "?" beside Rating on a profile opens `/about` **at the rating answer**, already expanded.
 6. ✅ the "?" on the code screen opens the join-code answer.

@@ -663,7 +663,7 @@ export default function LoginPage() {
               By creating an account you agree to our{" "}
               <Link to="/terms" className="font-semibold text-gold-ink">Terms of use</Link> and{" "}
               <Link to="/privacy" className="font-semibold text-gold-ink">Privacy policy</Link>. You
-              must be 18 or over.
+              must be 13 or over.
             </p>
           )}
 

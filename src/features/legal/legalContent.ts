@@ -426,8 +426,8 @@ export const PRIVACY: Doc = {
       title: { en: "Age", id: "Usia" },
       body: [
         {
-          en: "Padelier is for people aged 18 and over. We don't knowingly collect data from children, and if we find out an account belongs to someone under 18 we'll delete it.",
-          id: "Padelier ditujukan untuk pengguna berusia 18 tahun ke atas. Kami tidak dengan sengaja mengumpulkan data anak, dan jika kami mengetahui sebuah akun dimiliki orang di bawah 18 tahun, akun itu akan kami hapus.",
+          en: "Padelier is for people aged 13 and over. We don't knowingly collect data from children under 13, and if we find out an account belongs to someone under 13 we'll delete it.",
+          id: "Padelier ditujukan untuk pengguna berusia 13 tahun ke atas. Kami tidak dengan sengaja mengumpulkan data anak di bawah 13 tahun, dan jika kami mengetahui sebuah akun dimiliki orang di bawah 13 tahun, akun itu akan kami hapus.",
         },
       ],
     },
@@ -517,8 +517,8 @@ export const TERMS: Doc = {
       title: { en: "Your account", id: "Akun Anda" },
       body: [
         {
-          en: "You must be 18 or over to hold an account. One account per person. Give a real email address — it's how you get back in if you forget your password — and keep your password to yourself. What happens under your account is your responsibility.",
-          id: "Anda harus berusia 18 tahun ke atas untuk memiliki akun. Satu akun untuk satu orang. Gunakan alamat email yang benar — lewat situlah Anda bisa masuk kembali jika lupa kata sandi — dan jaga kerahasiaan kata sandi Anda. Segala hal yang terjadi melalui akun Anda menjadi tanggung jawab Anda.",
+          en: "You must be 13 or over to hold an account. One account per person. Give a real email address — it's how you get back in if you forget your password — and keep your password to yourself. What happens under your account is your responsibility.",
+          id: "Anda harus berusia 13 tahun ke atas untuk memiliki akun. Satu akun untuk satu orang. Gunakan alamat email yang benar — lewat situlah Anda bisa masuk kembali jika lupa kata sandi — dan jaga kerahasiaan kata sandi Anda. Segala hal yang terjadi melalui akun Anda menjadi tanggung jawab Anda.",
         },
       ],
     },

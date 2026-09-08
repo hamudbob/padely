@@ -152,8 +152,19 @@ under the Dynamic Island reads as a website.
 - **Privacy nutrition label** — declare, honestly and matching `/privacy`: email address, name,
   photo, user content, usage data, and that none of it is used for tracking or advertising. The
   label and the policy disagreeing is its own rejection
-- **Age rating** — content-wise Padelier is 4+. Note your terms say 18+ to *hold an account*; that
-  is a contractual rule, not a content rating, and you don't need to set the store rating to 18+
+- **Age rating** — SETTLED 8 Sep 2026, after this file and STORE_LISTING.md were found to
+  contradict each other mid-submission. Apple's questionnaire calculates **4+**: the app's own
+  content is a padel scheduler and there is nothing objectionable in it. Declaring user-generated
+  content no longer raises the rating by itself, because report and block exist (0053, 0054).
+  We nevertheless **override to 13+**, and the terms were changed to match on the same day.
+  The reason is consistency, not content: a store listing saying 4+ while the privacy policy
+  promises to delete under-age accounts is two published documents disagreeing about who the app
+  is for. 13 rather than 18 because padel clubs have junior members and excluding them was never
+  intentional; 13 rather than lower because collecting a name, photo and free-text bio from
+  under-13s pulls you into COPPA and its equivalents, which is a different app with different
+  obligations. The age now appears in exactly three places, and they must be changed together:
+  `legalContent.ts` (terms and privacy, EN and ID), `LoginPage.tsx` (the sign-up footnote), and
+  the App Store Connect override
 - **Export compliance** — you use HTTPS only, which is the standard exemption. Add
   `ITSAppUsesNonExemptEncryption = false` to `Info.plist` so you stop being asked every build
 - **A demo account for review.** Apple's reviewer must be able to sign in. Create a real account,
