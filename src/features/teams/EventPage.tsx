@@ -14,6 +14,8 @@ import {
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
 import { SkeletonScreen, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
+import { shareUrl } from "../../lib/shareLink";
+import ConfirmSheet, { ConfirmRequest } from "../shell/ConfirmSheet";
 
 interface DateParts {
   weekday: string;
@@ -69,6 +71,7 @@ export default function EventPage() {
   const [guestName, setGuestName] = useState("");
   const [guestGender, setGuestGender] = useState<"M" | "F">("M");
   const [guestBusy, setGuestBusy] = useState(false);
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 
   // NOTE ON eventId vs ev.id, which is the bug this page shipped with.
   //
@@ -81,7 +84,56 @@ export default function EventPage() {
   //
   // The resolved row already carries the real one. So: `eventId` for reading
   // and for links, `ev.id` for anything that writes.
-  async function respond(response: RsvpResponse) {
+  /**
+   * Leaving a spot you hold is the one RSVP move that cannot be undone.
+   *
+   * Everything else on this control is freely reversible — "maybe" to "in",
+   * "out" to "in" on a night with room. But giving up a CONFIRMED spot hands
+   * it to the next person on the waiting list the moment the write lands, and
+   * the way back is the end of that queue. That asymmetry, not the tap itself,
+   * is what earns a confirmation; returns null when there is nothing to warn
+   * about, so the common taps stay one tap.
+   */
+  function leaveWarning(next: RsvpResponse): Omit<ConfirmRequest, "run"> | null {
+    if (!ev) return null;
+    const leavingSpot = ev.myResponse === "in" && next !== "in";
+    const leavingQueue = ev.myResponse === "waitlist" && next !== "in" && next !== "waitlist";
+    if (!leavingSpot && !leavingQueue) return null;
+
+    const waiting = ev.counts.waitlist;
+    if (leavingSpot) {
+      return {
+        title: "Give up your spot?",
+        body: waiting > 0
+          ? `You're in for this session. Leaving hands your spot straight to the next person waiting${
+              waiting > 1 ? ` (${waiting} are in the queue)` : ""
+            } — if you change your mind you'd rejoin at the back of the list.`
+          : "You're in for this session. You can RSVP again later, though if the night fills up in the meantime you'd join the waiting list.",
+        confirmLabel: next === "out" ? "Yes, I'm out" : "Change me to maybe",
+        tone: "danger" as const,
+      };
+    }
+    return {
+      title: "Leave the waiting list?",
+      body: myQueuePosition
+        ? `You're number ${myQueuePosition} in the queue. Leaving gives up that place — rejoining later starts you at the back.`
+        : "Leaving gives up your place in the queue — rejoining later starts you at the back.",
+      confirmLabel: "Leave the waiting list",
+      tone: "danger" as const,
+    };
+  }
+
+  function respond(response: RsvpResponse) {
+    if (!eventId || !ev) return;
+    const warn = leaveWarning(response);
+    if (warn) {
+      setConfirm({ ...warn, run: () => doRespond(response) });
+      return;
+    }
+    void doRespond(response);
+  }
+
+  async function doRespond(response: RsvpResponse) {
     if (!eventId || !ev) return;
     setNote(null);
     setEv({ ...ev, myResponse: response }); // optimistic
@@ -123,7 +175,20 @@ export default function EventPage() {
     }
   }
 
-  async function dropGuest(guestId: string, who: string) {
+  function dropGuest(guestId: string, who: string) {
+    setConfirm({
+      title: `Remove ${who}?`,
+      // A guest has no account, so this is not reversible by the guest: only
+      // whoever invited them can put them back, and by then the spot may be
+      // gone.
+      body: `${who} was brought as a guest. Removing them frees their spot for the next person waiting, and they'd need adding again from scratch.`,
+      confirmLabel: `Remove ${who}`,
+      tone: "danger",
+      run: () => doDropGuest(guestId, who),
+    });
+  }
+
+  async function doDropGuest(guestId: string, who: string) {
     setBusy(true);
     setNote(null);
     try {
@@ -137,8 +202,33 @@ export default function EventPage() {
     }
   }
 
-  /** Host: promote off the waiting list, or take someone out. */
-  async function setFor(userId: string, response: RsvpResponse, who: string) {
+  /**
+   * Host: promote off the waiting list, or take someone out.
+   *
+   * Promoting is a gift and goes through unchallenged. Taking somebody out is
+   * done TO a person who is not holding the phone and cannot object, so it
+   * asks first — and says what happens next, because the spot does not stay
+   * empty, it moves to whoever is first in the queue.
+   */
+  function setFor(userId: string, response: RsvpResponse, who: string) {
+    if (!ev) return;
+    if (response === "in") {
+      void doSetFor(userId, response, who);
+      return;
+    }
+    const waiting = ev.counts.waitlist;
+    setConfirm({
+      title: `Take ${who} out?`,
+      body: waiting > 0
+        ? `${who} is in for this session. Taking them out gives their spot to the next person on the waiting list — you'd have to ask them to RSVP again, and the night may be full by then.`
+        : `${who} is in for this session. They'll need to RSVP again themselves if this was a mistake.`,
+      confirmLabel: `Take ${who} out`,
+      tone: "danger",
+      run: () => doSetFor(userId, response, who),
+    });
+  }
+
+  async function doSetFor(userId: string, response: RsvpResponse, who: string) {
     if (!ev) return;
     setBusy(true);
     setNote(null);
@@ -154,12 +244,19 @@ export default function EventPage() {
   }
 
   async function share() {
-    try {
-      await navigator.clipboard.writeText(window.location.href);
+    // window.location.href was `capacitor://localhost/e/...` in the app — a
+    // link that opens nothing for anybody. And a "Share" that only copied
+    // looked broken on a phone, because no sheet ever appeared.
+    const outcome = await shareUrl(
+      `/e/${ev?.slug ?? eventId ?? ""}`,
+      ev?.title ?? "Padelier session",
+      "Are you in?",
+    );
+    // "Copied" only when it really did copy. The old version said so on a
+    // path that had already failed.
+    if (outcome === "copied") {
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* ignore */
     }
   }
 
@@ -453,6 +550,11 @@ export default function EventPage() {
       <button onClick={share} className="w-full mt-6 rounded-full border border-line bg-surface text-ink-2 text-[12.5px] font-semibold py-2.5 active:bg-surface-2 transition-colors">
         {copied ? "Link copied ✓" : "Share this session"}
       </button>
+
+      {/* Rendered last and portalled out of this tree by Sheet — see the note
+          in Sheet.tsx about anim-fade creating a stacking context that would
+          otherwise put the tab bar on top of it. */}
+      {confirm && <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />}
     </div>
   );
 }

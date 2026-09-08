@@ -21,6 +21,8 @@ import { BottomSheet } from "../shell/Sheet";
 import { SkeletonScreen, SkeletonHero, SkeletonStats, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
 import { useCachedQuery, invalidateQuery } from "../../lib/cache/useCachedQuery";
 import OfflineNote from "../shell/OfflineNote";
+import { publicUrl } from "../../lib/shareLink";
+import ConfirmSheet, { ConfirmRequest } from "../shell/ConfirmSheet";
 
 const ROLE_LABEL: Record<TeamRole, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -181,7 +183,9 @@ export default function TeamDetailPage() {
 
   async function shareLink() {
     if (!teamId) return;
-    const url = `${window.location.origin}/teams/${teamId}`;
+    // publicUrl, not window.location.origin: in the app that origin is
+    // capacitor://localhost and the shared link opens nothing.
+    const url = publicUrl(`/teams/${teamId}`);
     const nav = navigator as Navigator & { share?: (d: { title?: string; text?: string; url?: string }) => Promise<void> };
     if (nav.share) {
       try {
@@ -641,6 +645,10 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
   const [cost, setCost] = useState("");
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
+  // Named confirmReq, not confirm: this file already calls window.confirm(),
+  // and a state variable called `confirm` shadows it silently — the compiler
+  // only caught it because the shadowed value was then invoked.
+  const [confirmReq, setConfirmReq] = useState<ConfirmRequest | null>(null);
 
   // Editing an existing event. Separate state from the create form on purpose:
   // they can both be open, and sharing one set of fields would have the new
@@ -754,7 +762,48 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
     }
   }
 
-  async function rsvp(eventId: string, response: RsvpResponse) {
+  /**
+   * Same protection as the event page, for the same accident.
+   *
+   * This card is the likelier place to lose a spot by mistake: it sits in a
+   * scrolling list of nights, so a thumb travelling down the page passes over
+   * a live RSVP control that is one tap from "Out". The event page at least
+   * has to be opened deliberately.
+   */
+  function rsvp(eventId: string, response: RsvpResponse) {
+    const ev = (eventsQ.data ?? []).find((e) => e.id === eventId);
+    const leavingSpot = ev?.myResponse === "in" && response !== "in";
+    const leavingQueue =
+      ev?.myResponse === "waitlist" && response !== "in" && response !== "waitlist";
+    if (!ev || (!leavingSpot && !leavingQueue)) {
+      void doRsvp(eventId, response);
+      return;
+    }
+    const waiting = ev.counts.waitlist;
+    setConfirmReq(
+      leavingSpot
+        ? {
+            title: "Give up your spot?",
+            body: waiting > 0
+              ? `You're in for ${ev.title}. Leaving hands your spot straight to the next person waiting${
+                  waiting > 1 ? ` (${waiting} are in the queue)` : ""
+                } — if you change your mind you'd rejoin at the back of the list.`
+              : `You're in for ${ev.title}. You can RSVP again later, though if the night fills up in the meantime you'd join the waiting list.`,
+            confirmLabel: response === "out" ? "Yes, I'm out" : "Change me to maybe",
+            tone: "danger",
+            run: () => doRsvp(eventId, response),
+          }
+        : {
+            title: "Leave the waiting list?",
+            body: `Leaving gives up your place in the queue for ${ev.title} — rejoining later starts you at the back.`,
+            confirmLabel: "Leave the waiting list",
+            tone: "danger",
+            run: () => doRsvp(eventId, response),
+          },
+    );
+  }
+
+  async function doRsvp(eventId: string, response: RsvpResponse) {
     // Optimistic, and written through to the cache — otherwise leaving the
     // club page and coming back before the server answers would show the old
     // response from disk, which looks exactly like the tap not registering.
@@ -783,7 +832,7 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
     // The readable path when the event has one, the uuid when it doesn't.
     // eventPath is the single place that decides, so the club card and the
     // event page can never start handing out two links for the same night.
-    const url = `${window.location.origin}${eventPath(ev)}`;
+    const url = publicUrl(eventPath(ev));
     const text = `${ev.title}${eventCode(ev) ? ` ${eventCode(ev)}` : ""} · ${formatEventWhen(ev.scheduledAt)}${
       ev.location ? ` @ ${ev.location}` : ""
     }${ev.cost ? ` (${ev.cost})` : ""} — Padelier`;
@@ -1091,6 +1140,10 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
           })}
         </div>
       )}
+
+      {/* Portalled out of this tree by Sheet, so the tab bar cannot paint
+          over it — see the stacking-context note in Sheet.tsx. */}
+      {confirmReq && <ConfirmSheet request={confirmReq} onClose={() => setConfirmReq(null)} />}
     </div>
   );
 }

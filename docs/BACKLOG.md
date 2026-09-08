@@ -271,3 +271,24 @@ season means:
 
 Worth doing. Worth doing with the backfill written at the same time as the
 schema, not after.
+
+## League rows have no per-player repair
+
+A player who claims their spot after a session has ended gets no league row,
+because apply_session_results is once-only and the client had already submitted
+a payload that excluded them. Ratings have exactly this problem and solved it in
+0047 with admin_credit_session_rating — a narrow, idempotent, admin-guarded
+repair with a button in the console.
+
+session_results has no equivalent, so the only route today is clearing
+sessions.results_applied by hand in the SQL editor and pressing Finalize
+(docs/ops/backfill-league-rows.sql). That works, but it is a raw UPDATE on
+production run from memory, and the failure mode of forgetting its WHERE clause
+is every past session becoming re-finalizable against today's club roster.
+
+Preferred fix: have the existing "Credit rating" repair also restore the league
+row, since the two are almost always missing together — one action for "this
+person played, make the record reflect it". Failing that, an
+admin_recompute_session_results(session_id) RPC behind admin_guard().
+
+Hit twice now, most recently 8 Sep 2026 (Plr padel night, two players).

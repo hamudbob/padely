@@ -23,7 +23,7 @@ import {
   PlayerId,
   RoundResult,
 } from "../scheduling/types";
-import { computeStandings, CompletedMatchResult } from "../scoring/standings";
+import { computeStandings, CompletedMatchResult, RankingBasis } from "../scoring/standings";
 import { scoreRangeForFormat, ScoringFormat } from "../scoring/formats";
 import { getLocalSession, saveLocalSession, localUuid } from "../offline/localSession";
 
@@ -358,15 +358,32 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
         outcome: m.outcome as "win_a" | "win_b" | "draw",
       };
     });
-  // Seed pairing by the SAME compensated points the Standings table shows —
-  // never wins. Mexicano is a points ladder; ranking by wins collapses in
-  // low-win formats (best-of-4) and mis-seeds the courts. Compensation folds
-  // in so a rester/late-joiner isn't wrongly at the bottom. We force
-  // "points_first" here (the session's wins/points toggle only affects the
-  // *display*, not the draw), and seed by the deterministic standings ORDER so
-  // the courts and the table can never disagree.
+  // Seed pairing from the SAME standings the table shows — same basis, same
+  // rest compensation, same tiebreaks — so the courts and the table can never
+  // disagree. Compensation folds in so a rester or late joiner isn't wrongly
+  // at the bottom.
+  //
+  // REGRESSION FIXED (was 721a77c, 26 Jul 2026). That commit hardcoded
+  // "points_first" here while fixing compensation, on the stated grounds that
+  // the wins/points choice "only affects the display, not the draw". It is not
+  // a display setting: it is ranking_basis, chosen at session creation ("Wins
+  // first" / "Points first"), and it drives the official rank badge. So a
+  // wins-first session seeded its courts off a points ladder, and the host
+  // watched a 5-win player sent to court 2 below a 2-win player — with the
+  // table on screen saying the opposite.
+  //
+  // The worry that motivated the hardcode — wins "collapsing" into ties in a
+  // low-win format — is already handled by the chain in computeStandings: a
+  // wins-first ladder breaks ties on fewer losses, then points, then
+  // head-to-head. It does not collapse.
   const restComp = Math.floor(scoreRangeForFormat(session.scoring_format as ScoringFormat).max / 2);
-  const standingsRows = computeStandings(activePlayerIds, finalMatches, [], "points_first", restComp);
+  const standingsRows = computeStandings(
+    activePlayerIds,
+    finalMatches,
+    [],
+    session.ranking_basis as RankingBasis,
+    restComp,
+  );
   const rankValueById = new Map<PlayerId, number>(
     standingsRows.map((r, i) => [r.subjectId, standingsRows.length - i]), // higher = better; unique, so no tie churn
   );

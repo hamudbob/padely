@@ -103,14 +103,31 @@ export function computeStandings(
     return { ...b, adjustmentTotal, restCompensation, totalPoints: b.points + adjustmentTotal + restCompensation };
   });
 
-  const primary = (r: Omit<StandingRow, "rank">) => (basis === "points_first" ? r.totalPoints : r.wins);
-  const secondary = (r: Omit<StandingRow, "rank">) => (basis === "points_first" ? r.wins : r.totalPoints);
+  // The tiebreak chain, in the order the host expects for the basis they chose:
+  //
+  //   points_first   points -> wins -> fewer losses -> head-to-head
+  //   wins_first     wins -> fewer losses -> points -> head-to-head
+  //
+  // Wins-first putting FEWER LOSSES above points is the point of the basis. If
+  // points came second, two players level on wins would be separated by margin
+  // of victory — which is the points ladder deciding a wins ladder, and the
+  // host picked "Wins first" precisely to avoid that. A 5-2 record beats 5-3
+  // no matter how heavily the 5-3 won their five.
+  //
+  // Both chains use the same three keys in a different order, which is why the
+  // shared-rank test below can compare the whole chain and stay correct for
+  // either basis. Each key returns a number where LOWER sorts first.
+  type RankKey = (r: Omit<StandingRow, "rank">) => number;
+  const rankKeys: RankKey[] =
+    basis === "points_first"
+      ? [(r) => -r.totalPoints, (r) => -r.wins, (r) => r.losses]
+      : [(r) => -r.wins, (r) => r.losses, (r) => -r.totalPoints];
 
   rows.sort((x, y) => {
-    if (primary(y) !== primary(x)) return primary(y) - primary(x);
-    if (secondary(y) !== secondary(x)) return secondary(y) - secondary(x);
-    // fewer losses breaks the next tie — a drawn record beats a lost one at equal points
-    if (x.losses !== y.losses) return x.losses - y.losses;
+    for (const key of rankKeys) {
+      const d = key(x) - key(y);
+      if (d !== 0) return d;
+    }
     const h2h = headToHeadResult(headToHead, x.subjectId, y.subjectId);
     if (h2h === "x") return -1;
     if (h2h === "y") return 1;
@@ -120,7 +137,7 @@ export function computeStandings(
     return x.subjectId < y.subjectId ? -1 : x.subjectId > y.subjectId ? 1 : 0;
   });
 
-  // assign shared ranks: equal (primary, secondary, and no decisive head-to-head) => same rank
+  // assign shared ranks: every tiebreak key equal, and no decisive head-to-head
   const result: StandingRow[] = [];
   let rank = 1;
   for (let i = 0; i < rows.length; i++) {
@@ -128,9 +145,7 @@ export function computeStandings(
       const prev = rows[i - 1];
       const cur = rows[i];
       const tied =
-        primary(prev) === primary(cur) &&
-        secondary(prev) === secondary(cur) &&
-        prev.losses === cur.losses &&
+        rankKeys.every((key) => key(prev) === key(cur)) &&
         headToHeadResult(headToHead, prev.subjectId, cur.subjectId) === "tie";
       if (!tied) rank = i + 1;
     }
