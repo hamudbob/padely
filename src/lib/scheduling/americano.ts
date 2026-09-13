@@ -98,6 +98,7 @@ function optimizeAmericano(rounds: RoundResult[], players: PlayerId[], rng: Rng,
     const pc = new Map<string, number>();
     const oc = new Map<string, number>();
     const play = new Map<string, number>(players.map((p) => [p, 0]));
+    let runningUnfairness = 0;
     for (const r of rounds) {
       for (const m of r.matches) {
         const ak = pairKey(m.teamA[0], m.teamA[1]);
@@ -113,11 +114,44 @@ function optimizeAmericano(rounds: RoundResult[], players: PlayerId[], rng: Rng,
         }
         for (const b of m.teamB) play.set(b, (play.get(b) ?? 0) + 1);
       }
+      // ── Fairness DURING the night, not just at the end of it ───────────
+      //
+      // Everything above this line is a total for the whole schedule, and a
+      // total has no notion of WHEN. That was the bug: moving one player's
+      // games to the back of the night left Σ playCount² completely unchanged,
+      // so the search was free to do it — and did, because partner variety is
+      // weighted 1000 and one fresh partnership looked like a bargain.
+      //
+      // A real session on 8 Sep 2026, six players on one court: player C sat
+      // out rounds 1, 2 and 3, then played five in a row. Totals were fine.
+      // The evening was not.
+      //
+      // So the running counts are measured after EVERY round. The invariant is
+      // the one selectPlayersForRound already guarantees when it builds the
+      // schedule greedily — most-played and least-played differ by at most one
+      // — which in plain terms is "everybody rests once before anybody rests
+      // twice". This term stops the optimizer trading that away again.
+      let lo = Infinity;
+      let hi = -Infinity;
+      for (const v of play.values()) {
+        if (v < lo) lo = v;
+        if (v > hi) hi = v;
+      }
+      const over = hi - lo - 1;
+      if (over > 0) runningUnfairness += over * over;
     }
     let f = 0;
     for (const v of pc.values()) f += v * v * 1000;
     for (const v of oc.values()) f += v * v;
     for (const v of play.values()) f += v * v * 60;
+    // Weighted to dominate: a single unfair round costs 200,000, where a whole
+    // schedule's partner repeats run to tens of thousands. This is deliberately
+    // not a tunable trade — a player benched three rounds running does not care
+    // that it bought somebody a novel partnership. Measured before and after:
+    // partner variety is UNCHANGED (still every possible pair, same max
+    // repeat), because the optimizer has enough freedom in within-round swaps
+    // to reach the same variety without touching who is on the bench.
+    f += runningUnfairness * 200000;
     return f;
   };
 
