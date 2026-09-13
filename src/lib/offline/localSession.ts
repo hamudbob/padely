@@ -140,6 +140,16 @@ export interface LocalSession {
   rests: LocalRestRow[];
   /** Set once the server has accepted it; the session then lives there. */
   syncedAt: number | null;
+  /**
+   * When the server last accepted the WHOLE graph, not just the first upload.
+   *
+   * syncedAt is stamped once and never touched again, so on 12 Sep 2026 it was
+   * still pointing at the moment the session STARTED while replication had
+   * been dead for hours — and the 24-hour sweep below, reading it, deleted the
+   * only surviving copy of the evening. Sweeping needs to ask "when did the
+   * server last actually take this?", which is this field.
+   */
+  lastReplicatedAt: number | null;
   /** Last sync failure, for showing the host something honest. */
   lastError: string | null;
 }
@@ -256,8 +266,27 @@ export function markSynced(sessionId: string): void {
   const s = all[sessionId];
   if (!s) return;
   s.syncedAt = Date.now();
+  s.lastReplicatedAt = Date.now();
   s.lastError = null;
   writeAll(all);
+}
+
+/** The server has just accepted the whole graph. Only this clears lastError. */
+export function markReplicated(sessionId: string): void {
+  const all = readAll();
+  const s = all[sessionId];
+  if (!s) return;
+  s.lastReplicatedAt = Date.now();
+  s.lastError = null;
+  writeAll(all);
+}
+
+/** Has the server fallen behind this device? Drives the host's warning. */
+export function replicationLagMs(sessionId: string): number | null {
+  const s = getLocalSession(sessionId);
+  if (!s || !s.syncedAt) return null;
+  const last = s.lastReplicatedAt ?? s.syncedAt;
+  return Date.now() - last;
 }
 
 export function recordSyncError(sessionId: string, message: string): void {
@@ -278,7 +307,13 @@ export function forgetSyncedSessions(): void {
     // live screen reads; dropping them a day into a long-running session
     // would take the app offline-hostile again for the very session that is
     // still being played.
-    if (s.session.status === "ended" && s.syncedAt && s.syncedAt < cutoff) {
+    // lastReplicatedAt, NOT syncedAt. syncedAt is stamped once at first
+    // upload; a session whose replication broke afterwards still looked
+    // "synced a day ago" and was swept while holding the only copy of the
+    // evening. Fall back to syncedAt only for rows written before this field
+    // existed. A session the server has never fully taken is never dropped.
+    const lastOk = s.lastReplicatedAt ?? s.syncedAt;
+    if (s.session.status === "ended" && lastOk && lastOk < cutoff) {
       delete all[id];
       changed = true;
     }
@@ -447,6 +482,7 @@ export function buildLocalSession(
     participants,
     rests,
     syncedAt: existing?.alreadyOnServer ? Date.now() : null,
+    lastReplicatedAt: existing?.alreadyOnServer ? Date.now() : null,
     lastError: null,
   };
 }

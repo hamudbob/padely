@@ -103,6 +103,7 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
 
   let availableCourts: { id: string; ordinal: number; available: boolean }[] = [];
   let playerRows: { id: string; status: string; team_side: string | null; gender: string; preferred_side: string | null }[] = [];
+  let allPlayerIds: { id: string; status: string }[] = [];
   let roundRows: { id: string; sequence: number; status: string }[] = [];
   let pairRows: { id: string; player_a_id: string; player_b_id: string }[] = [];
 
@@ -115,6 +116,10 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
       .filter((p) => p.status === "active")
       .slice()
       .sort((a, b) => a.joined_at.localeCompare(b.joined_at) || a.id.localeCompare(b.id));
+    // The FULL roster, leavers included. playerRows is who may be DRAWN;
+    // this is who is RANKED, and they are not the same set — see the note on
+    // rosterForStandings below.
+    allPlayerIds = local.players.map((p) => ({ id: p.id, status: p.status }));
     roundRows = local.rounds.slice().sort((a, b) => a.sequence - b.sequence);
     pairRows = needsPairs ? local.pairs : [];
   } else {
@@ -123,7 +128,9 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
       // Ordered so activePlayerIds has a STABLE order — the seeded RNG consumes
       // it positionally, so an unordered fetch could make "Refresh" (same seed)
       // draw differently just because DB row order shifted after an edit.
-      supabase.from("players").select("id, status, team_side, gender, preferred_side").eq("session_id", sessionId).eq("status", "active").order("joined_at", { ascending: true }).order("id", { ascending: true }),
+      // NOT filtered to active: the draw pool is active-only (filtered below),
+      // but the RANKING needs leavers who played — see rosterForStandings.
+      supabase.from("players").select("id, status, team_side, gender, preferred_side").eq("session_id", sessionId).order("joined_at", { ascending: true }).order("id", { ascending: true }),
       supabase.from("rounds").select("id, sequence, status").eq("session_id", sessionId).order("sequence", { ascending: true }),
       fetchPairs(),
     ]);
@@ -132,7 +139,9 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
     if (roundsResult.error) throw roundsResult.error;
     if (pairsResult.error) throw pairsResult.error;
     availableCourts = courtsResult.data ?? [];
-    playerRows = playersResult.data ?? [];
+    const everyone = playersResult.data ?? [];
+    allPlayerIds = everyone.map((p) => ({ id: p.id, status: p.status }));
+    playerRows = everyone.filter((p) => p.status === "active");
     roundRows = roundsResult.data ?? [];
     pairRows = pairsResult.data ?? [];
   }
@@ -377,8 +386,51 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
   // wins-first ladder breaks ties on fewer losses, then points, then
   // head-to-head. It does not collapse.
   const restComp = Math.floor(scoreRangeForFormat(session.scoring_format as ScoringFormat).max / 2);
+
+  // ── Rank the same field the Standings tab ranks ───────────────────────
+  //
+  // This used to pass activePlayerIds — players whose status is 'active' —
+  // while the table ranks active players PLUS anyone who left after playing
+  // (standingsQueries.ts: `p.status !== "left" || everPlayed.has(p.id)`).
+  //
+  // WHAT THIS DOES AND DOES NOT FIX — measured, not assumed.
+  //
+  // restCompensation is (maxMatches - yours) x floor(target/2), and maxMatches
+  // is taken over whatever set you hand in. Dropping a leaver who had played
+  // the most games lowers maxMatches, so every remaining player's total
+  // changes — but by the SAME constant, so the ORDER among active players is
+  // unchanged. Checked directly: cat > ana > bob either way, totals different,
+  // order identical.
+  //
+  // So this does NOT explain a low-placed player appearing on court 1. It is
+  // here because the draw and the Standings tab should rank the same field and
+  // report the same totals; two ladders that agree by accident are one bad
+  // afternoon from disagreeing on purpose.
+  //
+  // The court-1 symptom reported on 12 Sep had a different cause: replication
+  // had been dead since a Randomize (migration 0064), so the local match set
+  // was missing scored games, every affected player computed to 0/0/0, and the
+  // sort fell through every tiebreak to the final one — lexicographic subject
+  // id. Court 1 went to whoever's uuid sorted first. Fixing the sync fixed the
+  // input; this only keeps the two ladders honest with each other.
+  //
+  // The draw pool is still active-only — a player who left is ranked, never
+  // drawn. generateMexicanoRound only reads rankValue for players it is
+  // actually placing, so carrying leavers in the ladder is free.
+  const everPlayed = new Set(participants.map((pt) => pt.player_id));
+  const rosterForStandings = allPlayerIds
+    .filter((p) => p.status !== "left" || everPlayed.has(p.id))
+    .map((p) => p.id);
+
+  // KNOWN REMAINING DIVERGENCE: the table also applies manual point
+  // adjustments and this passes []. Adjustments are not in the local session
+  // graph, so reading them here would put a network call in the "Next Round"
+  // path and break the draw offline — which is the thing local-first exists to
+  // prevent. A host who has adjusted points will still see the draw seed off
+  // the unadjusted ladder. Fix by carrying adjustments in the local graph, not
+  // by fetching them here.
   const standingsRows = computeStandings(
-    activePlayerIds,
+    rosterForStandings,
     finalMatches,
     [],
     session.ranking_basis as RankingBasis,

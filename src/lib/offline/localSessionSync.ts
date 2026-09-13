@@ -3,6 +3,7 @@ import {
   LocalSession,
   listUnsyncedSessions,
   markSynced,
+  markReplicated,
   recordSyncError,
   forgetSyncedSessions,
   toSyncPayload,
@@ -217,6 +218,8 @@ export async function replicateSession(sessionId: string): Promise<void> {
     });
     if (error) throw error;
 
+    markReplicated(sessionId);
+
     const result = (data ?? {}) as { new_players?: Record<string, unknown>[] };
     const incoming = result.new_players ?? [];
     if (incoming.length > 0) {
@@ -265,11 +268,24 @@ export async function replicateSession(sessionId: string): Promise<void> {
       );
     }
   } catch (err) {
-    // Never surfaced. A failed replication is invisible to the host by design:
-    // the session on their screen is correct and complete, and the next
-    // mutation — or the periodic sweep — pushes again. Telling them would be
-    // reporting our plumbing.
-    console.warn("Session replication deferred:", err instanceof Error ? err.message : err);
+    // THIS USED TO BE SWALLOWED, and that is what turned a bug into a lost
+    // evening. The comment here read: "Never surfaced. A failed replication is
+    // invisible to the host by design... Telling them would be reporting our
+    // plumbing."
+    //
+    // That reasoning holds only while failures are transient. On 12 Sep 2026 a
+    // host tapped Randomize, which made every subsequent push raise
+    // unique_violation (see migration 0064), and nothing said a word — the
+    // screen reads localStorage, so it stayed perfect for hours while the
+    // server fell further behind. The host found out the next morning.
+    //
+    // A failure that repeats is not plumbing, it is data at risk, and the only
+    // person who can act on it is the one holding the phone. So it is recorded
+    // against the session, and replicationLagMs() lets the live screen say so
+    // once the gap stops looking like a blip.
+    const message = err instanceof Error ? err.message : String(err);
+    recordSyncError(sessionId, message);
+    console.warn("Session replication failed:", message);
   } finally {
     inFlight.delete(sessionId);
   }
