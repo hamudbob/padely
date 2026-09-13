@@ -10,3 +10,46 @@
   from = "/*"
   to = "/index.html"
   status = 200
+
+# ---------------------------------------------------------------------
+# Security headers
+#
+# Added 9 Sep 2026. There were none, which meant the site accepted framing by
+# anyone, sent full referrer URLs to third parties, and had no CSP — so any
+# future XSS would have had the run of the page.
+#
+# CSP is the one that needs care, because getting it wrong breaks the app
+# silently rather than loudly. Every source below is here for a reason:
+#
+#   connect-src  *.supabase.co       the database, auth and storage
+#                dns.google          the MX check in emailValidation.ts, which
+#                                    fails OPEN — leave this out and sign-up
+#                                    keeps working while quietly stopping
+#                                    catching typo'd domains. The file says so.
+#   style-src    'unsafe-inline'     required: Tailwind and React inline styles
+#   font-src     fonts.gstatic.com   the webfonts
+#   img-src      data: blob:         recap cards are rendered to a canvas and
+#                                    read back as data URLs before sharing
+#   frame-ancestors 'none'           nobody frames this app; combined with
+#                                    X-Frame-Options for older browsers
+#
+# Permissions-Policy denies camera too: there is no getUserMedia anywhere in
+# src/. The camera string in Info.plist is for the NATIVE photo picker, which
+# this header does not govern, so denying it here costs nothing.
+#
+# script-src deliberately has NO 'unsafe-inline' and NO 'unsafe-eval'. If a
+# build ever needs them, that is worth a conversation rather than a quiet edit:
+# 'unsafe-inline' on scripts is most of what CSP was protecting you from.
+#
+# These apply to the WEB build only. The iOS app runs from capacitor://localhost
+# and is governed by WKWebView, not by Netlify.
+# ---------------------------------------------------------------------
+[[headers]]
+  for = "/*"
+  [headers.values]
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://dns.google; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    X-Frame-Options = "DENY"
+    X-Content-Type-Options = "nosniff"
+    Referrer-Policy = "strict-origin-when-cross-origin"
+    Permissions-Policy = "camera=(), microphone=(), geolocation=(), payment=(), usb=(), magnetometer=(), gyroscope=()"
+    Strict-Transport-Security = "max-age=31536000; includeSubDomains"
