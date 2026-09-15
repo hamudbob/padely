@@ -1,5 +1,5 @@
 import { supabase } from "./client";
-import { localSessionIdForPlayer, setLocalPlayerStatus } from "../offline/localSession";
+import { localSessionIdForPlayer, setLocalPlayerStatus, setLocalRankingBasis } from "../offline/localSession";
 
 /**
  * Mid-session host actions — the "Manage" menu on Host Live: rename a
@@ -115,6 +115,14 @@ export async function restorePlayer(playerId: string): Promise<void> {
  * this changes the session's official basis.
  */
 export async function setRankingBasis(sessionId: string, basis: "points_first" | "wins_first"): Promise<void> {
+  // A device-held session reads its basis from localStorage -- the live board,
+  // the standings and the Mexicano ladder all go through local.session. Writing
+  // only to the server meant the host tapped this, watched their own board not
+  // move, and shipped a session whose spectators ranked on a different basis
+  // than they did for the rest of the night. Same shape as markPlayerLeft and
+  // restorePlayer above: local first, and replication carries it up (0066).
+  if (setLocalRankingBasis(sessionId, basis)) return;
+
   const { error } = await supabase.from("sessions").update({ ranking_basis: basis }).eq("id", sessionId);
   if (error) throw error;
 }

@@ -576,6 +576,29 @@ export function setLocalPlayerStatus(
   return true;
 }
 
+/**
+ * The session's ranking basis, on this device.
+ *
+ * Every host-side read of the basis comes from here -- the standings engine,
+ * the Standings tab and the Mexicano court ladder. A server-only write left
+ * the host ranking on the old basis while everyone else ranked on the new one,
+ * for the rest of the night, with nothing on screen to say so.
+ *
+ * Returns false when this device does not hold the session, so the caller can
+ * fall through to the server path.
+ */
+export function setLocalRankingBasis(
+  sessionId: string,
+  basis: "points_first" | "wins_first",
+): boolean {
+  const all = readAll();
+  const s = all[sessionId];
+  if (!s) return false;
+  s.session.ranking_basis = basis;
+  writeAll(all);
+  return true;
+}
+
 /** Which local session owns this player, if any. Manage acts on a player id. */
 export function localSessionIdForPlayer(playerId: string): string | null {
   for (const s of Object.values(readAll())) {

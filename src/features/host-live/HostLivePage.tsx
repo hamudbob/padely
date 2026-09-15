@@ -69,7 +69,11 @@ type SortBy = "wins" | "points" | "pointAvg" | "winPct";
 // self-normalize for uneven match counts. This is DISPLAY ONLY — it never
 // affects Mexicano round generation, which always ranks by the session's own
 // ranking_basis server-side.
-const SORT_OPTIONS: { value: SortBy; label: string }[] = [
+const SORT_OPTIONS: { value: SortBy | null; label: string }[] = [
+  // null = the session's official order, straight from computeStandings. It is
+  // the default and the way back: every other option is an explicit re-sort for
+  // looking at the field, and renumbers nothing.
+  { value: null, label: "Rank" },
   { value: "wins", label: "Wins" },
   { value: "points", label: "Points" },
   { value: "pointAvg", label: "Point avg" },
@@ -532,9 +536,19 @@ export default function HostLivePage() {
   // real placement). The sort toggle only changes viewing ORDER, so the
   // host can check "who has the most wins" without changing anyone's
   // official rank.
-  const effectiveSortBy: SortBy = sortBy ?? (standings?.rankingBasis === "wins_first" ? "wins" : "points");
+  // `sortBy` is null until the host taps a column, and null MUST mean "leave the
+  // engine's order alone". It used to fall back to a local comparator that
+  // approximated the basis -- wins then points, never consulting losses -- while
+  // computeStandings ranks wins_first as wins -> fewer losses -> points -> head
+  // to head. Two players on equal wins came out in a different order here than
+  // on every other screen, and than in the Mexicano ladder that seeds the next
+  // round from the same engine. The toggle stays, as an explicit re-sort for
+  // looking at the field; it just no longer decides the default.
+  const effectiveSortBy: SortBy | null = sortBy;
   const sortedStandingsRows = standings
-    ? [...standings.rows].sort((a, b) => {
+    ? effectiveSortBy === null
+      ? standings.rows
+      : [...standings.rows].sort((a, b) => {
         switch (effectiveSortBy) {
           case "wins":
             return b.wins - a.wins || b.compensatedPoints - a.compensatedPoints;
@@ -1323,7 +1337,7 @@ export default function HostLivePage() {
                 onClick={() => setShowSortMenu((v) => !v)}
                 className="inline-flex items-center gap-1.5 rounded-full bg-surface border border-line px-3 py-1.5 text-[11.5px] font-semibold text-ink active:scale-[0.98] transition-transform"
               >
-                Sort · {SORT_LABELS[effectiveSortBy]}
+                Sort · {effectiveSortBy ? SORT_LABELS[effectiveSortBy] : "Rank"}
                 <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round" className="text-warm-gray">
                   <path d="M6 9l6 6 6-6" />
                 </svg>
@@ -1334,7 +1348,7 @@ export default function HostLivePage() {
                   <div className="absolute right-0 top-10 z-50 w-40 rounded-2xl border border-line bg-surface shadow-[0_20px_44px_-16px_rgba(13,13,13,0.35)] overflow-hidden">
                     {SORT_OPTIONS.map((opt) => (
                       <button
-                        key={opt.value}
+                        key={opt.value ?? "rank"}
                         onClick={() => {
                           setSortBy(opt.value);
                           setShowSortMenu(false);
@@ -1377,8 +1391,14 @@ export default function HostLivePage() {
                 <span className={`text-center ${ptsActive ? "text-gold-ink" : ""}`}>{ptsHeader}</span>
               </div>
 
-              {sortedStandingsRows.map((row, i) => {
-                const isLeader = i === 0;
+              {sortedStandingsRows.map((row) => {
+                // row.rank, not the position in this list. computeStandings
+                // gives tied subjects the SAME rank; printing an index turned
+                // a genuine tie into 1, 2 here while every other screen showed
+                // 1, 1 -- and under an explicit re-sort it renumbered the whole
+                // field, so the host read positions that were not anyone's
+                // official standing.
+                const isLeader = row.rank === 1;
                 // Rest compensation — the neutral bonus credited for games a
                 // player sat out — already folded into PTS. Surfaced as a small
                 // "+N" next to the points so a rester reads as "credited +N",
@@ -1395,7 +1415,7 @@ export default function HostLivePage() {
                     }`}
                     style={{ gridTemplateColumns: standingsGridCols }}
                   >
-                    <span className={`text-center font-mono tnum text-[12px] ${isLeader ? "text-gold-ink font-bold" : "text-warm-gray"}`}>{i + 1}</span>
+                    <span className={`text-center font-mono tnum text-[12px] ${isLeader ? "text-gold-ink font-bold" : "text-warm-gray"}`}>{row.rank}</span>
                     <span className="min-w-0 flex items-center gap-1.5">
                       <span className="truncate text-[13px] font-semibold text-graphite">{row.playerName}</span>
                       {isTeamSparring && row.teamSide && (
