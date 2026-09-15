@@ -599,10 +599,77 @@ export function setLocalRankingBasis(
   return true;
 }
 
+/**
+ * The owner-only lineup swap, on this device.
+ *
+ * A faithful mirror of swap_round_players (0033): trade two on-court players by
+ * exchanging their exact match+side slots, or pull a rester on and sit the other
+ * player down. Locked once ANY match in the session is final, same as the RPC,
+ * so a finished result can never move under a player's feet.
+ *
+ * It exists because the RPC alone stopped working the day Start went
+ * local-first: the chips rendered, the swap went to a server row nobody was
+ * reading, and the host's screen never changed. Same shape of bug as Redraw and
+ * setRankingBasis.
+ *
+ * Returns "not-local" when this device does not hold the session, so the caller
+ * falls through to the server path.
+ */
+export function swapLocalRoundPlayers(
+  roundId: string,
+  playerA: string,
+  playerB: string,
+): "not-local" | "locked" | "ok" {
+  const all = readAll();
+  const s = Object.values(all).find((sess) => sess.rounds.some((r) => r.id === roundId));
+  if (!s) return "not-local";
+
+  if (s.matches.some((m) => m.status === "final")) return "locked";
+  if (playerA === playerB) return "ok";
+
+  const roundMatchIds = new Set(s.matches.filter((m) => m.round_id === roundId).map((m) => m.id));
+  const slotA = s.participants.find((mp) => roundMatchIds.has(mp.match_id) && mp.player_id === playerA);
+  const slotB = s.participants.find((mp) => roundMatchIds.has(mp.match_id) && mp.player_id === playerB);
+
+  if (slotA && slotB) {
+    // Both on court: exchange match + side. Read both slots BEFORE writing
+    // either, or the second read sees the first write and the swap collapses.
+    const aMatch = slotA.match_id;
+    const aSide = slotA.side;
+    slotA.match_id = slotB.match_id;
+    slotA.side = slotB.side;
+    slotB.match_id = aMatch;
+    slotB.side = aSide;
+  } else if (slotA || slotB) {
+    // One plays, one rests: the rester takes the slot, the player sits down.
+    const slot = (slotA ?? slotB)!;
+    const onCourt = slotA ? playerA : playerB;
+    const resting = slotA ? playerB : playerA;
+    slot.player_id = resting;
+    s.rests = s.rests.filter((rr) => !(rr.round_id === roundId && rr.player_id === resting));
+    if (!s.rests.some((rr) => rr.round_id === roundId && rr.player_id === onCourt)) {
+      s.rests.push({ round_id: roundId, player_id: onCourt, consecutive_rest_count: 0 });
+    }
+  } else {
+    return "ok"; // both resting: nothing to do
+  }
+
+  writeAll(all);
+  return "ok";
+}
+
 /** Which local session owns this player, if any. Manage acts on a player id. */
 export function localSessionIdForPlayer(playerId: string): string | null {
   for (const s of Object.values(readAll())) {
     if (s.players.some((p) => p.id === playerId)) return s.session.id;
+  }
+  return null;
+}
+
+/** Which local session owns this round, if any. Round actions act on a round id. */
+export function localSessionIdForRound(roundId: string): string | null {
+  for (const s of Object.values(readAll())) {
+    if (s.rounds.some((r) => r.id === roundId)) return s.session.id;
   }
   return null;
 }

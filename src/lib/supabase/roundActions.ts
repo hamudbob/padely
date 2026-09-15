@@ -25,7 +25,14 @@ import {
 } from "../scheduling/types";
 import { computeStandings, CompletedMatchResult, RankingBasis } from "../scoring/standings";
 import { scoreRangeForFormat, ScoringFormat } from "../scoring/formats";
-import { getLocalSession, saveLocalSession, localUuid } from "../offline/localSession";
+import {
+  getLocalSession,
+  saveLocalSession,
+  localUuid,
+  swapLocalRoundPlayers,
+  localSessionIdForRound,
+} from "../offline/localSession";
+import { replicateSession } from "../offline/localSessionSync";
 
 export interface GenerateNextRoundResult {
   roundId: string;
@@ -736,6 +743,19 @@ async function loadLatestTwoRounds(sessionId: string): Promise<{ latestId: strin
  * court, or pull a rester on. Server-gated to a single account and only allowed
  * before any score is entered. */
 export async function swapRoundPlayers(roundId: string, playerA: string, playerB: string): Promise<void> {
+  // Local first. A device-held session has no server rows worth swapping, and
+  // the host's screen reads localStorage — so the RPC alone made the chips
+  // inert: tap two, nothing moves. Replication carries the new lineup up.
+  const localResult = swapLocalRoundPlayers(roundId, playerA, playerB);
+  if (localResult === "locked") {
+    throw new Error("Lineups are locked once scoring has started.");
+  }
+  if (localResult === "ok") {
+    const sessionId = localSessionIdForRound(roundId);
+    if (sessionId) void replicateSession(sessionId);
+    return;
+  }
+
   const { error } = await supabase.rpc("swap_round_players", { p_round_id: roundId, p_player_a: playerA, p_player_b: playerB });
   if (error) throw new Error(error.message);
 }
