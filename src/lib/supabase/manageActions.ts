@@ -1,5 +1,11 @@
 import { supabase } from "./client";
-import { localSessionIdForPlayer, setLocalPlayerStatus, setLocalRankingBasis } from "../offline/localSession";
+import {
+  localSessionIdForPlayer,
+  setLocalPlayerStatus,
+  setLocalRankingBasis,
+  setLocalCourtName,
+  setLocalCourtAvailability,
+} from "../offline/localSession";
 
 /**
  * Mid-session host actions — the "Manage" menu on Host Live: rename a
@@ -14,11 +20,19 @@ import { localSessionIdForPlayer, setLocalPlayerStatus, setLocalRankingBasis } f
 export async function renameCourt(courtId: string, displayName: string): Promise<void> {
   const trimmed = displayName.trim();
   if (!trimmed) throw new Error("Court name can't be empty.");
+  // Local first: the host's board renders local.courts, and the next
+  // replication pushes local over the server — so a server-only rename both
+  // failed to show AND undid itself moments later.
+  if (setLocalCourtName(courtId, trimmed)) return;
   const { error } = await supabase.from("courts").update({ display_name: trimmed }).eq("id", courtId);
   if (error) throw error;
 }
 
 export async function setCourtAvailability(courtId: string, available: boolean): Promise<void> {
+  // Local first, and this one is not cosmetic: the next round is drawn from
+  // `local.courts.filter((c) => c.available)` (roundActions.ts:118), so a
+  // server-only write left a closed court still in the draw all night.
+  if (setLocalCourtAvailability(courtId, available)) return;
   const { error } = await supabase.from("courts").update({ available }).eq("id", courtId);
   if (error) throw error;
 }

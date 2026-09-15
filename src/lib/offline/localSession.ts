@@ -666,6 +666,47 @@ export function localSessionIdForPlayer(playerId: string): string | null {
   return null;
 }
 
+/**
+ * Court name and availability, on this device.
+ *
+ * Both Manage actions were server-only, and for a device-held session that made
+ * them worse than inert. The rename never showed, because getHostLiveSnapshot
+ * reads local.courts — and the next replication then overwrote the server's new
+ * name with the stale local one, so the change undid itself.
+ *
+ * Availability was the dangerous one: roundActions.ts:118 draws on
+ * `local.courts.filter((c) => c.available)`, so taking a court out of play had
+ * NO effect on the next round. The host closed a court and the app kept putting
+ * matches on it.
+ *
+ * Return false when this device does not hold the court, so the caller falls
+ * through to the server path.
+ */
+function updateLocalCourt(courtId: string, patch: (c: LocalCourtRow) => void): boolean {
+  const all = readAll();
+  for (const s of Object.values(all)) {
+    const court = s.courts.find((c) => c.id === courtId);
+    if (court) {
+      patch(court);
+      writeAll(all);
+      return true;
+    }
+  }
+  return false;
+}
+
+export function setLocalCourtName(courtId: string, displayName: string): boolean {
+  return updateLocalCourt(courtId, (c) => {
+    c.display_name = displayName;
+  });
+}
+
+export function setLocalCourtAvailability(courtId: string, available: boolean): boolean {
+  return updateLocalCourt(courtId, (c) => {
+    c.available = available;
+  });
+}
+
 /** Which local session owns this round, if any. Round actions act on a round id. */
 export function localSessionIdForRound(roundId: string): string | null {
   for (const s of Object.values(readAll())) {
