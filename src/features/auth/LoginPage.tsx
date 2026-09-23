@@ -1,4 +1,5 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
+import { PUBLIC_ORIGIN } from "../../lib/shareLink";
 import ErrorNote from "../shell/ErrorNote";
 import { withFallback } from "../../lib/errors";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
@@ -79,7 +80,12 @@ export default function LoginPage() {
   const next = safeNext(params.get("next"));
   const back = useBackNav("/");
   const { user } = useHostSession();
-  const emailRedirectTo = `${window.location.origin}/login?next=${encodeURIComponent(next)}`;
+  // PUBLIC_ORIGIN, not window.location.origin. Inside the native app the
+  // origin is `capacitor://localhost` — a scheme Supabase will not accept and
+  // no mail app can open, so GoTrue fell back to the Site URL and the link
+  // landed on the website, where the PKCE verifier does not exist. Nothing
+  // could complete. shareLink.ts has carried the right constant all along.
+  const emailRedirectTo = `${PUBLIC_ORIGIN}/login?next=${encodeURIComponent(next)}`;
 
   const verdict = useMemo(() => evaluatePassword(password, { email }), [password, email]);
   const isSignup = stage === "signup";
@@ -304,7 +310,10 @@ export default function LoginPage() {
     setResetState("sending");
     setError(null);
     try {
-      await sendPasswordReset(shape.normalised, `${window.location.origin}/reset-password`);
+      // Same reason as emailRedirectTo above. This one was worse: the Site URL
+      // fallback drops the PATH too, so the email opened padelier.id and never
+      // showed a password form at all.
+      await sendPasswordReset(shape.normalised, `${PUBLIC_ORIGIN}/reset-password`);
       setResetState("sent");
     } catch (err) {
       setError(withFallback(err, "Couldn't send the email just now."));

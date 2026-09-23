@@ -260,14 +260,15 @@ export default function AdminSessionPage() {
             Force end
           </button>
         )}
-        <a
-          href={`/live/${s.public_token}`}
-          target="_blank"
-          rel="noreferrer"
+        {/* Not target="_blank": in the native webview that routes to
+            UIApplication.open with a capacitor://localhost URL iOS cannot
+            handle, so the button did nothing at all. */}
+        <Link
+          to={`/live/${s.public_token}`}
           className="text-[12.5px] font-semibold text-ink-2 border border-line rounded-full px-3.5 py-2 bg-surface active:opacity-70"
         >
-          Open live view ↗
-        </a>
+          Open live view
+        </Link>
       </div>
       {note && <p className="text-[12px] text-ink-2 mt-2 leading-relaxed">{note}</p>}
 

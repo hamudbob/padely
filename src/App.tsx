@@ -55,9 +55,17 @@ function useRecoveryRedirect() {
   const location = useLocation();
   useEffect(() => {
     const hash = window.location.hash;
-    const isRecovery = hash.includes("type=recovery") || hash.includes("error_code=otp_expired");
+    const search = window.location.search;
+    // The client is on PKCE (client.ts), which puts the token in the QUERY as
+    // `?code=`, not in the hash. This net only ever read the hash, so it had
+    // silently stopped firing — which is part of why a reset link that landed
+    // on the wrong route just showed the home screen.
+    const isRecovery =
+      hash.includes("type=recovery") ||
+      hash.includes("error_code=otp_expired") ||
+      search.includes("type=recovery");
     if (isRecovery && location.pathname !== "/reset-password") {
-      navigate(`/reset-password${hash}`, { replace: true });
+      navigate(`/reset-password${search}${hash}`, { replace: true });
     }
     // Runs once per mount; the hash is only present on the landing navigation.
     // eslint-disable-next-line react-hooks/exhaustive-deps

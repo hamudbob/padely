@@ -6,10 +6,25 @@
 # Netlify needs to serve index.html for every path and let react-router
 # handle routing client-side — otherwise refreshing on any route but "/"
 # 404s.
+# Apple's CDN fetches this to decide whether padelier.id links may open the
+# iOS app. It must come back 200, as application/json, with NO redirect — Apple
+# will not follow one, and a miss means every shared link keeps opening Safari.
+# Declared BEFORE the SPA catch-all so the catch-all can never swallow it.
+[[redirects]]
+  from = "/.well-known/apple-app-site-association"
+  to = "/.well-known/apple-app-site-association"
+  status = 200
+  force = false
+
 [[redirects]]
   from = "/*"
   to = "/index.html"
   status = 200
+
+[[headers]]
+  for = "/.well-known/apple-app-site-association"
+  [headers.values]
+    Content-Type = "application/json"
 
 # ---------------------------------------------------------------------
 # Security headers

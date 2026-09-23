@@ -1,0 +1,19 @@
+{
+  "applinks": {
+    "details": [
+      {
+        "appIDs": ["2Q959XG9JZ.id.padelier.app"],
+        "components": [
+          { "/": "/reset-password*", "comment": "password reset must open the app, not Safari" },
+          { "/": "/login*",          "comment": "sign-up confirmation" },
+          { "/": "/e/*",             "comment": "club event" },
+          { "/": "/live/*",          "comment": "spectator board" },
+          { "/": "/join*",           "comment": "join by code" },
+          { "/": "/session/*",       "comment": "session + final standings" },
+          { "/": "/teams/*",         "comment": "club" },
+          { "/": "/u/*",             "comment": "public profile" }
+        ]
+      }
+    ]
+  }
+}

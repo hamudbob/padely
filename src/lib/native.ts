@@ -84,6 +84,13 @@ export async function handleDeepLink(url: string): Promise<DeepLinkResult> {
   const code = params.get("code");
   const errorDescription = params.get("error_description") ?? params.get("error");
 
+  // A password-reset link is ALSO a `?code=` link, and that is the trap:
+  // exchanging the code signs the person in silently, and without a navigation
+  // they never see the new-password form. Same "nothing happened" symptom the
+  // universal link was supposed to cure. Decided before the exchange, because
+  // the exchange is what the branch below turns on.
+  const isRecovery = parsed.pathname === "/reset-password";
+
   if (code) {
     try {
       const { error } = await supabase.auth.exchangeCodeForSession(code);
@@ -91,6 +98,10 @@ export async function handleDeepLink(url: string): Promise<DeepLinkResult> {
       // signed-in app is worse than either outcome.
       await Browser.close().catch(() => undefined);
       if (error) return { kind: "auth-error", message: error.message };
+      // ResetPasswordPage checks getSession() precisely for "the token was
+      // already exchanged before I mounted", so arriving with the session
+      // established is the state it expects.
+      if (isRecovery) return { kind: "path", path: "/reset-password" };
       return { kind: "signed-in" };
     } catch (err) {
       await Browser.close().catch(() => undefined);
