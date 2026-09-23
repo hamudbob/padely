@@ -40,3 +40,7 @@ DerivedData/
 
 # Supabase CLI link state — project ref and pooler details, machine-local.
 supabase/.temp/
+
+# Scratch deliverables written during Claude sessions
+Claude outputs/
+_to_delete/
