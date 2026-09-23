@@ -5,6 +5,7 @@ import {
   setLocalRankingBasis,
   setLocalCourtName,
   setLocalCourtAvailability,
+  addLocalPlayer,
 } from "../offline/localSession";
 
 /**
@@ -56,6 +57,17 @@ export interface AddLatePlayerInput {
 export async function addLatePlayer(input: AddLatePlayerInput): Promise<{ id: string }> {
   const trimmed = input.name.trim();
   if (!trimmed) throw new Error("Player name can't be empty.");
+
+  // Local first, for the same reason as every other Manage action: the host's
+  // roster is read from localStorage, so a server-only insert looked like the
+  // button had done nothing.
+  const localId = addLocalPlayer(input.sessionId, {
+    displayName: trimmed,
+    gender: input.gender,
+    teamSide: input.teamSide ?? null,
+  });
+  if (localId) return { id: localId };
+
   const { data, error } = await supabase
     .from("players")
     .insert({

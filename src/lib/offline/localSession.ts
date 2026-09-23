@@ -707,6 +707,46 @@ export function setLocalCourtAvailability(courtId: string, available: boolean): 
   });
 }
 
+/**
+ * A late arrival, on this device.
+ *
+ * addLatePlayer wrote only to the server. On a device-held session the host's
+ * roster renders from local.players, so tapping Add did nothing visible — the
+ * player only appeared once the next round was drawn and the sync's
+ * new_players merge had quietly put them in. Sixth instance of this shape,
+ * after Redraw, setRankingBasis, the lineup swap and the two court settings.
+ *
+ * Returns the new player's id, or null when this device does not hold the
+ * session so the caller can fall through to the server path.
+ */
+export function addLocalPlayer(
+  sessionId: string,
+  input: { displayName: string; gender: "M" | "F"; teamSide?: "A" | "B" | null },
+): string | null {
+  const all = readAll();
+  const s = all[sessionId];
+  if (!s) return null;
+
+  const id = localUuid();
+  s.players.push({
+    id,
+    session_id: sessionId,
+    display_name: input.displayName,
+    gender: input.gender,
+    linked_user_id: null,
+    team_side: input.teamSide ?? null,
+    preferred_side: null,
+    // 'active' is what puts them in the NEXT draw: every generator filters on
+    // it (roundActions.ts). Rounds already drawn are deliberately untouched.
+    status: "active",
+    matches_played: 0,
+    rests: 0,
+    joined_at: new Date().toISOString(),
+  } as LocalPlayerRow);
+  writeAll(all);
+  return id;
+}
+
 /** Which local session owns this round, if any. Round actions act on a round id. */
 export function localSessionIdForRound(roundId: string): string | null {
   for (const s of Object.values(readAll())) {
