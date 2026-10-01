@@ -8,6 +8,7 @@ import { initNativeShell } from "./lib/nativeShell";
 import { startProviderTokenCapture } from "./lib/supabase/providerTokens";
 import { startCacheNamespace } from "./lib/cache/cacheStore";
 import { startLocalSessionSync } from "./lib/offline/localSessionSync";
+import "./fonts.css";
 import "./index.css";
 
 // Before anything renders, so a crash during the first paint is still caught.

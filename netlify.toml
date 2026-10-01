@@ -21,6 +21,15 @@
   to = "/index.html"
   status = 200
 
+# Fonts are not content-hashed (stable names so fonts.css can point at them),
+# so cache them for a week rather than forever. If a font file is ever
+# replaced, rename it.
+[[headers]]
+  for = "/fonts/*"
+  [headers.values]
+    Cache-Control = "public, max-age=604800"
+    Access-Control-Allow-Origin = "*"
+
 [[headers]]
   for = "/.well-known/apple-app-site-association"
   [headers.values]
@@ -42,7 +51,13 @@
 #                                    keeps working while quietly stopping
 #                                    catching typo'd domains. The file says so.
 #   style-src    'unsafe-inline'     required: Tailwind and React inline styles
-#   font-src     fonts.gstatic.com   the webfonts
+#   font-src     'self'              the webfonts, self-hosted in public/fonts
+#                                    since 1 Oct 2026. They used to come from
+#                                    Google with a media="print" onload=...
+#                                    trick — and THIS policy blocked that inline
+#                                    onload, so no brand font ever loaded on
+#                                    the web. Inline handlers are exactly what
+#                                    script-src 'self' forbids; don't add one.
 #   img-src      data: blob:         recap cards are rendered to a canvas and
 #                                    read back as data URLs before sharing
 #   frame-ancestors 'none'           nobody frames this app; combined with
@@ -62,7 +77,7 @@
 [[headers]]
   for = "/*"
   [headers.values]
-    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; font-src 'self' https://fonts.gstatic.com data:; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://dns.google; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
+    Content-Security-Policy = "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data: blob: https://*.supabase.co; connect-src 'self' https://*.supabase.co wss://*.supabase.co https://dns.google; frame-ancestors 'none'; base-uri 'self'; form-action 'self'; object-src 'none'"
     X-Frame-Options = "DENY"
     X-Content-Type-Options = "nosniff"
     Referrer-Policy = "strict-origin-when-cross-origin"
