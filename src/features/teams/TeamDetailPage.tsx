@@ -21,7 +21,7 @@ import { BottomSheet } from "../shell/Sheet";
 import { SkeletonScreen, SkeletonHero, SkeletonStats, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
 import { useCachedQuery, invalidateQuery } from "../../lib/cache/useCachedQuery";
 import OfflineNote from "../shell/OfflineNote";
-import { publicUrl } from "../../lib/shareLink";
+import { shareUrl } from "../../lib/shareLink";
 import ConfirmSheet, { ConfirmRequest } from "../shell/ConfirmSheet";
 
 const ROLE_LABEL: Record<TeamRole, string> = { owner: "Owner", admin: "Admin", member: "Member" };
@@ -183,24 +183,18 @@ export default function TeamDetailPage() {
 
   async function shareLink() {
     if (!teamId) return;
-    // publicUrl, not window.location.origin: in the app that origin is
-    // capacitor://localhost and the shared link opens nothing.
-    const url = publicUrl(`/teams/${teamId}`);
-    const nav = navigator as Navigator & { share?: (d: { title?: string; text?: string; url?: string }) => Promise<void> };
-    if (nav.share) {
-      try {
-        await nav.share({ title: team?.name ?? "Join my team", text: `Join ${team?.name ?? "our team"} on Padelier`, url });
-        return;
-      } catch {
-        /* user cancelled — fall through to copy */
-      }
-    }
-    try {
-      await navigator.clipboard.writeText(url);
+    // shareUrl builds the link against https://padelier.id (never
+    // capacitor://localhost) and opens the native sheet in the app. It used to
+    // fall through to the clipboard when the person CANCELLED the sheet, then
+    // announce "Link copied" for something they had just declined.
+    const outcome = await shareUrl(
+      `/teams/${teamId}`,
+      team?.name ?? "Join my team",
+      `Join ${team?.name ?? "our team"} on Padelier`,
+    );
+    if (outcome === "copied") {
       setLinkCopied(true);
       setTimeout(() => setLinkCopied(false), 1600);
-    } catch {
-      /* ignore */
     }
   }
 
@@ -832,25 +826,12 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
     // The readable path when the event has one, the uuid when it doesn't.
     // eventPath is the single place that decides, so the club card and the
     // event page can never start handing out two links for the same night.
-    const url = publicUrl(eventPath(ev));
     const text = `${ev.title}${eventCode(ev) ? ` ${eventCode(ev)}` : ""} · ${formatEventWhen(ev.scheduledAt)}${
       ev.location ? ` @ ${ev.location}` : ""
     }${ev.cost ? ` (${ev.cost})` : ""} — Padelier`;
-    const nav = navigator as Navigator & { share?: (d: { title?: string; text?: string; url?: string }) => Promise<void> };
-    if (nav.share) {
-      try {
-        await nav.share({ title: ev.title, text, url });
-        return;
-      } catch {
-        /* cancelled — fall through to copy */
-      }
-    }
-    try {
-      // Copy the bare URL only — pasting text+URL reads as two links on iOS.
-      await navigator.clipboard.writeText(url);
-    } catch {
-      /* ignore */
-    }
+    // Native sheet in the app, Web Share in a browser, bare URL to the
+    // clipboard only where neither exists — and never after a cancel.
+    await shareUrl(eventPath(ev), ev.title, text);
   }
 
   const RSVP_OPTS: { value: RsvpResponse; label: string }[] = [

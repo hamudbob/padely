@@ -9,7 +9,7 @@ import { Link, useNavigate, useParams } from "react-router-dom";
 import { StandingsRow } from "../../lib/supabase/standingsQueries";
 import { getPublicSessionById, PublicSessionData } from "../../lib/supabase/publicSessionQueries";
 import { renderRecapCard } from "../../lib/recap/renderRecapCard";
-import { publicUrl, PUBLIC_ORIGIN } from "../../lib/shareLink";
+import { publicUrl, PUBLIC_ORIGIN, shareUrl } from "../../lib/shareLink";
 
 const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
@@ -61,6 +61,7 @@ export default function FinalSummaryPage() {
   // actual share tap is a fresh user gesture — iOS refuses navigator.share()
   // if the gesture that started it has already been spent on a long await.
   const [recapBusy, setRecapBusy] = useState(false);
+  const [linkCopied, setLinkCopied] = useState(false);
   const [recapUrl, setRecapUrl] = useState<string | null>(null);
   const [recapBlob, setRecapBlob] = useState<Blob | null>(null);
   const [recapError, setRecapError] = useState<unknown>(null);
@@ -88,12 +89,14 @@ export default function FinalSummaryPage() {
       .finally(() => setLoading(false));
   }, [sessionId]);
 
-  function handleShare() {
-    const url = publicUrl(`/session/${sessionId ?? ""}/final`);
-    if (typeof navigator !== "undefined" && navigator.share) {
-      navigator.share({ url }).catch(() => {});
-    } else if (typeof navigator !== "undefined" && navigator.clipboard) {
-      navigator.clipboard.writeText(url).catch(() => {});
+  // shareUrl, not navigator.share: inside the iOS app the WebView's
+  // navigator.share is not dependable, and the native sheet (Capacitor Share)
+  // is. Falls back to the clipboard only where there is no sheet at all.
+  async function handleShare() {
+    const outcome = await shareUrl(`/session/${sessionId ?? ""}/final`, "Final standings");
+    if (outcome === "copied") {
+      setLinkCopied(true);
+      window.setTimeout(() => setLinkCopied(false), 1600);
     }
   }
 
@@ -307,7 +310,7 @@ export default function FinalSummaryPage() {
         onClick={handleShare}
         className="w-full mt-2.5 rounded-full px-4 py-3.5 font-semibold border-[1.5px] border-line text-ink-2 bg-surface active:scale-[0.99] transition-transform"
       >
-        Share link instead
+        {linkCopied ? "Link copied ✓" : "Share link instead"}
       </button>
       {/* Points at the read-only spectator view, not /host. The host screen is
           gated to the host, so for a player this button used to be a login

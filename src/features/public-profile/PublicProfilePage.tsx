@@ -9,7 +9,7 @@ import AvatarLightbox from "../shell/AvatarLightbox";
 import SafetySheet from "./SafetySheet";
 import { unblockUser } from "../../lib/supabase/safetyQueries";
 import { SkeletonScreen, SkeletonHero, SkeletonStats, SkeletonBlock } from "../shell/Skeleton";
-import { publicUrl } from "../../lib/shareLink";
+import { shareUrl } from "../../lib/shareLink";
 
 const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -83,13 +83,15 @@ export default function PublicProfilePage() {
     }
   }
 
+  // The share sheet on a phone, the clipboard only where there is no sheet.
+  // "Link copied" is shown only when it really was copied — this used to copy
+  // silently on every tap, so on the iPhone "Share this profile" appeared to
+  // do nothing at all.
   async function share() {
-    try {
-      await navigator.clipboard.writeText(publicUrl(window.location.pathname));
+    const outcome = await shareUrl(window.location.pathname, profile?.displayName ?? "Padelier profile");
+    if (outcome === "copied") {
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
-    } catch {
-      /* ignore */
     }
   }
 
