@@ -292,3 +292,50 @@ person played, make the record reflect it". Failing that, an
 admin_recompute_session_results(session_id) RPC behind admin_guard().
 
 Hit twice now, most recently 8 Sep 2026 (Plr padel night, two players).
+
+---
+
+# Added 8 Oct 2026
+
+## Objectives and badges on the profile
+
+Hamud's idea. A player's profile shows a set of **objectives**; completing one
+earns a **badge** that is shown on the profile from then on.
+
+Separate from Trofeo (the tournament trophy, discussed for 1.2): a trophy is
+scarce and someone had to lose for you to get it; badges are personal
+milestones anyone can collect.
+
+Design notes from the discussion, to settle before building:
+
+- **Reward taking part, not only winning.** The winners already have rank,
+  rating, the league and Champions Hall. The players most likely to drift away
+  are the ones finishing 1–6, and a badge system that only rewards results
+  gives them nothing. Lean towards: 10 / 25 / 50 nights played, played with
+  every club member, four Tuesdays in a row, 20 different partners — plus a
+  small number of genuinely hard ones (beat someone 200+ points above you, a
+  perfect night, champion three times) so the shelf means something.
+- **Two different axes, on purpose.** The rating tells the truth about level;
+  badges tell the story. Someone can be twelfth by rating and have the fullest
+  shelf, and that is fine.
+- **Derive from history; never grant at the moment it happens.** Store the
+  objective's definition and compute who has met it from rating_history,
+  session_results, matches and pairs. If badges are written as rows on the
+  night, a new objective can never apply retroactively, and every history
+  repair (missing league rows, corrected lineups — both happened in Sep 2026)
+  leaves badges silently wrong. Cache the result in profiles.stats, which was
+  designed for exactly this ("cached insights … populated at session end") and
+  never filled.
+- **Show progress, not just completion.** "7 / 10 nights" on an objective is
+  what brings someone back next week.
+- **Day one is an event.** Because badges come from history, launch hands
+  everyone the badges they have already earned: "here's your shelf from the
+  last two months". Good re-engagement push; lean into it.
+- **Farmable today.** The host enters every score, so a performance badge can
+  be faked with an invented session. Harmless in a friend group; matters if
+  venues run public leagues. Prefer participation objectives until scores are
+  confirmed by more than one person.
+- **Where it shows.** Own profile and the public /u/ page — a shelf on a shared
+  profile is better marketing than a standings link.
+- **Possible later:** a few cosmetic paid extras (badge frames) fit the
+  "charge for things nobody loses" rule. Never paid objectives.
