@@ -152,6 +152,18 @@ export interface LocalSession {
   lastReplicatedAt: number | null;
   /** Last sync failure, for showing the host something honest. */
   lastError: string | null;
+  /**
+   * Bumped by writeAll whenever the session's CONTENT changes — a score, a
+   * round, a player — and never by bookkeeping (the timestamps on this object).
+   * Strictly increasing, so two edits in the same millisecond still differ.
+   */
+  changedAt?: number | null;
+  /**
+   * The changedAt of the snapshot the server last accepted. While
+   * changedAt > pushedChangedAt this phone holds something the server does
+   * not, and that is the only question replication needs answered.
+   */
+  pushedChangedAt?: number | null;
 }
 
 /* ── Persistence ─────────────────────────────────────────────────────────── */
@@ -182,11 +194,8 @@ export function onLocalSessionChange(fn: ChangeListener): () => void {
   };
 }
 
-function announce(all: Record<string, LocalSession>): void {
-  // Announce every session present; the syncer debounces and only pushes the
-  // ones that are live. Cheap, and it cannot miss a mutation the way naming a
-  // single id at each call site eventually would.
-  for (const id of Object.keys(all)) {
+function announce(ids: string[]): void {
+  for (const id of ids) {
     for (const fn of changeListeners) {
       try {
         fn(id);
@@ -197,10 +206,46 @@ function announce(all: Record<string, LocalSession>): void {
   }
 }
 
-function writeAll(all: Record<string, LocalSession>): void {
+/** Everything on a LocalSession that is about syncing it rather than about it. */
+const BOOKKEEPING = new Set(["syncedAt", "lastReplicatedAt", "lastError", "changedAt", "pushedChangedAt"]);
+
+function contentOf(s: LocalSession | undefined): string {
+  if (!s) return "";
+  return JSON.stringify(s, (key, value) => (BOOKKEEPING.has(key) ? undefined : value));
+}
+
+/**
+ * Persist, and tell replication which sessions actually changed.
+ *
+ * THIS USED TO ANNOUNCE EVERY STORED SESSION ON EVERY WRITE — including the
+ * write markReplicated makes to record that a push succeeded. So each
+ * successful push announced a change, which scheduled the next push 1.5 s
+ * later, which succeeded, which announced... forever, for every session on
+ * the phone, ended ones included. Measured in a test: one score, forty
+ * uploads of the whole evening per minute, for as long as the app was open.
+ *
+ * Now a session is announced only if its CONTENT differs from what was
+ * stored, compared field by field with the bookkeeping left out. That keeps
+ * the old guarantee — no call site has to remember to name the session it
+ * touched — without bookkeeping ever counting as a change.
+ *
+ * `bookkeeping: true` is for the sync timestamps themselves: written, never
+ * announced, never stamped.
+ */
+function writeAll(all: Record<string, LocalSession>, opts: { bookkeeping?: boolean } = {}): void {
   try {
+    let changed: string[] = [];
+    if (!opts.bookkeeping) {
+      const before = readAll();
+      for (const [id, s] of Object.entries(all)) {
+        const prev = before[id];
+        if (contentOf(s) === contentOf(prev)) continue;
+        s.changedAt = Math.max(Date.now(), (prev?.changedAt ?? s.changedAt ?? 0) + 1);
+        changed.push(id);
+      }
+    }
     localStorage.setItem(STORAGE_KEY, JSON.stringify(all));
-    announce(all);
+    announce(changed);
   } catch (err) {
     // A full disk here is not a cosmetic failure — it is a session that will
     // not survive the app being killed. Loud, so the caller can refuse to
@@ -261,31 +306,58 @@ export function saveLocalSession(next: LocalSession): void {
  * still be there if the next request fails. It is cleared by
  * `forgetSyncedSessions` on a later launch, once there is no doubt.
  */
-export function markSynced(sessionId: string): void {
+/**
+ * `pushedThrough` is the changedAt of the snapshot that was sent. Anything
+ * changed after that snapshot was taken is still owed to the server, and
+ * hasUnpushedChanges keeps saying so until a later push carries it.
+ */
+export function markSynced(sessionId: string, pushedThrough?: number | null): void {
   const all = readAll();
   const s = all[sessionId];
   if (!s) return;
   s.syncedAt = Date.now();
   s.lastReplicatedAt = Date.now();
   s.lastError = null;
-  writeAll(all);
+  s.pushedChangedAt = pushedThrough !== undefined ? pushedThrough : s.changedAt ?? null;
+  writeAll(all, { bookkeeping: true });
 }
 
 /** The server has just accepted the whole graph. Only this clears lastError. */
-export function markReplicated(sessionId: string): void {
+export function markReplicated(sessionId: string, pushedThrough?: number | null): void {
   const all = readAll();
   const s = all[sessionId];
   if (!s) return;
   s.lastReplicatedAt = Date.now();
   s.lastError = null;
-  writeAll(all);
+  s.pushedChangedAt = pushedThrough !== undefined ? pushedThrough : s.changedAt ?? null;
+  writeAll(all, { bookkeeping: true });
 }
 
-/** Has the server fallen behind this device? Drives the host's warning. */
+/**
+ * Does this phone hold something the server has not accepted yet?
+ *
+ * Only for sessions the server already has (syncedAt) — creating one is
+ * syncLocalSessions' job. A recorded error counts too: the last attempt
+ * failed, so nothing since can be assumed to have landed.
+ */
+export function hasUnpushedChanges(s: LocalSession | null | undefined): boolean {
+  if (!s || !s.syncedAt) return false;
+  if (s.lastError) return true;
+  return (s.changedAt ?? 0) > (s.pushedChangedAt ?? 0);
+}
+
+export function listSessionsNeedingPush(): LocalSession[] {
+  return Object.values(readAll()).filter(hasUnpushedChanges);
+}
+
+/**
+ * How long the server has been behind this device, or null if it is not.
+ * Drives the host's "not saved yet" warning; zero lag when nothing is owed.
+ */
 export function replicationLagMs(sessionId: string): number | null {
   const s = getLocalSession(sessionId);
-  if (!s || !s.syncedAt) return null;
-  const last = s.lastReplicatedAt ?? s.syncedAt;
+  if (!hasUnpushedChanges(s)) return null;
+  const last = s!.lastReplicatedAt ?? s!.syncedAt!;
   return Date.now() - last;
 }
 
@@ -294,7 +366,7 @@ export function recordSyncError(sessionId: string, message: string): void {
   const s = all[sessionId];
   if (!s) return;
   s.lastError = message;
-  writeAll(all);
+  writeAll(all, { bookkeeping: true });
 }
 
 /** Drop sessions that synced more than a day ago. Called at startup. */
@@ -313,12 +385,15 @@ export function forgetSyncedSessions(): void {
     // evening. Fall back to syncedAt only for rows written before this field
     // existed. A session the server has never fully taken is never dropped.
     const lastOk = s.lastReplicatedAt ?? s.syncedAt;
+    // And never while it holds changes the server has not taken: until then
+    // this row IS the evening, whatever the date says.
+    if (hasUnpushedChanges(s)) continue;
     if (s.session.status === "ended" && lastOk && lastOk < cutoff) {
       delete all[id];
       changed = true;
     }
   }
-  if (changed) writeAll(all);
+  if (changed) writeAll(all, { bookkeeping: true });
 }
 
 /* ── Building one ────────────────────────────────────────────────────────── */

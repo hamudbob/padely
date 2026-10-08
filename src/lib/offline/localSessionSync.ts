@@ -10,6 +10,8 @@ import {
   getLocalSession,
   saveLocalSession,
   onLocalSessionChange,
+  hasUnpushedChanges,
+  listSessionsNeedingPush,
 } from "./localSession";
 import { flush as flushPendingScores } from "../supabase/scoreSyncQueue";
 import { applySessionRatings } from "../supabase/ratingActions";
@@ -90,7 +92,9 @@ export async function syncLocalSessions(): Promise<SyncOutcome> {
           already_existed?: boolean;
         };
 
-        markSynced(local.session.id);
+        // The snapshot's changedAt, not "now": anything the host did while
+        // this upload was on the wire is still owed, and replication sends it.
+        markSynced(local.session.id, local.changedAt ?? null);
         outcome.synced += 1;
 
         // A session ENDED offline still owes the world two things, and both
@@ -151,7 +155,10 @@ export async function syncLocalSessions(): Promise<SyncOutcome> {
  * the app was suspended.
  */
 export function startLocalSessionSync(): () => void {
-  const attempt = () => void syncLocalSessions();
+  // Create anything the server has never seen, then catch up anything it has
+  // fallen behind on — including sessions that changed while the app was
+  // closed, which no change event will ever announce again.
+  const attempt = () => void syncLocalSessions().then(() => replicatePending());
 
   attempt();
   const stopReplication = startReplication();
@@ -168,6 +175,8 @@ export function startLocalSessionSync(): () => void {
 
   return () => {
     stopReplication();
+    for (const t of timers.values()) window.clearTimeout(t);
+    timers.clear();
     window.removeEventListener("online", onOnline);
     document.removeEventListener("visibilitychange", onVisible);
     window.clearInterval(timer);
@@ -200,8 +209,39 @@ export function localSyncState(sessionId: string): { local: boolean; error: stri
  * seconds behind, so a lost phone costs seconds rather than an evening.
  */
 const DEBOUNCE_MS = 1500;
+/** After a failure: 2 s, 5 s, 15 s, 30 s, then once a minute until it lands. */
+const RETRY_MS = [2_000, 5_000, 15_000, 30_000, 60_000];
 const timers = new Map<string, number>();
 const inFlight = new Set<string>();
+const failures = new Map<string, number>();
+
+function schedule(sessionId: string, delayMs: number): void {
+  const existing = timers.get(sessionId);
+  if (existing) window.clearTimeout(existing);
+  timers.set(
+    sessionId,
+    window.setTimeout(() => {
+      timers.delete(sessionId);
+      void replicateSession(sessionId);
+    }, delayMs),
+  );
+}
+
+/**
+ * Push every session that holds changes the server has not accepted.
+ *
+ * The backstop for everything the change events cannot see: a push that
+ * failed while the app was then closed, signal returning while the phone sat
+ * idle, a session edited offline yesterday. Runs at start-up, on `online`,
+ * on returning to the app, and once a minute.
+ */
+export function replicatePending(): void {
+  for (const s of listSessionsNeedingPush()) {
+    const id = s.session.id;
+    if (inFlight.has(id) || timers.has(id)) continue;
+    void replicateSession(id);
+  }
+}
 
 export async function replicateSession(sessionId: string): Promise<void> {
   if (typeof navigator !== "undefined" && "onLine" in navigator && !navigator.onLine) return;
@@ -209,8 +249,14 @@ export async function replicateSession(sessionId: string): Promise<void> {
   // Nothing to push if it has never been created server-side; syncLocalSessions
   // owns that case and will call back here afterwards.
   if (!local || !local.syncedAt) return;
+  // A push is already on the wire. Not dropped, as it used to be: when that
+  // push lands it checks for anything newer and sends it (see `finally`).
   if (inFlight.has(sessionId)) return;
   inFlight.add(sessionId);
+
+  // What this push carries. Changes made from here on are newer than this.
+  const pushedThrough = local.changedAt ?? null;
+  let succeeded = false;
 
   try {
     const { data, error } = await supabase.rpc("sync_session_state", {
@@ -218,7 +264,9 @@ export async function replicateSession(sessionId: string): Promise<void> {
     });
     if (error) throw error;
 
-    markReplicated(sessionId);
+    markReplicated(sessionId, pushedThrough);
+    failures.delete(sessionId);
+    succeeded = true;
 
     const result = (data ?? {}) as { new_players?: Record<string, unknown>[] };
     const incoming = result.new_players ?? [];
@@ -286,22 +334,22 @@ export async function replicateSession(sessionId: string): Promise<void> {
     const message = err instanceof Error ? err.message : String(err);
     recordSyncError(sessionId, message);
     console.warn("Session replication failed:", message);
+    // And try again on our own. This used to wait for the host's next tap —
+    // so the LAST change of the night, the one with no tap after it, was the
+    // one most likely never to arrive.
+    const n = (failures.get(sessionId) ?? 0) + 1;
+    failures.set(sessionId, n);
+    schedule(sessionId, RETRY_MS[Math.min(n - 1, RETRY_MS.length - 1)]);
   } finally {
     inFlight.delete(sessionId);
+    if (succeeded && !timers.has(sessionId) && hasUnpushedChanges(getLocalSession(sessionId))) {
+      // Something changed while that push was on the wire. Send it now.
+      schedule(sessionId, DEBOUNCE_MS);
+    }
   }
 }
 
 /** Register the debounced replicate. Called once, from startLocalSessionSync. */
 function startReplication(): () => void {
-  return onLocalSessionChange((sessionId) => {
-    const existing = timers.get(sessionId);
-    if (existing) window.clearTimeout(existing);
-    timers.set(
-      sessionId,
-      window.setTimeout(() => {
-        timers.delete(sessionId);
-        void replicateSession(sessionId);
-      }, DEBOUNCE_MS),
-    );
-  });
+  return onLocalSessionChange((sessionId) => schedule(sessionId, DEBOUNCE_MS));
 }
