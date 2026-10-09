@@ -267,8 +267,22 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
   const sessionIds = [...new Set(rows.map((e) => e.session_id).filter((s): s is string => !!s))];
   const sessionById = new Map<string, { status: string; public_token: string; join_code: string }>();
   if (sessionIds.length > 0) {
-    const { data: sess } = await supabase.from("sessions").select("id, status, public_token, join_code").in("id", sessionIds);
-    for (const s of sess ?? []) sessionById.set(s.id, { status: s.status, public_token: s.public_token, join_code: s.join_code });
+    // Through get_club_event_sessions (0068), not the sessions table. Since
+    // 0021 only the HOST can select a session row, so this used to come back
+    // empty for every other member: the host's card said Live, everyone
+    // else's still offered the RSVP for a night already being played.
+    type Sess = { id: string; status: string; public_token: string; join_code: string };
+    let sess: Sess[] | null = null;
+    const rpc = await (supabase.rpc as any)("get_club_event_sessions", { p_session_ids: sessionIds });
+    if (!rpc.error) {
+      sess = (rpc.data ?? []) as Sess[];
+    } else {
+      // Until 0068 is applied: the old read, which at least still works for
+      // the host. Remove once the migration is on every environment.
+      const direct = await supabase.from("sessions").select("id, status, public_token, join_code").in("id", sessionIds);
+      sess = (direct.data ?? []) as Sess[];
+    }
+    for (const s of sess) sessionById.set(s.id, { status: s.status, public_token: s.public_token, join_code: s.join_code });
   }
 
   const profiles = await getProfiles([...new Set((rsvps ?? []).map((r) => r.user_id))]);
