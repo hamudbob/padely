@@ -15,6 +15,8 @@ import {
   ClubEvent,
   RsvpResponse,
   eventPath,
+  eventShareText,
+  formatEventWhen,
 } from "../../lib/supabase/eventQueries";
 import { useBackNav } from "../../lib/useBackNav";
 import { BottomSheet } from "../shell/Sheet";
@@ -826,9 +828,7 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
     // The readable path when the event has one, the uuid when it doesn't.
     // eventPath is the single place that decides, so the club card and the
     // event page can never start handing out two links for the same night.
-    const text = `${ev.title}${eventCode(ev) ? ` ${eventCode(ev)}` : ""} · ${formatEventWhen(ev.scheduledAt)}${
-      ev.location ? ` @ ${ev.location}` : ""
-    }${ev.cost ? ` (${ev.cost})` : ""} — Padelier`;
+    const text = eventShareText(ev);
     // Native sheet in the app, Web Share in a browser, bare URL to the
     // clipboard only where neither exists — and never after a cancel.
     await shareUrl(eventPath(ev), ev.title, text);
@@ -1158,8 +1158,4 @@ function eventDateParts(iso: string): { month: string; day: string; weekday: str
   };
 }
 
-function formatEventWhen(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
-}
+

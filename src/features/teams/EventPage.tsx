@@ -5,6 +5,8 @@ import {
   setRsvp,
   setMemberRsvp,
   eventCode,
+  eventPath,
+  eventShareText,
   PublicEvent,
   RsvpResponse,
   EventAttendee,
@@ -247,11 +249,9 @@ export default function EventPage() {
     // window.location.href was `capacitor://localhost/e/...` in the app — a
     // link that opens nothing for anybody. And a "Share" that only copied
     // looked broken on a phone, because no sheet ever appeared.
-    const outcome = await shareUrl(
-      `/e/${ev?.slug ?? eventId ?? ""}`,
-      ev?.title ?? "Padelier session",
-      "Are you in?",
-    );
+    if (!ev) return;
+    // Same path and same message as the club card — see eventShareText.
+    const outcome = await shareUrl(eventPath(ev), ev.title, eventShareText(ev));
     // "Copied" only when it really did copy. The old version said so on a
     // path that had already failed.
     if (outcome === "copied") {

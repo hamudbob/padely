@@ -75,6 +75,37 @@ export function eventCode(e: {
   return parts.join("");
 }
 
+/** "Tue 14 Oct, 20:00" in the phone's own locale. Empty for a bad date. */
+export function formatEventWhen(iso: string): string {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return "";
+  return d.toLocaleString(undefined, { weekday: "short", day: "numeric", month: "short", hour: "2-digit", minute: "2-digit" });
+}
+
+/**
+ * The message that travels with a shared event link.
+ *
+ * ONE function, because there were two: the club card sent
+ * "Tuesday Night 2C3H12P · Tue 14 Oct, 20:00 @ Kemang (Rp 75k) — Padelier"
+ * and the event page sent "Are you in?". Same night, two different invites in
+ * the group chat depending on which screen the host happened to be on.
+ */
+export function eventShareText(e: {
+  title: string;
+  scheduledAt: string;
+  location?: string | null;
+  cost?: string | null;
+  courtCount?: number | null;
+  durationHours?: number | null;
+  maxPlayers?: number | null;
+}): string {
+  const code = eventCode(e);
+  const when = formatEventWhen(e.scheduledAt);
+  return `${e.title}${code ? ` ${code}` : ""}${when ? ` · ${when}` : ""}${e.location ? ` @ ${e.location}` : ""}${
+    e.cost ? ` (${e.cost})` : ""
+  } — Padelier`;
+}
+
 export interface NewEvent {
   title: string;
   scheduledAt: string; // ISO
