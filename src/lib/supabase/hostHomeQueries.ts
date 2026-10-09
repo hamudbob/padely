@@ -49,6 +49,44 @@ const EMPTY: HostHomeSummary = {
   stats: { sessionsHosted: 0, activeThisMonth: 0, gamesPlayed: 0 },
 };
 
+/**
+ * `.in(column, ids)` in slices, merged.
+ *
+ * Two hard limits sit under this screen, and a host with two months of
+ * history crosses both. PostgREST returns at most 1000 rows per request and
+ * says nothing when it stops — 25 sessions x ~22 matches x 4 players is ~2200
+ * participant rows, so finishing places quietly came from half the data. And
+ * every id goes into the URL: 550 match ids is ~20 KB of query string, long
+ * enough to risk the gateway refusing it — and if any one request fails the
+ * WHOLE home query fails, so Play falls back to the last cached list, which
+ * does not have the session started tonight.
+ *
+ * Slices keep each request well under both. They run in parallel, so it costs
+ * no extra wall-clock time in the common case.
+ */
+async function selectIn<T>(
+  table: string,
+  columns: string,
+  column: string,
+  ids: string[],
+  size: number,
+  narrow?: (q: any) => any,
+): Promise<T[]> {
+  if (ids.length === 0) return [];
+  const slices: string[][] = [];
+  for (let i = 0; i < ids.length; i += size) slices.push(ids.slice(i, i + size));
+  const pages = await Promise.all(
+    slices.map(async (slice) => {
+      let q: any = (supabase as any).from(table).select(columns).in(column, slice);
+      if (narrow) q = narrow(q);
+      const { data, error } = await q;
+      if (error) throw error;
+      return (data ?? []) as T[];
+    }),
+  );
+  return pages.flat();
+}
+
 export async function getHostHomeSummary(): Promise<HostHomeSummary> {
   const { data: userData, error: userError } = await supabase.auth.getUser();
   if (userError) throw userError;
@@ -68,7 +106,7 @@ export async function getHostHomeSummary(): Promise<HostHomeSummary> {
     .limit(1);
   if (teamError) throw teamError;
   const teamRow = (teamRows ?? [])[0];
-  if (!teamRow) return EMPTY;
+  if (!teamRow) return withLocalSessions(EMPTY);
 
   const { data: sessionRows, error: sessionsError } = await supabase
     .from("sessions")
@@ -79,7 +117,10 @@ export async function getHostHomeSummary(): Promise<HostHomeSummary> {
   if (sessionsError) throw sessionsError;
 
   const sessions = sessionRows ?? [];
-  if (sessions.length === 0) return EMPTY;
+  // Not EMPTY outright: a host whose very first session is running on this
+  // phone, not yet uploaded, has no server rows at all — and Play showed
+  // nothing while the session was live in their hand.
+  if (sessions.length === 0) return withLocalSessions(EMPTY);
 
   // Placement/round enrichment (the expensive per-session standings computation)
   // is bounded to the live sessions plus the most recent ended ones, so this
@@ -109,38 +150,29 @@ export async function getHostHomeSummary(): Promise<HostHomeSummary> {
   // Batched children — only for the enriched window. players / rounds /
   // adjustments / pairs keyed by session, then matches by round, then
   // participants by match. Flat regardless of how many sessions the host has.
-  const [
-    { data: players, error: playersError },
-    { data: rounds, error: roundsError },
-    { data: adjustments, error: adjustmentsError },
-    { data: pairs, error: pairsError },
-  ] = await Promise.all([
-    supabase.from("players").select("id, session_id, display_name, team_side, status, email, linked_user_id").in("session_id", enrichIds),
-    supabase.from("rounds").select("id, session_id").in("session_id", enrichIds),
-    supabase.from("adjustments").select("session_id, player_id, pair_id, amount").in("session_id", enrichIds),
-    supabase.from("pairs").select("id, session_id, player_a_id, player_b_id").in("session_id", enrichIds),
+  // 20 sessions per slice keeps a slice's players (~24 a night) and rounds
+  // well under the 1000-row cap.
+  type PlayerRow = { id: string; session_id: string; display_name: string; team_side: "A" | "B" | null; status: string; email: string | null; linked_user_id: string | null };
+  const [players, rounds, adjustments, pairs] = await Promise.all([
+    selectIn<PlayerRow>("players", "id, session_id, display_name, team_side, status, email, linked_user_id", "session_id", enrichIds, 20),
+    selectIn<{ id: string; session_id: string }>("rounds", "id, session_id", "session_id", enrichIds, 20),
+    selectIn<{ session_id: string; player_id: string | null; pair_id: string | null; amount: number }>(
+      "adjustments", "session_id, player_id, pair_id, amount", "session_id", enrichIds, 20,
+    ),
+    selectIn<{ id: string; session_id: string; player_a_id: string; player_b_id: string }>(
+      "pairs", "id, session_id, player_a_id, player_b_id", "session_id", enrichIds, 20,
+    ),
   ]);
-  if (playersError) throw playersError;
-  if (roundsError) throw roundsError;
-  if (adjustmentsError) throw adjustmentsError;
-  if (pairsError) throw pairsError;
 
   const roundList = rounds ?? [];
   const roundToSession = new Map<string, string>(roundList.map((r) => [r.id, r.session_id]));
   const roundIds = roundList.map((r) => r.id);
 
-  const finalMatches =
-    roundIds.length > 0
-      ? (
-          await supabase
-            .from("matches")
-            .select("id, round_id, score_a, score_b, outcome, status")
-            .in("round_id", roundIds)
-            .eq("status", "final")
-        )
-      : { data: [], error: null };
-  if (finalMatches.error) throw finalMatches.error;
-  const matchRows = finalMatches.data ?? [];
+  type MatchRow = { id: string; round_id: string; score_a: number | null; score_b: number | null; outcome: string | null; status: string };
+  const matchRows = await selectIn<MatchRow>(
+    "matches", "id, round_id, score_a, score_b, outcome, status", "round_id", roundIds, 100,
+    (q) => q.eq("status", "final"),
+  );
   const matchToSession = new Map<string, string>();
   for (const m of matchRows) {
     const sid = roundToSession.get(m.round_id);
@@ -148,12 +180,10 @@ export async function getHostHomeSummary(): Promise<HostHomeSummary> {
   }
   const matchIds = matchRows.map((m) => m.id);
 
-  const participantsRes =
-    matchIds.length > 0
-      ? await supabase.from("match_participants").select("match_id, player_id, side").in("match_id", matchIds)
-      : { data: [], error: null };
-  if (participantsRes.error) throw participantsRes.error;
-  const participantRows = participantsRes.data ?? [];
+  // 100 matches x 4 seats = 400 rows a slice.
+  const participantRows = await selectIn<{ match_id: string; player_id: string; side: "A" | "B" }>(
+    "match_participants", "match_id, player_id, side", "match_id", matchIds, 100,
+  );
 
   // Group every child collection by session id.
   const bySession = <T>(rows: T[], sid: (r: T) => string | undefined) => {
@@ -261,14 +291,21 @@ export async function getHostHomeSummary(): Promise<HostHomeSummary> {
     gamesPlayed,
   };
 
-  // Sessions this device holds that the server has not answered with — a
-  // session started or ended with no signal. Without this, ending a session on
-  // a court made it VANISH: gone from the live screen, absent from Play, and
-  // only reappearing once it uploaded. The evening looked deleted.
-  //
-  // Merged rather than replaced, and only where the id is missing, so a synced
-  // session is always represented by the server's richer row.
-  const seen = new Set(enriched.map((s) => s.id));
+  return withLocalSessions({ sessions: enriched, stats });
+}
+
+/**
+ * Sessions this device holds that the server has not answered with — a
+ * session started or ended with no signal. Without this, ending a session on
+ * a court made it VANISH: gone from the live screen, absent from Play, and
+ * only reappearing once it uploaded. The evening looked deleted.
+ *
+ * Merged rather than replaced, and only where the id is missing, so a synced
+ * session is always represented by the server's richer row. Applied on EVERY
+ * return path — it used to run only after the server list was non-empty.
+ */
+function withLocalSessions(summary: HostHomeSummary): HostHomeSummary {
+  const seen = new Set(summary.sessions.map((s) => s.id));
   const localOnly = listAllLocalSessions()
     .filter((l) => !seen.has(l.session.id))
     .map((l) => ({
@@ -286,7 +323,6 @@ export async function getHostHomeSummary(): Promise<HostHomeSummary> {
       fieldSize: l.players.length,
       myRank: null,
       myGames: 0,
-    })) as unknown as typeof enriched;
-
-  return { sessions: [...enriched, ...localOnly], stats };
+    })) as unknown as HostHomeSession[];
+  return { sessions: [...summary.sessions, ...localOnly], stats: summary.stats };
 }
