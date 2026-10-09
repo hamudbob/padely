@@ -374,36 +374,48 @@ Sending (send-push) exists; nothing calls it. Needs DB triggers / pg_cron and
 one real test send to confirm the APNs key before building on it. Ask for
 permission at a meaningful moment (first RSVP), not at launch.
 
-## Auto-end a forgotten session
-Two layers, because the live session lives on the host's phone:
-- Phone (primary): on open/resume, a live session with no new score for
-  ~12 h is ended through the normal endSession path — ratings and league
-  apply as usual.
-- Server (backstop, 72 h): marks it ended, status only. sync_session_state
-  must become one-way for status (ended can never go back to live), or the
-  host's phone would resurrect it on the next sync. Ratings for those are
-  applied by the host's phone on next open, or Finalize in admin.
+## Auto-end a forgotten session  (revised 9 Oct, Hamud's design)
+The DATABASE ends it; the phone follows.
+- Server: a scheduled job (pg_cron, every ~15 min) ends any live session with
+  no activity for 12 h — status ended, ended_at, auto_ended = true. Needs a
+  last_activity_at on sessions, bumped by sync_session_state whenever the
+  pushed content actually changes.
+- Phone: on open/resume, ask the server for the status of every live session
+  it holds. Ended there -> mark it ended locally and show it as ended. Then
+  run the normal end steps (ratings, league) — both are idempotent.
+- sync_session_state: status becomes one-way. A push can never move a
+  session from ended back to live — otherwise a phone that missed the
+  memo resurrects it on its next sync.
+- Admin (and host) can REOPEN: an RPC that reverses the ratings already
+  applied (rating_history keeps rating_before since 0040), clears
+  ratings_applied / results_applied, removes the league rows and sets status
+  live. Without the reversal, games played after reopening would never
+  count, or would count twice.
 
 ## RSVP rename + public RSVP with a rating window
-- New name: not "Meet" (Reclub). Still choosing.
+- Club sessions: "Call-up". Open play (anyone with the link / public) needs
+  its own name — candidate: "Mabar" (main bareng). Still choosing.
 - Visibility: club only / link only / public. Public lets the host set a
   minimum and maximum rating; Join is offered only inside the window.
   Provisional players (unsettled rating) need host approval rather than an
   automatic yes or no. Public needs Report and block (Policy section above)
-  first.
+  first — Report and block can be built any time; not now.
 
 ## Official tier names
 Bands stay (they were tuned in Sep to stop labels flipping on noise); names
 change. Not Bronze/Silver/Gold — official padel grading uses those.
-Proposal (padel shots, easiest to hardest), pending Hamud's yes:
+Two proposals, Hamud to choose. Padel shots:
   <1300 Saque (secret) · 1300 Globo · 1425 Bandeja · 1575 Víbora ·
   1700 Bajada · 1800+ Por Cuatro (secret)
+Or plain Indonesian, the way people talk about each other:
+  <1300 Pemula · 1300 Rutin · 1425 Lumayan · 1575 Mantap · 1700 Jago ·
+  1800+ Legenda
 
-## Play tab speed
-Write each linked player's final place, field size and games to a small
-table when a session ends. Play (and badges, and profile history) then read
-one small query instead of re-computing 25 sessions' standings every open.
-Show live sessions from their own tiny query first.
+## Play tab speed  (decided 9 Oct)
+Drop the finishing place next to each past session on Play. That removes the
+whole standings computation from the screen: Play becomes the session list
+plus a light count for live ones. (A per-player placement table written at
+session end is still worth having later for badges and profile history.)
 
 ## Already done this round
 Logo PNGs · self-hosted fonts · Share buttons use the native sheet · sync
