@@ -339,3 +339,73 @@ Design notes from the discussion, to settle before building:
   profile is better marketing than a standings link.
 - **Possible later:** a few cosmetic paid extras (badge frames) fit the
   "charge for things nobody loses" rule. Never paid objectives.
+
+---
+
+# Decided 9 Oct 2026
+
+Agreed with Hamud; not built yet unless marked.
+
+## Record card: points won %, not scored / conceded
+Totals across formats mean nothing (one 21-point night outweighs a month of
+race-to-4). Replace with the share of all points played that you won —
+comparable across every format.
+
+## End-of-session check + faces on the standings
+Built together; same data underneath (who is linked, who is a club member).
+- Before End: a bottom sheet listing "hasn't joined" (no account linked) and
+  "not a club member", the session code large with Share, "End session" /
+  "Wait". A join request arriving while it is open shows there with the usual
+  Approve, which links to the name already on the list (no duplicate);
+  approved names tick off; when none are left the button is plain "End".
+- Admin: re-finalize button (clears results_applied), and Finalize reports
+  rows written vs players.
+- Host page Standings tab AND the public live view: profile picture for a
+  linked player; for an unlinked one, initials in the same circle marked
+  "no account", so everyone can see who hasn't claimed their spot.
+
+## Push notifications — in this order
+1. Someone wants to join your session (host)
+2. Session started — you're in
+3. Reminder an hour before
+4. You're off the waitlist
+5. Final standings are up
+Sending (send-push) exists; nothing calls it. Needs DB triggers / pg_cron and
+one real test send to confirm the APNs key before building on it. Ask for
+permission at a meaningful moment (first RSVP), not at launch.
+
+## Auto-end a forgotten session
+Two layers, because the live session lives on the host's phone:
+- Phone (primary): on open/resume, a live session with no new score for
+  ~12 h is ended through the normal endSession path — ratings and league
+  apply as usual.
+- Server (backstop, 72 h): marks it ended, status only. sync_session_state
+  must become one-way for status (ended can never go back to live), or the
+  host's phone would resurrect it on the next sync. Ratings for those are
+  applied by the host's phone on next open, or Finalize in admin.
+
+## RSVP rename + public RSVP with a rating window
+- New name: not "Meet" (Reclub). Still choosing.
+- Visibility: club only / link only / public. Public lets the host set a
+  minimum and maximum rating; Join is offered only inside the window.
+  Provisional players (unsettled rating) need host approval rather than an
+  automatic yes or no. Public needs Report and block (Policy section above)
+  first.
+
+## Official tier names
+Bands stay (they were tuned in Sep to stop labels flipping on noise); names
+change. Not Bronze/Silver/Gold — official padel grading uses those.
+Proposal (padel shots, easiest to hardest), pending Hamud's yes:
+  <1300 Saque (secret) · 1300 Globo · 1425 Bandeja · 1575 Víbora ·
+  1700 Bajada · 1800+ Por Cuatro (secret)
+
+## Play tab speed
+Write each linked player's final place, field size and games to a small
+table when a session ends. Play (and badges, and profile history) then read
+one small query instead of re-computing 25 sessions' standings every open.
+Show live sessions from their own tiny query first.
+
+## Already done this round
+Logo PNGs · self-hosted fonts · Share buttons use the native sheet · sync
+loop / retry / no-drop fix · one event share text · Play tab sliced queries
+and local sessions on every path · club card live for members (0068).
