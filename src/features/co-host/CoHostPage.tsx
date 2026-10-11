@@ -3,7 +3,6 @@ import { Link, useParams } from "react-router-dom";
 import PageHeader from "../shell/PageHeader";
 import ErrorNote from "../shell/ErrorNote";
 import PersonAvatar from "../shell/PersonAvatar";
-import { BottomSheet } from "../shell/Sheet";
 import { SkeletonScreen, SkeletonLine, SkeletonCourts } from "../shell/Skeleton";
 import { tap, notify } from "../../lib/nativeShell";
 import { withFallback } from "../../lib/errors";
@@ -261,204 +260,313 @@ export default function CoHostPage() {
   const activeA = pickerMatch ? side(pickerMatch, "A").map((id) => nameOf.get(id) ?? "Player").join(" & ") : "";
   const activeB = pickerMatch ? side(pickerMatch, "B").map((id) => nameOf.get(id) ?? "Player").join(" & ") : "";
 
+  const isTeamSparring = session.format === "team_sparring";
+  const allScoredHere = isCurrent && roundDone;
+  // The forward arrow lights up and draws the next round — exactly as on the
+  // host's screen — when the round is done and this format draws one at a time.
+  const advanceAvailable = canAdvance && !advancing;
+  const showTies = format === "fixed_4_games";
+  const gridCols = ["1.4rem", "minmax(0,1fr)", "2.9rem", "1.8rem", "1.6rem", showTies ? "1.5rem" : null, "2.7rem"]
+    .filter(Boolean)
+    .join(" ");
+
   return (
     <div className="mx-auto max-w-sm min-h-screen bg-ivory px-4 safe-top safe-bottom relative anim-fade">
       <PageHeader className="mb-3" fallback="/play" />
 
+      {/* Session title + status — the host's header, minus the menu */}
       <div className="flex items-center gap-2.5 mb-1">
         <h1 className="font-serif text-[24px] font-semibold text-graphite tracking-tight leading-tight truncate">{session.name}</h1>
-        <span className="shrink-0 inline-flex items-center gap-1.5 text-[10px] font-semibold rounded-full px-2.5 py-1 bg-gold-soft text-gold-ink border border-gold/30">
-          CO-HOST
+        <span
+          className={`shrink-0 inline-flex items-center gap-1.5 text-[10px] font-semibold rounded-full px-2.5 py-1 ${
+            live ? "bg-graphite text-ivory" : "bg-surface-2 text-warm-gray border border-line"
+          }`}
+        >
+          {live && <span className="w-1.5 h-1.5 rounded-full bg-court-lime" aria-hidden />}
+          {live ? "LIVE" : "ENDED"}
         </span>
       </div>
       <p className="text-[12px] text-warm-gray mb-4">
         {FORMAT_LABELS[session.format] ?? session.format}
-        {session.host_name ? ` · Host: ${session.host_name}` : ""}
+        {session.fixed_partner_style ? " · Fixed Partner" : ""}
+        {" · "}
+        <span className="text-gold-ink font-semibold">Co-host</span>
+        {session.host_name ? <> for {session.host_name}</> : null}
       </p>
 
       {!live && (
-        <div className="rounded-2xl border border-line bg-surface px-4 py-3 mb-4">
-          <p className="text-[14px] font-semibold text-graphite">This session has ended.</p>
-          <Link to={`/session/${session.id}/final`} className="text-[13px] text-ink-2 underline underline-offset-2">
-            See the final standings
+        <div className="mb-4 rounded-2xl border border-line bg-surface px-4 py-3">
+          <p className="text-[13.5px] font-semibold text-graphite">This session has ended. Scores are locked.</p>
+          <Link to={`/session/${session.id}/final`} className="text-[12.5px] text-gold-ink font-semibold">
+            See the final standings ›
           </Link>
         </div>
       )}
 
       {offline && (
-        <p className="rounded-xl bg-gold-soft/60 border border-gold/25 px-3 py-2 text-[12px] text-gold-ink mb-3">
-          No signal. Scores you enter as co-host go straight to the server, so they'll work again once you're back online.
+        <p className="mb-4 rounded-2xl bg-gold-soft/60 border border-gold/25 px-3.5 py-2.5 text-[12px] text-gold-ink leading-snug">
+          No signal. Co-host scores go straight to the server, so they'll work again once you're back online.
         </p>
       )}
 
       <div className="flex rounded-full bg-surface border border-line p-1 mb-4">
-        {(["round", "standings"] as Tab[]).map((t) => (
-          <button
-            key={t}
-            onClick={() => setTab(t)}
-            className={`flex-1 rounded-full py-2 text-[13px] font-semibold ${tab === t ? "bg-graphite text-ivory" : "text-warm-gray"}`}
-          >
-            {t === "round" ? "Rounds" : "Standings"}
-          </button>
-        ))}
+        <button
+          onClick={() => setTab("round")}
+          className={`flex-1 rounded-full py-2 text-[13px] font-semibold ${tab === "round" ? "bg-graphite text-ivory" : "text-warm-gray"}`}
+        >
+          Rounds
+        </button>
+        <button
+          onClick={() => setTab("standings")}
+          className={`flex-1 rounded-full py-2 text-[13px] font-semibold ${tab === "standings" ? "bg-graphite text-ivory" : "text-warm-gray"}`}
+        >
+          Standings
+        </button>
       </div>
 
       {tab === "round" && viewed && (
         <>
-          <div className="flex items-center justify-between mb-3">
+          {/* Round navigator — the host's, with the same lit › to advance */}
+          <div className="flex items-center gap-2 mb-3.5">
             <button
               onClick={() => browse(-1)}
               disabled={viewedIdx <= 0}
               aria-label="Previous round"
-              className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 disabled:opacity-30"
+              className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] shrink-0 disabled:opacity-30 disabled:cursor-not-allowed"
             >
               ‹
             </button>
-            <div className="text-center">
-              <p className="text-[15px] font-semibold text-graphite">Round {viewed.sequence}</p>
-              <p className="text-[11px] text-warm-gray">{isCurrent ? "Now playing" : roundDone ? "Finished" : "Coming up"}</p>
+            <div className="flex-1 text-center min-w-0">
+              <b className="font-serif text-[16px] font-semibold text-graphite">
+                Round <span className="font-mono tnum">{viewed.sequence}</span>
+              </b>
+              <span className={`block text-[10px] mt-0.5 ${advanceAvailable ? "text-win font-semibold" : "text-warm-gray"}`}>
+                {advancing
+                  ? "Drawing the next round…"
+                  : advanceAvailable
+                    ? "All scored — tap › for the next round"
+                    : preGenerated
+                      ? `Round ${viewed.sequence} of ${rounds.length}${!live ? " · session ended" : ""}`
+                      : isCurrent && live
+                        ? "Current round"
+                        : isCurrent
+                          ? "Final round · session ended"
+                          : `Viewing history${roundDone ? " · scored" : ""}`}
+              </span>
             </div>
             <button
-              onClick={() => browse(1)}
-              disabled={isLast}
-              aria-label="Next round"
-              className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 disabled:opacity-30"
+              onClick={advanceAvailable ? nextRound : () => browse(1)}
+              disabled={advanceAvailable ? advancing : isLast}
+              aria-label={advanceAvailable ? "Start next round" : "Next round"}
+              className={`w-9 h-9 rounded-full flex items-center justify-center text-[17px] shrink-0 transition-colors ${
+                advanceAvailable
+                  ? "bg-graphite text-gold disabled:opacity-40"
+                  : `bg-surface border border-line text-ink-2 ${isLast ? "opacity-30 cursor-not-allowed" : ""}`
+              }`}
             >
               ›
             </button>
           </div>
 
-          <div className="space-y-2.5">
-            {viewedMatches.map((m) => {
-              const final = m.status === "final";
+          {/* Match blocks — score tiles floating over a names card */}
+          {viewedMatches.map((m) => {
+            const final = m.status === "final" && m.score_a !== null && m.score_b !== null;
+            const aWon = final && (m.score_a as number) > (m.score_b as number);
+            const bWon = final && (m.score_b as number) > (m.score_a as number);
+            const names = (s: "A" | "B") => side(m, s).map((id) => nameOf.get(id) ?? "Player");
+            const tile = (s: "A" | "B") => {
+              const val = s === "A" ? m.score_a : m.score_b;
+              const won = s === "A" ? aWon : bWon;
               return (
-                <div key={m.id} className="rounded-2xl border border-line bg-surface p-3.5">
-                  <p className="text-[10px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-2">
-                    {courtName.get(m.court_id) ?? "Court"}
-                    {m.status === "cancelled" ? " · cancelled" : ""}
-                  </p>
-                  {(["A", "B"] as const).map((s) => {
-                    const ids = side(m, s);
-                    const val = s === "A" ? m.score_a : m.score_b;
-                    const won = (s === "A" && m.outcome === "win_a") || (s === "B" && m.outcome === "win_b");
-                    return (
-                      <button
-                        key={s}
-                        onClick={() => openPicker(m, s)}
-                        disabled={!live || m.status === "cancelled"}
-                        className="w-full flex items-center gap-2 py-1.5 text-left disabled:cursor-default"
-                      >
-                        <span className="flex -space-x-1.5 shrink-0">
-                          {ids.map((id) => {
-                            const p = playerOf.get(id);
-                            return (
-                              <PersonAvatar key={id} name={p?.display_name ?? "?"} avatarUrl={p?.avatar_url ?? null} linked={!!p?.linked_user_id} size={24} />
-                            );
-                          })}
-                        </span>
-                        <span className={`flex-1 min-w-0 truncate text-[14px] ${won ? "font-semibold text-graphite" : "text-ink-2"}`}>
-                          {ids.map((id) => nameOf.get(id) ?? "Player").join(" & ")}
-                        </span>
-                        <span
-                          className={`tnum min-w-[2.6rem] text-center rounded-lg px-2 py-1 text-[16px] font-semibold ${
-                            final ? (won ? "bg-graphite text-ivory" : "bg-surface-2 text-ink-2") : "border border-dashed border-line text-warm-gray"
-                          }`}
-                        >
-                          {final ? val : "–"}
-                        </span>
-                      </button>
-                    );
-                  })}
-                  {live && !final && m.status !== "cancelled" && (
-                    <p className="text-[11px] text-warm-gray mt-1">Tap a team to enter the score.</p>
-                  )}
-                </div>
+                <button
+                  onClick={() => openPicker(m, s)}
+                  disabled={!live || m.status === "cancelled"}
+                  aria-label={`Score for ${names(s).join(" & ")}`}
+                  className={`relative w-[62px] h-[54px] rounded-[14px] bg-graphite flex items-center justify-center font-mono tnum text-[25px] font-bold shadow-[0_9px_20px_-13px_rgba(13,13,13,0.5)] disabled:cursor-default ${
+                    val === null ? "text-stone" : "text-ivory"
+                  }`}
+                >
+                  {won && <span aria-hidden className="absolute top-1.5 right-2 w-1.5 h-1.5 rounded-full bg-gold" />}
+                  {val ?? "–"}
+                </button>
               );
-            })}
-          </div>
+            };
+            return (
+              <div key={m.id} className="mb-6">
+                <div className="text-right text-[13px] font-semibold text-warm-gray mb-2.5">
+                  {courtName.get(m.court_id) ?? "Court"}
+                  {m.status === "cancelled" ? " · cancelled" : ""}
+                </div>
+                <div className="flex justify-center gap-3 relative z-[2] -mb-6">
+                  {tile("A")}
+                  {tile("B")}
+                </div>
+                <div className="rounded-[18px] border border-line bg-surface px-[18px] pt-8 pb-4 flex items-center justify-between gap-2.5">
+                  <div className="flex flex-col min-w-0">
+                    {isTeamSparring && <span className="text-[10px] font-bold text-graphite">TEAM A</span>}
+                    {names("A").map((n, i) => (
+                      <span key={i} className="text-[14.5px] font-semibold text-ink leading-[1.3]">{n}</span>
+                    ))}
+                  </div>
+                  <span className="font-mono text-[12px] font-semibold text-warm-gray shrink-0">vs</span>
+                  <div className="flex flex-col items-end text-right min-w-0">
+                    {isTeamSparring && <span className="text-[10px] font-bold text-gold-ink">TEAM B</span>}
+                    {names("B").map((n, i) => (
+                      <span key={i} className="text-[14.5px] font-semibold text-ink leading-[1.3]">{n}</span>
+                    ))}
+                  </div>
+                </div>
+              </div>
+            );
+          })}
 
           {resting.length > 0 && (
-            <p className="text-[12px] text-warm-gray mt-3">
-              <span className="font-semibold text-ink-2">Resting:</span> {resting.join(", ")}
+            <p className="mt-3.5 flex gap-2 items-start text-[12px] text-ink-2 leading-relaxed">
+              <span className="text-win font-semibold shrink-0">Resting</span>
+              <span>{resting.join(", ")} this round — back on court next.</span>
             </p>
           )}
 
-          {live && isLast && !preGenerated && (
-            <div className="mt-5">
-              <button
-                onClick={nextRound}
-                disabled={!canAdvance || advancing}
-                className="w-full rounded-full bg-graphite text-ivory text-[14px] font-semibold py-3 disabled:opacity-40 active:scale-[0.98] transition-transform"
-              >
-                {advancing ? "Drawing…" : `Start round ${viewed.sequence + 1}`}
-              </button>
-              {!canAdvance && (
-                <p className="text-[11px] text-warm-gray text-center mt-1.5">Score every court first.</p>
-              )}
-              <ErrorNote error={advanceError} where="CoHostPage.nextRound" className="mt-2" />
-            </div>
+          {live && isCurrent && !roundDone && (
+            <p className="text-[10px] text-warm-gray text-center mt-3">
+              {preGenerated
+                ? "Tap a score tile to enter the result."
+                : "Finish scoring every match this round to unlock the next round."}
+            </p>
           )}
-          {live && preGenerated && isLast && roundDone && (
-            <p className="text-[12px] text-warm-gray text-center mt-5">Every round is scored. The host ends the session.</p>
+          {live && preGenerated && isLast && allScoredHere && (
+            <p className="text-[10px] text-warm-gray text-center mt-3">Every round is scored. The host ends the session.</p>
           )}
+          <ErrorNote error={advanceError} where="CoHostPage.nextRound" className="mt-2" />
         </>
       )}
 
       {tab === "standings" && (
-        <div className="rounded-2xl border border-line bg-surface overflow-hidden">
-          <div className="grid grid-cols-[1.4rem_minmax(0,1fr)_2rem_1.8rem_1.6rem_2.7rem] gap-1.5 px-3.5 py-2 text-[10px] font-bold uppercase tracking-[0.1em] text-warm-gray border-b border-line">
-            <span>#</span><span>Player</span><span className="text-right">GP</span><span className="text-right">W</span><span className="text-right">L</span><span className="text-right">PTS</span>
+        <div>
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-3">Standings</p>
+          <div className="rounded-2xl border border-line bg-surface overflow-hidden">
+            <div
+              className="grid items-center gap-1.5 px-3 py-2 bg-surface-2 border-b border-line text-[9.5px] font-bold uppercase tracking-wide text-warm-gray"
+              style={{ gridTemplateColumns: gridCols }}
+            >
+              <span className="text-center">#</span>
+              <span>Name</span>
+              <span className="text-center">GP</span>
+              <span className="text-center">W</span>
+              <span className="text-center">L</span>
+              {showTies && <span className="text-center">T</span>}
+              <span className="text-center text-gold-ink">PTS</span>
+            </div>
+            {standings.map((r) => {
+              const p = playerOf.get(r.subjectId);
+              const isLeader = r.rank === 1 && finals.length > 0;
+              return (
+                <div
+                  key={r.subjectId}
+                  className={`grid items-center gap-1.5 px-3 py-2.5 border-t border-line first:border-t-0 ${isLeader ? "bg-gold-soft/50" : ""}`}
+                  style={{ gridTemplateColumns: gridCols }}
+                >
+                  <span className={`text-center font-mono tnum text-[12px] ${isLeader ? "text-gold-ink font-bold" : "text-warm-gray"}`}>{r.rank}</span>
+                  <span className="min-w-0 flex items-center gap-1.5">
+                    <PersonAvatar
+                      name={p?.display_name ?? "?"}
+                      avatarUrl={p?.avatar_url ?? null}
+                      linked={!!p?.linked_user_id}
+                      size={22}
+                      className="ring-2 ring-surface shrink-0"
+                    />
+                    <span className="min-w-0 flex flex-col leading-tight">
+                      <span className="truncate text-[13px] font-semibold text-graphite">{p?.display_name ?? "Player"}</span>
+                      {p && !p.linked_user_id && <span className="text-[10px] text-warm-gray">no account</span>}
+                    </span>
+                    {isTeamSparring && p?.team_side && (
+                      <span
+                        className={`shrink-0 text-[9px] font-bold rounded px-1 py-0.5 ${
+                          p.team_side === "A" ? "bg-graphite text-ivory" : "bg-gold-soft text-gold-ink border border-gold/30"
+                        }`}
+                      >
+                        {p.team_side}
+                      </span>
+                    )}
+                  </span>
+                  <span className="text-center font-mono tnum text-[12.5px] text-ink-2">{r.matchesPlayed}</span>
+                  <span className="text-center font-mono tnum text-[13px] text-ink-2">{r.wins}</span>
+                  <span className="text-center font-mono tnum text-[13px] text-ink-2">{r.losses}</span>
+                  {showTies && <span className="text-center font-mono tnum text-[13px] text-ink-2">{r.draws}</span>}
+                  <span className="text-center font-mono tnum text-[13px] whitespace-nowrap font-bold text-graphite">
+                    {r.totalPoints}
+                    {r.restCompensation > 0 && (
+                      <span className="align-top text-[8.5px] font-bold text-gold-ink ml-0.5">+{r.restCompensation}</span>
+                    )}
+                  </span>
+                </div>
+              );
+            })}
+            {finals.length === 0 && (
+              <p className="text-sm text-warm-gray px-4 py-3">No finished matches yet — standings will fill in as scores come in.</p>
+            )}
           </div>
-          {standings.map((r) => {
-            const p = playerOf.get(r.subjectId);
-            return (
-              <div key={r.subjectId} className="grid grid-cols-[1.4rem_minmax(0,1fr)_2rem_1.8rem_1.6rem_2.7rem] gap-1.5 items-center px-3.5 py-2 border-b border-line last:border-b-0">
-                <span className="tnum text-[12px] text-warm-gray">{r.rank}</span>
-                <span className="flex items-center gap-2 min-w-0">
-                  <PersonAvatar name={p?.display_name ?? "?"} avatarUrl={p?.avatar_url ?? null} linked={!!p?.linked_user_id} size={22} />
-                  <span className="truncate text-[13px] text-graphite">{p?.display_name ?? "Player"}</span>
-                </span>
-                <span className="tnum text-right text-[12px] text-ink-2">{r.matchesPlayed}</span>
-                <span className="tnum text-right text-[12px] text-ink-2">{r.wins}</span>
-                <span className="tnum text-right text-[12px] text-ink-2">{r.losses}</span>
-                <span className="tnum text-right text-[13px] font-semibold text-graphite">{r.totalPoints}</span>
-              </div>
-            );
-          })}
         </div>
       )}
 
-      <p className="text-[11px] text-warm-gray text-center mt-6 mb-8 leading-snug">
-        As co-host you can enter scores and start the next round. Players, courts and settings stay with the host.
+      <p className="text-[10.5px] text-warm-gray text-center mt-8 mb-8 leading-snug px-4">
+        As co-host you enter scores and start the next round. Players, courts and settings stay with the host.
       </p>
 
+      {/* Score picker — the host's sheet */}
       {pickerMatch && (
-        <BottomSheet
-          onClose={() => !saving && setPickerMatch(null)}
-          title={autoFill ? `Score for ${pickerSide === "A" ? activeA : activeB}` : pickerSide === "A" ? activeA : activeB}
-          subtitle={
-            autoFill
-              ? `The other team gets ${range.max} minus this.`
-              : pickerSide === "A"
-                ? `Their score, then ${activeB}'s.`
-                : `${activeA} has ${pendingA}. Now ${activeB}.`
-          }
-        >
-          <div className="grid grid-cols-6 gap-2 pb-2">
-            {Array.from({ length: range.max - range.min + 1 }, (_, i) => range.min + i).map((n) => (
+        <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-40" onClick={() => !saving && setPickerMatch(null)}>
+          <div className="w-full max-w-sm bg-ivory rounded-t-2xl p-4 safe-bottom" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-1">
+              <b className="text-sm text-ink">{courtName.get(pickerMatch.court_id) ?? "Court"}</b>
               <button
-                key={n}
-                onClick={() => pick(n)}
-                disabled={saving}
-                className="tnum aspect-square rounded-xl border border-line bg-surface text-[16px] font-semibold text-graphite active:bg-graphite active:text-ivory disabled:opacity-50"
+                onClick={() => !saving && setPickerMatch(null)}
+                className="w-7 h-7 rounded-full bg-surface border border-line text-warm-gray text-xs"
               >
-                {n}
+                ✕
               </button>
-            ))}
+            </div>
+            <p className="text-sm font-semibold text-ink mb-1">
+              Entering score for: {isTeamSparring && `Team ${pickerSide} — `}
+              {pickerSide === "A" ? activeA : activeB}
+            </p>
+            {!autoFill && (
+              <p className="text-[11px] text-warm-gray mb-2">
+                {pickerSide === "B" && pendingA !== null ? (
+                  <>
+                    {activeA} scored <span className="font-mono tnum">{pendingA}</span>. Now pick {activeB}'s score.
+                  </>
+                ) : (
+                  `Next you'll be asked for ${activeB}'s score.`
+                )}
+              </p>
+            )}
+            <p className="text-[11px] text-warm-gray mb-2">
+              Valid range <span className="font-mono tnum">{range.min}-{range.max}</span>
+              {autoFill ? (
+                <>
+                  {" "}(opponent auto-fills as <span className="font-mono tnum">{range.max}</span> − this score).
+                </>
+              ) : (
+                "."
+              )}
+            </p>
+            <div className="grid grid-cols-5 gap-2 max-h-64 overflow-y-auto">
+              {Array.from({ length: range.max - range.min + 1 }, (_, i) => range.min + i).map((n) => (
+                <button
+                  key={n}
+                  onClick={() => pick(n)}
+                  disabled={saving}
+                  className="aspect-square rounded-xl border border-line bg-surface font-mono tnum font-semibold text-graphite active:bg-graphite active:text-ivory disabled:opacity-40"
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+            <ErrorNote error={saveError} where="CoHostPage.save" className="mt-2" />
+            {saving && <p className="text-xs text-warm-gray mt-2">Saving…</p>}
           </div>
-          {saving && <p className="text-[12px] text-warm-gray text-center">Saving…</p>}
-          <ErrorNote error={saveError} where="CoHostPage.save" className="mt-2" />
-        </BottomSheet>
+        </div>
       )}
     </div>
   );
