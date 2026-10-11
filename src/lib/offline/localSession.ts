@@ -836,3 +836,32 @@ export function listAllLocalSessions(): LocalSession[] {
     b.session.started_at.localeCompare(a.session.started_at),
   );
 }
+
+/**
+ * A player claimed their spot — mirror it onto this device.
+ *
+ * Accepting a claim is a server RPC (respond_player_claim, 0029): it links the
+ * spot to the claimant's account and renames it to their profile name. For a
+ * session this phone is running, the phone's copy never heard about it — so
+ * the host kept seeing the typed name with no account, and the very next
+ * replication pushed the typed name back over the real one (the sync upsert
+ * updates display_name; it leaves linked_user_id alone, which is why ratings
+ * and the league were never affected — only the name, and what this device
+ * believes). The same server-only-write shape as the court, lineup and late
+ * player bugs before it.
+ *
+ * Returns false when this device does not hold that player.
+ */
+export function setLocalPlayerLink(playerId: string, userId: string, displayName: string | null): boolean {
+  const all = readAll();
+  for (const s of Object.values(all)) {
+    const p = s.players.find((x) => x.id === playerId);
+    if (p) {
+      p.linked_user_id = userId;
+      if (displayName && displayName.trim()) p.display_name = displayName.trim();
+      writeAll(all);
+      return true;
+    }
+  }
+  return false;
+}

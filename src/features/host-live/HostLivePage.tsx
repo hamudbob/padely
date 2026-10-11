@@ -27,8 +27,11 @@ import {
 import { supabase } from "../../lib/supabase/client";
 import { notifyLiveUpdate } from "../../lib/supabase/liveChannel";
 import { SkeletonScreen, SkeletonLine, SkeletonCourts } from "../shell/Skeleton";
-import { isLocalOnly, hasLocalSession } from "../../lib/offline/localSession";
-import { publicUrl } from "../../lib/shareLink";
+import { isLocalOnly, hasLocalSession, setLocalPlayerLink } from "../../lib/offline/localSession";
+import { publicUrl, shareUrl } from "../../lib/shareLink";
+import { getSessionPeople, SessionPeople, unlinkedPlayers, nonMembers } from "../../lib/supabase/sessionPeopleQueries";
+import PersonAvatar from "../shell/PersonAvatar";
+import { BottomSheet } from "../shell/Sheet";
 
 /**
  * Overlays any locally-queued (not-yet-synced) scores on top of the server's
@@ -184,6 +187,10 @@ export default function HostLivePage() {
   const [rankingBasisSaving, setRankingBasisSaving] = useState(false);
 
   const [showEndConfirm, setShowEndConfirm] = useState(false);
+  // Accounts, faces and club membership for everyone in the session — read by
+  // the Standings tab and the end-of-session check (sessionPeopleQueries).
+  const [people, setPeople] = useState<SessionPeople | null>(null);
+  const [peopleFailed, setPeopleFailed] = useState(false);
   const [endingSession, setEndingSession] = useState(false);
   const [endSessionError, setEndSessionError] = useState<unknown>(null);
 
@@ -262,7 +269,18 @@ export default function HostLivePage() {
       .catch((err) => setError(withFallback(err, "Could not load this session.")));
   }
 
+  function loadPeople() {
+    if (!sessionId) return;
+    getSessionPeople(sessionId)
+      .then((p) => {
+        setPeople(p);
+        setPeopleFailed(false);
+      })
+      .catch(() => setPeopleFailed(true)); // faces and the check are additive; never block the screen
+  }
+
   function loadStandings() {
+    loadPeople();
     if (!sessionId) return;
     setStandingsLoading(true);
     setStandingsError(null);
@@ -820,10 +838,17 @@ export default function HostLivePage() {
   async function respondClaim(claimId: string, accept: boolean) {
     if (!sessionId) return;
     setClaimBusyId(claimId);
+    const claim = claims.find((c) => c.id === claimId);
     try {
       await respondPlayerClaim(claimId, accept);
       setClaims((cs) => cs.filter((c) => c.id !== claimId));
       loadClaims();
+      if (accept && claim) {
+        // Mirror it onto this phone, or its next push puts the typed name
+        // back and it keeps believing the spot has no account.
+        setLocalPlayerLink(claim.playerId, claim.claimantId, claim.claimantName);
+        loadPeople();
+      }
       if (accept) {
         load(); // the claimed spot is now renamed to the real player
         loadStandings();
@@ -945,6 +970,20 @@ export default function HostLivePage() {
       setManageError(withFallback(err, "Could not update player."));
     }
   }
+
+  // While the end check is open, keep it current: someone may be claiming
+  // their spot right now from the code on screen.
+  useEffect(() => {
+    if (!showEndConfirm) return;
+    loadPeople();
+    loadClaims();
+    const t = window.setInterval(() => {
+      loadPeople();
+      loadClaims();
+    }, 8000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showEndConfirm]);
 
   async function handleEndSession() {
     if (!sessionId) return;
@@ -1417,7 +1456,38 @@ export default function HostLivePage() {
                   >
                     <span className={`text-center font-mono tnum text-[12px] ${isLeader ? "text-gold-ink font-bold" : "text-warm-gray"}`}>{row.rank}</span>
                     <span className="min-w-0 flex items-center gap-1.5">
-                      <span className="truncate text-[13px] font-semibold text-graphite">{row.playerName}</span>
+                      {(() => {
+                        // A face for an account, dashed initials for a spot nobody
+                        // has claimed. Pairs (Fixed Partner) show both, overlapped.
+                        const ids = people?.pairPlayers.get(row.subjectId) ?? [row.subjectId];
+                        const ps = ids.map((id) => people?.byPlayer.get(id)).filter((x): x is NonNullable<typeof x> => !!x);
+                        if (ps.length === 0) return null;
+                        return (
+                          <span className="flex shrink-0 -space-x-1.5">
+                            {ps.map((pp) => (
+                              <PersonAvatar
+                                key={pp.playerId}
+                                name={pp.name}
+                                avatarUrl={pp.avatarUrl}
+                                linked={!!pp.userId}
+                                size={22}
+                                className="ring-2 ring-surface"
+                              />
+                            ))}
+                          </span>
+                        );
+                      })()}
+                      <span className="min-w-0 flex flex-col leading-tight">
+                        <span className="truncate text-[13px] font-semibold text-graphite">{row.playerName}</span>
+                        {(() => {
+                          const ids = people?.pairPlayers.get(row.subjectId) ?? [row.subjectId];
+                          const missing = ids.some((id) => {
+                            const pp = people?.byPlayer.get(id);
+                            return pp ? !pp.userId : false;
+                          });
+                          return missing ? <span className="text-[10px] text-warm-gray">no account</span> : null;
+                        })()}
+                      </span>
                       {isTeamSparring && row.teamSide && (
                         <span
                           className={`shrink-0 text-[9px] font-bold rounded px-1 py-0.5 ${
@@ -1493,35 +1563,131 @@ export default function HostLivePage() {
         </div>
       )}
 
-      {showEndConfirm && (
-        <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-40 px-4">
-          <div className="w-full max-w-sm bg-surface rounded-2xl p-4 border border-line">
-            <b className="text-sm text-ink">End this session?</b>
-            <p className="text-[13px] text-ink-2 mt-2">
-              Scores and standings stay exactly as they are — you just won't be able to add more scores or
-              generate another round. You can still reopen this session anytime from the home page to see the
-              results.
-            </p>
-            <ErrorNote error={endSessionError} where="HostLivePage.end" className="mt-2" />
-            <div className="flex gap-2 mt-4">
-              <button
-                onClick={() => setShowEndConfirm(false)}
-                disabled={endingSession}
-                className="flex-1 flex items-center justify-center rounded-full px-4 py-2.5 font-semibold border-[1.5px] border-graphite text-graphite bg-surface active:scale-[0.99] transition-transform disabled:opacity-50"
-              >
-                Cancel
-              </button>
+      {showEndConfirm && (() => {
+        // The last moment anyone can still fix who gets credit for tonight.
+        // A spot with no account gets no rating, no league row and no place
+        // in that person's history; a linked player outside the club gets a
+        // rating but no league row. Until now the host found out days later,
+        // from an admin screen. So: say so here, with the code to fix it.
+        const missing = people ? unlinkedPlayers(people) : [];
+        const outsiders = people ? nonMembers(people) : [];
+        const code = snapshot.session.joinCode;
+        // Not "everyone has joined" until we actually know — the list loads a
+        // moment after the sheet opens.
+        const checking = people === null && !peopleFailed;
+        // Couldn't find out (offline and never synced, say): say nothing
+        // either way rather than claim everyone joined, or that they didn't.
+        const unknown = people === null && peopleFailed;
+        const allIn = unknown || (!checking && missing.length === 0 && outsiders.length === 0);
+        return (
+          <BottomSheet
+            onClose={() => !endingSession && setShowEndConfirm(false)}
+            title="End this session?"
+            subtitle={
+              checking
+                ? "Checking who has joined…"
+                : unknown
+                  ? "Scores and standings stay exactly as they are."
+                  : allIn
+                  ? "Everyone has joined. Scores and standings stay exactly as they are."
+                  : "Scores and standings stay as they are. A few people won't get credit for tonight yet."
+            }
+          >
+            {missing.length > 0 && (
+              <>
+                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mb-2 px-1">
+                  {missing.length} {missing.length === 1 ? "hasn't" : "haven't"} joined
+                </p>
+                <div className="rounded-2xl bg-surface-2 overflow-hidden">
+                  {missing.map((m) => (
+                    <div key={m.playerId} className="flex items-center gap-2.5 px-3.5 py-2.5 border-t border-line first:border-t-0">
+                      <PersonAvatar name={m.name} avatarUrl={null} linked={false} size={26} />
+                      <span className="flex-1 min-w-0 truncate text-[13.5px] font-semibold text-graphite">{m.name}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-warm-gray mt-2 px-1 leading-snug">
+                  No rating, no league points and nothing in their history until they claim their spot.
+                </p>
+              </>
+            )}
+
+            {outsiders.length > 0 && (
+              <>
+                <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-5 mb-2 px-1">Not in the club</p>
+                <div className="rounded-2xl bg-surface-2 overflow-hidden">
+                  {outsiders.map((m) => (
+                    <div key={m.playerId} className="flex items-center gap-2.5 px-3.5 py-2.5 border-t border-line first:border-t-0">
+                      <PersonAvatar name={m.name} avatarUrl={m.avatarUrl} linked size={26} />
+                      <span className="flex-1 min-w-0 truncate text-[13.5px] font-semibold text-graphite">{m.name}</span>
+                    </div>
+                  ))}
+                </div>
+                <p className="text-[11px] text-warm-gray mt-2 px-1 leading-snug">
+                  They get a rating, but no league points until they join the club.
+                </p>
+              </>
+            )}
+
+            {missing.length > 0 && (
+              <div className="mt-5 rounded-2xl bg-surface-2 px-4 py-3.5 flex items-center gap-3">
+                <div className="flex-1">
+                  <p className="text-[10.5px] text-warm-gray">Join code</p>
+                  <p className="font-mono tnum text-[26px] font-semibold text-graphite tracking-[0.12em] leading-tight">{code}</p>
+                </div>
+                <button
+                  onClick={() => void shareUrl(`/join?code=${code}`, snapshot.session.name, `Claim your spot in ${snapshot.session.name} on Padelier`)}
+                  className="shrink-0 rounded-full bg-graphite text-ivory text-[12.5px] font-semibold px-4 py-2.5 active:scale-95 transition-transform"
+                >
+                  Share
+                </button>
+              </div>
+            )}
+
+            {/* A claim that arrives while this is open — same Accept as the
+                banner on the live screen, so the person drops off the list. */}
+            {claims.length > 0 && (
+              <div className="mt-4 rounded-2xl bg-gold-soft/60 border border-gold/25 overflow-hidden">
+                {claims.map((c) => (
+                  <div key={c.id} className="flex items-center gap-2.5 px-3.5 py-2.5 border-t border-gold/15 first:border-t-0">
+                    <PersonAvatar name={c.claimantName} avatarUrl={c.claimantAvatar} linked size={26} />
+                    <span className="flex-1 min-w-0 text-[13px] text-graphite leading-tight">
+                      <b className="font-semibold">{c.claimantName}</b>
+                      <span className="text-warm-gray"> is </span>
+                      <b className="font-semibold">{c.playerName}</b>
+                    </span>
+                    <button
+                      onClick={() => respondClaim(c.id, true)}
+                      disabled={claimBusyId === c.id}
+                      className="shrink-0 rounded-full bg-graphite text-ivory text-[11.5px] font-semibold px-3 py-1.5 disabled:opacity-40"
+                    >
+                      Accept
+                    </button>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            <ErrorNote error={endSessionError} where="HostLivePage.end" className="mt-3" />
+            <div className="flex flex-col gap-2 mt-5">
               <button
                 onClick={handleEndSession}
                 disabled={endingSession}
-                className="flex-1 flex items-center justify-center rounded-full px-4 py-2.5 font-semibold text-ivory bg-loss active:scale-[0.99] transition-transform disabled:opacity-50"
+                className="w-full rounded-full px-4 py-3.5 font-semibold text-ivory bg-loss active:scale-[0.99] transition-transform disabled:opacity-50"
               >
-                {endingSession ? "Ending…" : "End Session"}
+                {endingSession ? "Ending…" : allIn ? "End session" : "End anyway"}
+              </button>
+              <button
+                onClick={() => setShowEndConfirm(false)}
+                disabled={endingSession}
+                className="w-full rounded-full px-4 py-3 font-semibold text-ink-2 active:opacity-70 disabled:opacity-50"
+              >
+                {allIn ? "Cancel" : "Wait for them"}
               </button>
             </div>
-          </div>
-        </div>
-      )}
+          </BottomSheet>
+        );
+      })()}
 
       {roundConfirm && (
         <div className="fixed inset-0 bg-black/40 flex items-center justify-center z-40 px-4">
