@@ -7,6 +7,7 @@ import { SkeletonScreen, SkeletonLine, SkeletonCourts } from "../shell/Skeleton"
 import { tap, notify } from "../../lib/nativeShell";
 import { withFallback } from "../../lib/errors";
 import { fetchScorerSession } from "../../lib/offline/coHostSync";
+import { ensurePushRegistered } from "../../lib/push";
 import type { ScorerSession } from "../../lib/offline/coHostMerge";
 import { submitCoHostScore, advanceRoundAsCoHost } from "../../lib/supabase/coHostActions";
 import { isAutoFillFormat, scoreRangeForFormat, validateAndDeriveScore, ScoringFormat } from "../../lib/scoring/formats";
@@ -70,6 +71,10 @@ export default function CoHostPage() {
   }
 
   useEffect(load, [sessionId]);
+  // Someone who just became a co-host wants to hear next time they're made one.
+  useEffect(() => {
+    void ensurePushRegistered();
+  }, []);
 
   // The host, and any other co-host, are changing this too. Keep current.
   useEffect(() => {

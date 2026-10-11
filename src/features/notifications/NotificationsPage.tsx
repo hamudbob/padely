@@ -42,6 +42,13 @@ export default function NotificationsPage() {
 
   async function openTarget(n: AppNotification) {
     if (!n.read) markNotificationRead(n.id).catch(() => undefined);
+    // Since 0073 every new notification carries where it leads — the same
+    // place a tap on the push opens.
+    const path = (n.data?.path as string | undefined) ?? null;
+    if (path && path.startsWith("/") && !path.startsWith("//")) {
+      navigate(path);
+      return;
+    }
     const token = (n.data?.public_token as string | undefined) ?? null;
     const eventId = (n.data?.event_id as string | undefined) ?? null;
     const clubId = (n.data?.club_id as string | undefined) ?? null;

@@ -1,6 +1,6 @@
 import { useEffect } from "react";
 import { useNavigate } from "react-router-dom";
-import { startPushListeners } from "./push";
+import { startPushListeners, refreshPushIfGranted } from "./push";
 
 /**
  * Mounted once, from App, inside the Router — the same shape as useDeepLinks
@@ -21,5 +21,11 @@ import { startPushListeners } from "./push";
 export function usePushNotifications(): void {
   const navigate = useNavigate();
 
-  useEffect(() => startPushListeners((path) => navigate(path)), [navigate]);
+  useEffect(() => {
+    const stop = startPushListeners((path) => navigate(path));
+    // Listeners first, so the token that register() produces has somewhere
+    // to land. Only re-registers someone who already said yes.
+    void refreshPushIfGranted();
+    return stop;
+  }, [navigate]);
 }

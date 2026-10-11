@@ -8,6 +8,7 @@ import {
   creditSessionRating,
   forceEndSession,
   resetSessionResults,
+  reopenSession,
   getSessionDetail,
   linkPlayer,
 } from "../../lib/supabase/adminQueries";
@@ -126,6 +127,31 @@ export default function AdminSessionPage() {
         (e instanceof Error ? e.message : "That didn’t work.") +
           " If the rows were already cleared, press Rebuild again — it is safe to repeat.",
       );
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function reopen() {
+    if (!sessionId) return;
+    if (
+      !window.confirm(
+        "Reopen this session? It goes back to live with every score kept. Its ratings and league rows are undone, and applied again when it ends.",
+      )
+    )
+      return;
+    setBusy(true);
+    setNote(null);
+    try {
+      const r = await reopenSession(sessionId);
+      setNote(
+        `Reopened. ${r.players_unrated} rating${r.players_unrated === 1 ? "" : "s"} and ${r.league_rows_removed} league row${
+          r.league_rows_removed === 1 ? "" : "s"
+        } undone. The host's phone picks it up next time the app opens.`,
+      );
+      load();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "That didn’t work.");
     } finally {
       setBusy(false);
     }
@@ -297,6 +323,15 @@ export default function AdminSessionPage() {
             className="text-[12.5px] font-semibold text-graphite border border-line rounded-full px-3.5 py-2 bg-surface active:opacity-70 disabled:opacity-40"
           >
             Rebuild league rows
+          </button>
+        )}
+        {ended && (
+          <button
+            onClick={reopen}
+            disabled={busy}
+            className="text-[12.5px] font-semibold text-graphite border border-line rounded-full px-3.5 py-2 bg-surface active:opacity-70 disabled:opacity-40"
+          >
+            Reopen
           </button>
         )}
         {!ended && (

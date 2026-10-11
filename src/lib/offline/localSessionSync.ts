@@ -17,6 +17,7 @@ import { flush as flushPendingScores } from "../supabase/scoreSyncQueue";
 import { applySessionRatings } from "../supabase/ratingActions";
 import { applySessionResults } from "../supabase/resultActions";
 import { pullCoHostChanges } from "./coHostSync";
+import { reconcileSessionStatus } from "./sessionStatusCheck";
 
 /**
  * Push sessions that were started offline up to the server.
@@ -159,7 +160,12 @@ export function startLocalSessionSync(): () => void {
   // Create anything the server has never seen, then catch up anything it has
   // fallen behind on — including sessions that changed while the app was
   // closed, which no change event will ever announce again.
-  const attempt = () => void syncLocalSessions().then(() => replicatePending());
+  // Then ask the server which nights it has ended (or reopened) without this
+  // phone: 0072's 12-hour idle rule, another device, an admin.
+  const attempt = () =>
+    void syncLocalSessions()
+      .then(() => reconcileSessionStatus())
+      .then(() => replicatePending());
 
   attempt();
   const stopReplication = startReplication();

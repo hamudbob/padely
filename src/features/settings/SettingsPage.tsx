@@ -17,6 +17,7 @@ import { useBackNav } from "../../lib/useBackNav";
 import { evaluatePassword } from "../../lib/passwordPolicy";
 import PasswordField from "../auth/PasswordField";
 import PasswordStrength from "../auth/PasswordStrength";
+import NotificationsSettings from "./NotificationsSettings";
 
 /**
  * Settings — everything about *you* that you can change, behind the gear on the
@@ -501,6 +502,9 @@ export default function SettingsPage() {
           <span className="text-stone text-[15px] shrink-0" aria-hidden>›</span>
         </Link>
       </div>
+
+      {/* ── Notifications ──────────────────────────────────────────────── */}
+      <NotificationsSettings label={label} />
 
       {/* ── Account ────────────────────────────────────────────────────── */}
       <p className={`${label} mb-2 px-1`}>Account</p>

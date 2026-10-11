@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from "react";
+import { ensurePushRegistered } from "../../lib/push";
 import ErrorNote from "../shell/ErrorNote";
 import { withFallback } from "../../lib/errors";
 import PageHeader from "../shell/PageHeader";
@@ -823,6 +824,9 @@ export default function CreateSessionPage() {
       // problem, not something the host waits at a spinner for.
       void syncLocalSessions();
       void replicateSession(sid);
+      // The host is about to want to hear about join requests and claims.
+      // Prompts once per install, and only if never asked; silent otherwise.
+      void ensurePushRegistered();
 
       // REPLACE, not push. The wizard is finished the moment the session is
       // live, and leaving it in history meant a host who backed out of the live

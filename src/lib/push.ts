@@ -86,6 +86,36 @@ export async function ensurePushRegistered(): Promise<"granted" | "denied" | "un
   }
 }
 
+/** Where this device stands, without asking anything. */
+export async function getPushPermission(): Promise<"granted" | "denied" | "prompt" | "unsupported"> {
+  if (!isNative()) return "unsupported";
+  try {
+    const status = await PushNotifications.checkPermissions();
+    if (status.receive === "granted") return "granted";
+    if (status.receive === "denied") return "denied";
+    return "prompt";
+  } catch {
+    return "unsupported";
+  }
+}
+
+/**
+ * On launch: if this person already said yes, register again — silently, no
+ * prompt. Tokens rotate (OS updates, restores, reinstalls), and the server
+ * only learns the new one when the app hands it over. Before this, a token was
+ * stored only at the moment permission was first granted, so a phone whose
+ * token had rotated simply stopped being reachable.
+ */
+export async function refreshPushIfGranted(): Promise<void> {
+  if (!isNative()) return;
+  try {
+    const status = await PushNotifications.checkPermissions();
+    if (status.receive === "granted") await PushNotifications.register();
+  } catch (err) {
+    console.warn("Push refresh failed:", err);
+  }
+}
+
 /**
  * Attach the listeners. Called once, from App, inside the Router so it can
  * navigate.

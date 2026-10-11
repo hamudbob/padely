@@ -1,4 +1,5 @@
 import { ReactNode, useCallback, useEffect, useState } from "react";
+import { supabase } from "../../lib/supabase/client";
 import { Link } from "react-router-dom";
 import PageHeader from "../shell/PageHeader";
 import {
@@ -266,6 +267,56 @@ function RefinalizeButton({ sessionId }: { sessionId: string }) {
   );
 }
 
+// Push (0073): is the pipe set up, and what did send-push answer lately.
+type PushStatus = {
+  configured: boolean;
+  pg_net: boolean;
+  pg_cron: boolean;
+  devices: number;
+  my_devices: { environment: string; last_seen_at: string }[];
+  log: { created_at: string; notification_type: string; users: number; error: string | null; status_code?: number | null; response?: string | null; error_msg?: string | null }[];
+};
+
+function PushCard() {
+  const [st, setSt] = useState<PushStatus | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const load = useCallback(() => {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    (supabase as any).rpc("admin_push_status").then(({ data, error }: { data: PushStatus; error: { message: string } | null }) => {
+      if (error) setErr(error.message);
+      else setSt(data);
+    });
+  }, []);
+  useEffect(load, [load]);
+  if (err) return <Card className="px-4 py-3.5"><p className="text-[12.5px] text-warm-gray">Push status unavailable: {err}</p></Card>;
+  if (!st) return null;
+  const ok = (b: boolean) => (b ? "✓" : "✗");
+  return (
+    <Card className="px-4 py-3.5">
+      <div className="flex items-center justify-between">
+        <p className="text-[13.5px] font-semibold text-graphite">Push notifications</p>
+        <button onClick={load} className="text-[11.5px] font-semibold text-ink-2">Refresh</button>
+      </div>
+      <p className="text-[12px] text-ink-2 mt-1 font-mono">
+        config {ok(st.configured)} · pg_net {ok(st.pg_net)} · pg_cron {ok(st.pg_cron)} · {st.devices} devices · mine {st.my_devices.length}
+        {st.my_devices.length > 0 ? ` (${st.my_devices.map((d) => d.environment).join(", ")})` : ""}
+      </p>
+      {st.log.length === 0 ? (
+        <p className="text-[12px] text-warm-gray mt-2">Nothing sent yet.</p>
+      ) : (
+        <div className="mt-2 space-y-1">
+          {st.log.slice(0, 8).map((l, i) => (
+            <p key={i} className="text-[11.5px] text-ink-2 font-mono truncate">
+              {relativeTime(l.created_at)} · {l.notification_type} · {l.users}u ·{" "}
+              {l.error ?? (l.status_code != null ? `${l.status_code} ${l.response ?? ""}` : l.error_msg ?? "pending")}
+            </p>
+          ))}
+        </div>
+      )}
+    </Card>
+  );
+}
+
 function HealthTab() {
   const { data, error, loading } = useAsync<HealthCheck[]>(getAdminHealth, []);
   if (!data) return <Loading error={error} loading={loading} />;
@@ -273,6 +324,7 @@ function HealthTab() {
   const clean = data.every((c) => c.count === 0);
   return (
     <div className="space-y-3">
+      <PushCard />
       {clean && (
         <Card className="px-4 py-4">
           <p className="text-[14px] font-semibold text-win">Everything checks out.</p>

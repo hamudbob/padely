@@ -661,12 +661,24 @@ export function updateLocalSession<T>(sessionId: string, merge: (s: LocalSession
   return result;
 }
 
-export function setLocalSessionEnded(sessionId: string): void {
+export function setLocalSessionEnded(sessionId: string, endedAt?: string | null): void {
   const all = readAll();
   const s = all[sessionId];
   if (!s) return;
   s.session.status = "ended";
-  s.session.ended_at = new Date().toISOString();
+  // The server's end time when it ended the night (0072's idle sweep, or the
+  // host on another device); otherwise now, from this phone.
+  s.session.ended_at = endedAt ?? new Date().toISOString();
+  writeAll(all);
+}
+
+/** An admin or the host reopened the night on the server (0072). */
+export function setLocalSessionReopened(sessionId: string): void {
+  const all = readAll();
+  const s = all[sessionId];
+  if (!s || s.session.status !== "ended") return;
+  s.session.status = "live";
+  s.session.ended_at = null;
   writeAll(all);
 }
 

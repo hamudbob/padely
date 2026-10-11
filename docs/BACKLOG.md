@@ -364,33 +364,22 @@ Built together; same data underneath (who is linked, who is a club member).
   linked player; for an unlinked one, initials in the same circle marked
   "no account", so everyone can see who hasn't claimed their spot.
 
-## Push notifications — in this order
-1. Someone wants to join your session (host)
-2. Session started — you're in
-3. Reminder an hour before
-4. You're off the waitlist
-5. Final standings are up
-Sending (send-push) exists; nothing calls it. Needs DB triggers / pg_cron and
-one real test send to confirm the APNs key before building on it. Ask for
-permission at a meaningful moment (first RSVP), not at launch.
+## Push notifications — DONE in 0073 (11 Oct)
+Every row in `notifications` is now also pushed (pg_net -> send-push, batched,
+never able to fail the transaction). New sources: join request + claim (host),
+session live (its players + RSVP "in"), an hour before a club session (pg_cron,
+every 5 min), off the waitlist (0048, already written), final standings, made
+co-host. Settings -> Notifications has "Turn on" and "Send a test notification";
+Admin -> Health shows the pipe and send-push's answers.
+Setup: `push_config` row (URL, PUSH_SEND_SECRET, anon key) in the SQL editor;
+pg_net + pg_cron enabled. Mute a type with `push_config.muted_types`.
+Known: 0048's waitlist message formats the time in UTC, not Jakarta.
 
-## Auto-end a forgotten session  (revised 9 Oct, Hamud's design)
-The DATABASE ends it; the phone follows.
-- Server: a scheduled job (pg_cron, every ~15 min) ends any live session with
-  no activity for 12 h — status ended, ended_at, auto_ended = true. Needs a
-  last_activity_at on sessions, bumped by sync_session_state whenever the
-  pushed content actually changes.
-- Phone: on open/resume, ask the server for the status of every live session
-  it holds. Ended there -> mark it ended locally and show it as ended. Then
-  run the normal end steps (ratings, league) — both are idempotent.
-- sync_session_state: status becomes one-way. A push can never move a
-  session from ended back to live — otherwise a phone that missed the
-  memo resurrects it on its next sync.
-- Admin (and host) can REOPEN: an RPC that reverses the ratings already
-  applied (rating_history keeps rating_before since 0040), clears
-  ratings_applied / results_applied, removes the league rows and sets status
-  live. Without the reversal, games played after reopening would never
-  count, or would count twice.
+## Auto-end a forgotten session — DONE in 0072 (11 Oct)
+12 h with no activity -> ended (pg_cron every 15 min, plus the host's phone
+asking on launch). ended_at = when it went quiet; auto_ended = true. A push can
+no longer revive an ended session. reopen_session() for host/admin walks the
+ratings and league rows back (Admin -> session -> Reopen).
 
 ## RSVP rename + public RSVP with a rating window
 - Club sessions: "Call-up". Open play (anyone with the link / public) needs

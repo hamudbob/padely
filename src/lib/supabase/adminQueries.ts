@@ -507,6 +507,13 @@ export const saveAppSettings = (s: {
 export const resetSessionResults = (sessionId: string) =>
   call<{ session_id: string; rows_removed: number }>("admin_reset_session_results", { p_session_id: sessionId });
 
+/** Put an ended session back to live (0072): its ratings and league rows are
+ *  walked back, so ending it again applies them once. */
+export const reopenSession = (sessionId: string) =>
+  call<{ session_id: string; players_unrated: number; league_rows_removed: number }>("reopen_session", {
+    p_session_id: sessionId,
+  });
+
 export const forceEndSession = (sessionId: string) =>
   call<{ session_id: string; status: string; changed: boolean }>("admin_force_end_session", {
     p_session_id: sessionId,

@@ -27,13 +27,14 @@ import {
 import { supabase } from "../../lib/supabase/client";
 import { notifyLiveUpdate } from "../../lib/supabase/liveChannel";
 import { SkeletonScreen, SkeletonLine, SkeletonCourts } from "../shell/Skeleton";
-import { isLocalOnly, hasLocalSession, setLocalPlayerLink } from "../../lib/offline/localSession";
+import { isLocalOnly, hasLocalSession, setLocalPlayerLink, getLocalSession } from "../../lib/offline/localSession";
 import { publicUrl, shareUrl } from "../../lib/shareLink";
 import { getSessionPeople, SessionPeople, unlinkedPlayers, nonMembers } from "../../lib/supabase/sessionPeopleQueries";
 import PersonAvatar from "../shell/PersonAvatar";
 import { BottomSheet } from "../shell/Sheet";
 import CoHostSheet from "./CoHostSheet";
 import { listCoHosts, pullCoHostChanges, CoHost } from "../../lib/offline/coHostSync";
+import { reconcileSessionStatus } from "../../lib/offline/sessionStatusCheck";
 
 /**
  * Overlays any locally-queued (not-yet-synced) scores on top of the server's
@@ -255,7 +256,17 @@ export default function HostLivePage() {
   function load() {
     if (!sessionId) return;
     getHostLiveSnapshot(sessionId)
-      .then((snap) => {
+      .then(async (snap) => {
+        // Ended on this phone — but an admin or the host may have REOPENED it
+        // since (0072). Ask before leaving, or the reopen could never be
+        // reached from here: this screen would bounce straight to the podium.
+        if (snap?.session.status === "ended" && hasLocalSession(sessionId)) {
+          await reconcileSessionStatus(sessionId);
+          if (getLocalSession(sessionId)?.session.status === "live") {
+            load();
+            return;
+          }
+        }
         // An ended session has one home, and it isn't this screen. Everything
         // this page still offered once the scores were locked — the board, every
         // round — the podium either shows or links to, and it's the page players
@@ -410,6 +421,29 @@ export default function HostLivePage() {
   }, [showEndConfirm]);
 
   useEffect(loadCoHosts, [sessionId]);
+
+  // Has the server ended this night without us (12 hours idle, 0072), or the
+  // host ended it on another device? Checked on open, on coming back to the
+  // app, and once a minute. If so, load() takes the host to the podium.
+  useEffect(() => {
+    if (!sessionId || !hasLocalSession(sessionId)) return;
+    const check = () => {
+      if (document.visibilityState !== "visible") return;
+      // Read the stored status rather than trusting the returned list: the
+      // app-wide check may have been the one that noticed.
+      void reconcileSessionStatus(sessionId).then(() => {
+        if (getLocalSession(sessionId)?.session.status === "ended") load();
+      });
+    };
+    check();
+    const t = window.setInterval(check, 60_000);
+    document.addEventListener("visibilitychange", check);
+    return () => {
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", check);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId]);
 
   // A co-host writes to the server, not to this phone. While the screen is
   // open, pull their scores and rounds in, so the host sees them land and
