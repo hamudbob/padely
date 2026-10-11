@@ -385,6 +385,24 @@ export default function HostLivePage() {
     setHasAutoPositioned(true);
   }, [snapshot, roundHistory, hasAutoPositioned]);
 
+  // While the end check is open, keep it current: someone may be claiming
+  // their spot right now from the code on screen.
+  useEffect(() => {
+    if (!showEndConfirm) return;
+    loadPeople();
+    loadClaims();
+    const t = window.setInterval(() => {
+      loadPeople();
+      loadClaims();
+    }, 8000);
+    return () => window.clearInterval(t);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [showEndConfirm]);
+
+  // Every hook above this line. The two returns below stop early while the
+  // session loads; a hook placed after them runs on some renders and not
+  // others, and React fails the whole screen with error #310. (That is
+  // exactly what the end-check effect did on 11 Oct 2026.)
   if (error) {
     return (
       <div className="mx-auto max-w-sm min-h-screen bg-ivory px-4 py-8 safe-top">
@@ -970,20 +988,6 @@ export default function HostLivePage() {
       setManageError(withFallback(err, "Could not update player."));
     }
   }
-
-  // While the end check is open, keep it current: someone may be claiming
-  // their spot right now from the code on screen.
-  useEffect(() => {
-    if (!showEndConfirm) return;
-    loadPeople();
-    loadClaims();
-    const t = window.setInterval(() => {
-      loadPeople();
-      loadClaims();
-    }, 8000);
-    return () => window.clearInterval(t);
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [showEndConfirm]);
 
   async function handleEndSession() {
     if (!sessionId) return;
