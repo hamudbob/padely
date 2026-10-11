@@ -85,11 +85,9 @@ export default function RecordSheet({
 }) {
   const { allTime, last30, currentStreak, bestWinStreak, worstLossStreak, formAll } = insights;
 
-  // Points only exist for matches whose score was actually entered, so this
-  // is an average over games played rather than a per-game guarantee.
-  const avgFor = allTime.matches > 0 ? allTime.pointsFor / allTime.matches : 0;
-  const avgAgainst = allTime.matches > 0 ? allTime.pointsAgainst / allTime.matches : 0;
-  const diff = allTime.pointsFor - allTime.pointsAgainst;
+  const share = (v: number | null) => (v === null ? "–" : `${Math.round(v * 100)}%`);
+  const shareHint = (v: number | null, games: number) =>
+    v === null ? "no scores yet" : `over ${games} ${games === 1 ? "game" : "games"}`;
 
   // Twenty is enough to see a shape without turning the sheet into a wall.
   const recent = formAll.slice(-20);
@@ -124,27 +122,20 @@ export default function RecordSheet({
           </div>
           <p className="text-[10.5px] text-warm-gray text-center mt-2">W · L · D</p>
 
-          {/* ── Points ──────────────────────────────────────────────────
+          {/* ── Points won ─────────────────────────────────────────────
               The half of a result the win rate throws away: losing 19–21 all
-              night is a different season from losing 6–21. */}
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-6 mb-2 px-1">Points</p>
+              night is a different season from losing 6–21.
+              A share, not totals. Totals mixed formats into nonsense — one
+              night to 21 outweighed a month of race-to-4. Each game counts
+              once here, whatever it was played to. */}
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-6 mb-2 px-1">Points won</p>
           <div className="rounded-2xl bg-surface overflow-hidden">
-            <Line
-              label="Scored"
-              value={allTime.pointsFor.toLocaleString()}
-              hint={allTime.matches > 0 ? `${avgFor.toFixed(1)} a game` : undefined}
-            />
-            <Line
-              label="Conceded"
-              value={allTime.pointsAgainst.toLocaleString()}
-              hint={allTime.matches > 0 ? `${avgAgainst.toFixed(1)} a game` : undefined}
-            />
-            <Line
-              label="Difference"
-              value={`${diff > 0 ? "+" : ""}${diff.toLocaleString()}`}
-              hint={diff === 0 ? "level" : diff > 0 ? "you score more than you concede" : "you concede more than you score"}
-            />
+            <Line label="All time" value={share(allTime.pointsWon)} hint={shareHint(allTime.pointsWon, allTime.scoredGames)} />
+            <Line label="Last 30 days" value={share(last30.pointsWon)} hint={shareHint(last30.pointsWon, last30.scoredGames)} />
           </div>
+          <p className="text-[10.5px] text-warm-gray mt-2 px-1">
+            Your share of the points in each game. Every game counts the same, whether it went to 21 or first to 4.
+          </p>
 
           {/* ── Streaks ─────────────────────────────────────────────── */}
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-6 mb-2 px-1">Streaks</p>

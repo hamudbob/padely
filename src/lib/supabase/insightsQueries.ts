@@ -43,6 +43,18 @@ export interface RecordSlice {
   winRate: number;
   pointsFor: number;
   pointsAgainst: number;
+  /** Games in this slice that had a score entered (pointsWon is over these). */
+  scoredGames: number;
+  /**
+   * Your share of the points in a game, averaged over games — 0..1, or null
+   * when no game here had a score.
+   *
+   * Averaged PER GAME on purpose, not pooled. Sessions mix formats: a game to
+   * 21 has ~40 points in it, a race to 4 has ~6. Pooled, one 21-point night
+   * outweighs a month of race-to-4 — which is exactly why "scored / conceded"
+   * read as nonsense. Per game, 21–15 and 4–2 both count once, as ~0.6.
+   */
+  pointsWon: number | null;
 }
 
 export interface Streak {
@@ -109,6 +121,7 @@ const RECENT_DAYS = 30;
 
 const EMPTY_SLICE: RecordSlice = {
   matches: 0, wins: 0, losses: 0, draws: 0, winRate: 0, pointsFor: 0, pointsAgainst: 0,
+  scoredGames: 0, pointsWon: null,
 };
 
 const EMPTY: PlayerInsights = {
@@ -297,6 +310,11 @@ export function computeInsights(payload: Partial<ParticipationPayload>): PlayerI
       else slice.draws++;
       if (typeof mine === "number") slice.pointsFor += mine;
       if (typeof theirs === "number") slice.pointsAgainst += theirs;
+      if (typeof mine === "number" && typeof theirs === "number" && mine + theirs > 0) {
+        // Summed here, divided by scoredGames once the walk is done.
+        slice.pointsWon = (slice.pointsWon ?? 0) + mine / (mine + theirs);
+        slice.scoredGames++;
+      }
     }
 
     const withMe = sides[side].filter((pid) => !myPlayerIds.includes(pid));
@@ -321,6 +339,9 @@ export function computeInsights(payload: Partial<ParticipationPayload>): PlayerI
   const rate = (slice: RecordSlice) => (slice.matches > 0 ? slice.wins / slice.matches : 0);
   allTime.winRate = rate(allTime);
   last30.winRate = rate(last30);
+  for (const slice of [allTime, last30]) {
+    slice.pointsWon = slice.scoredGames > 0 ? (slice.pointsWon ?? 0) / slice.scoredGames : null;
+  }
 
   // Streaks, read off the same chronological list. A draw breaks a run of
   // either kind rather than extending it.

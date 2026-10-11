@@ -135,6 +135,12 @@ describe("computeInsights", () => {
     expect(insights.last30.pointsFor).toBe(73);
   });
 
+  it("averages points won per game, so every format weighs the same", () => {
+    // Shares: 21/31 21/36 12/33 8/29 21/40 14/35 21/32 17/38, averaged.
+    expect(insights.allTime.scoredGames).toBe(8);
+    expect(insights.allTime.pointsWon).toBeCloseTo(0.4911, 3);
+  });
+
   it("reads streaks off the chronological run", () => {
     // W W L L | W L W L  → currently on one loss, best win run is two.
     expect(insights.formAll).toEqual(["W", "W", "L", "L", "W", "L", "W", "L"]);
