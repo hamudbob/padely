@@ -7,12 +7,13 @@ import {
   adminSearch,
   creditSessionRating,
   forceEndSession,
+  resetSessionResults,
   getSessionDetail,
   linkPlayer,
 } from "../../lib/supabase/adminQueries";
 import { previewSessionCredit } from "../../lib/supabase/adminRatingRepair";
 import { applySessionRatings } from "../../lib/supabase/ratingActions";
-import { applySessionResults } from "../../lib/supabase/resultActions";
+import { applySessionResults, ResultsReport } from "../../lib/supabase/resultActions";
 
 /**
  * One session, all the way down.
@@ -76,17 +77,55 @@ export default function AdminSessionPage() {
 
   useEffect(load, [load]);
 
+  /** One line an admin can act on: how many rows, and who is missing and why. */
+  function describe(r: ResultsReport): string {
+    if (r.skipped === "not a club session") return "Not a club session — there's no league to write to.";
+    if (r.skipped === "already finalized")
+      return "League rows were already written, so nothing changed. Use Rebuild league rows to redo them.";
+    const parts = [`Wrote ${r.written} league ${r.written === 1 ? "row" : "rows"} for ${r.players} players.`];
+    if (r.noAccount.length) parts.push(`No account: ${r.noAccount.join(", ")}.`);
+    if (r.notMember.length) parts.push(`Not in the club: ${r.notMember.join(", ")}.`);
+    if (r.notRanked.length) parts.push(`Not on the standings: ${r.notRanked.join(", ")}.`);
+    return parts.join(" ");
+  }
+
   async function refinalize() {
     if (!sessionId) return;
     setBusy(true);
     setNote(null);
     try {
       await applySessionRatings(sessionId);
-      await applySessionResults(sessionId);
-      setNote("Finalize re-run. Both writes are idempotent, so pressing it again changes nothing.");
+      const report = await applySessionResults(sessionId);
+      setNote(describe(report));
       load();
     } catch (e) {
       setNote(e instanceof Error ? e.message : "That didn’t work.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  /**
+   * Re-run finalize could never fix rows that were already written: the
+   * server returns early once results_applied is set. This clears it (0070)
+   * and rebuilds every league row from today's roster and club membership —
+   * the fix for a player linked or added to the club after the night.
+   */
+  async function rebuildLeague() {
+    if (!sessionId) return;
+    if (!window.confirm("Rebuild this session's league rows from the current roster and club? Ratings are not touched.")) return;
+    setBusy(true);
+    setNote(null);
+    try {
+      await resetSessionResults(sessionId);
+      const report = await applySessionResults(sessionId);
+      setNote(describe(report));
+      load();
+    } catch (e) {
+      setNote(
+        (e instanceof Error ? e.message : "That didn’t work.") +
+          " If the rows were already cleared, press Rebuild again — it is safe to repeat.",
+      );
     } finally {
       setBusy(false);
     }
@@ -249,6 +288,15 @@ export default function AdminSessionPage() {
             className="text-[12.5px] font-semibold text-graphite border border-line rounded-full px-3.5 py-2 bg-surface active:opacity-70 disabled:opacity-40"
           >
             Re-run finalize
+          </button>
+        )}
+        {ended && s.club_id !== null && (
+          <button
+            onClick={rebuildLeague}
+            disabled={busy}
+            className="text-[12.5px] font-semibold text-graphite border border-line rounded-full px-3.5 py-2 bg-surface active:opacity-70 disabled:opacity-40"
+          >
+            Rebuild league rows
           </button>
         )}
         {!ended && (

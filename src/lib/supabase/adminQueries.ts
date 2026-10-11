@@ -502,6 +502,11 @@ export const saveAppSettings = (s: {
 /** Move a stuck session to ended. Does NOT apply ratings — those are computed
  *  on the client from the final matches — so follow it with Re-run finalize if
  *  the session should count. */
+/** Remove a session's league rows and clear results_applied (0070), so
+ *  applySessionResults can rebuild them. Ratings are not touched. */
+export const resetSessionResults = (sessionId: string) =>
+  call<{ session_id: string; rows_removed: number }>("admin_reset_session_results", { p_session_id: sessionId });
+
 export const forceEndSession = (sessionId: string) =>
   call<{ session_id: string; status: string; changed: boolean }>("admin_force_end_session", {
     p_session_id: sessionId,

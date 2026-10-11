@@ -15,7 +15,7 @@
 --   -     nothing of its own left to detect: a later migration replaced the
 --         same function (see the note), or it only changed grants or data
 --
--- Generated from supabase/migrations (0001-0069). Regenerate with
+-- Generated from supabase/migrations (0001-0070). Regenerate with
 -- scripts/gen_migration_check.py after adding a migration.
 -- =====================================================================
 select migration,
@@ -90,6 +90,7 @@ select migration,
   ('0066_sync_session_settings', (null)::boolean, 'replaced later by 0067_sync_participant_removals — that row decides'),
   ('0067_sync_participant_removals', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'sync_session_state' and p.prosrc like '%delete from match_participants mp%')))::boolean, 'new code in sync_session_state()'),
   ('0068_club_event_sessions', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'get_club_event_sessions')))::boolean, 'function get_club_event_sessions'),
-  ('0069_public_standings_faces', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'get_public_session' and p.prosrc like '%''id'', p.id, ''display_name'', p.display_name, ''status'', p.status, ''team_side'', p.team_side,%')) and (exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'get_public_session_by_id' and p.prosrc like '%''avatar_url'', pr.avatar_url,%')))::boolean, 'new code in get_public_session(), new code in get_public_session_by_id()')
+  ('0069_public_standings_faces', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'get_public_session' and p.prosrc like '%''id'', p.id, ''display_name'', p.display_name, ''status'', p.status, ''team_side'', p.team_side,%')) and (exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'get_public_session_by_id' and p.prosrc like '%''avatar_url'', pr.avatar_url,%')))::boolean, 'new code in get_public_session(), new code in get_public_session_by_id()'),
+  ('0070_admin_reset_session_results', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'admin_reset_session_results')))::boolean, 'function admin_reset_session_results')
 ) as t(migration, ok, checks)
  order by (case when ok then 2 when ok is null then 1 else 0 end), migration;

@@ -26,17 +26,39 @@ import { newRating, winProbability } from "../rating/glicko2";
  *
  * Best-effort: a failure here must never block ending the session.
  */
-export async function applySessionResults(sessionId: string): Promise<void> {
+/**
+ * What a finalize actually did, in words an admin can act on. Finalize used
+ * to return nothing, so "7 league rows for 12 players" was invisible until
+ * someone noticed the table was short.
+ */
+export interface ResultsReport {
+  /** League rows written. */
+  written: number;
+  /** Players in the session (not counting ones who left before playing). */
+  players: number;
+  /** Spots with no account — never in the league. */
+  noAccount: string[];
+  /** Linked, but not a member of the club. */
+  notMember: string[];
+  /** Member, but not on the standings (e.g. never played). */
+  notRanked: string[];
+  /** Set when nothing could be written at all, and why. */
+  skipped?: "not a club session" | "already finalized" | "no players ranked";
+}
+
+export async function applySessionResults(sessionId: string): Promise<ResultsReport> {
   const { data: session, error: sessionError } = await supabase
     .from("sessions")
-    .select("club_id, format, fixed_partner_style")
+    .select("club_id, format, fixed_partner_style, results_applied")
     .eq("id", sessionId)
     .single();
   if (sessionError) throw sessionError;
-  if (!session?.club_id) return; // not a team session — nothing to record
+  const empty: ResultsReport = { written: 0, players: 0, noAccount: [], notMember: [], notRanked: [] };
+  if (!session?.club_id) return { ...empty, skipped: "not a club session" };
+  if ((session as { results_applied?: boolean }).results_applied) return { ...empty, skipped: "already finalized" };
 
   const [{ data: players, error: playersError }, standings, { data: memberRows, error: memberError }] = await Promise.all([
-    supabase.from("players").select("id, linked_user_id, status").eq("session_id", sessionId),
+    supabase.from("players").select("id, display_name, linked_user_id, status").eq("session_id", sessionId),
     getSessionStandings(sessionId),
     supabase.from("club_members").select("user_id").eq("club_id", session.club_id),
   ]);
@@ -55,7 +77,14 @@ export async function applySessionResults(sessionId: string): Promise<void> {
   for (const [playerId, userId] of userByPlayer) {
     if (memberSet.has(userId)) memberByPlayer.set(playerId, userId);
   }
-  if (memberByPlayer.size === 0) return; // no current members played — nothing for the league
+  const nameOfPlayer = new Map((players ?? []).map((p) => [p.id, p.display_name as string]));
+  const report: ResultsReport = {
+    ...empty,
+    players: (players ?? []).length,
+    noAccount: (players ?? []).filter((p) => !p.linked_user_id).map((p) => p.display_name as string),
+    notMember: [...userByPlayer].filter(([, uid]) => !memberSet.has(uid)).map(([pid]) => nameOfPlayer.get(pid) ?? "?"),
+  };
+  if (memberByPlayer.size === 0) return report; // no current members played — nothing for the league
 
   const playerCount = (players ?? []).length;
 
@@ -79,7 +108,7 @@ export async function applySessionResults(sessionId: string): Promise<void> {
 
   const rowBySubject = new Map(standings.rows.map((r) => [r.subjectId, r]));
   const fieldSize = standings.rows.length;
-  if (fieldSize === 0) return;
+  if (fieldSize === 0) return { ...report, skipped: "no players ranked" };
 
   // ---- Opponent-adjusted per-player performance (perf_adj) ---------------
   const perfByPlayer = await computePerfAdj(sessionId, userByPlayer);
@@ -102,9 +131,15 @@ export async function applySessionResults(sessionId: string): Promise<void> {
   for (const [playerId, userId] of memberByPlayer) {
     if (seen.has(userId)) continue;
     const subjectId = subjectByPlayer.get(playerId);
-    if (!subjectId) continue;
+    if (!subjectId) {
+      report.notRanked.push(nameOfPlayer.get(playerId) ?? "?");
+      continue;
+    }
     const row = rowBySubject.get(subjectId);
-    if (!row) continue;
+    if (!row) {
+      report.notRanked.push(nameOfPlayer.get(playerId) ?? "?");
+      continue;
+    }
     seen.add(userId);
     const podiumBonus = row.rank === 1 ? 3 : row.rank === 2 ? 2 : row.rank === 3 ? 1 : 0;
     rows.push({
@@ -121,10 +156,11 @@ export async function applySessionResults(sessionId: string): Promise<void> {
       perf_adj: perfByPlayer.get(playerId) ?? 0.5,
     });
   }
-  if (rows.length === 0) return;
+  if (rows.length === 0) return report;
 
   const { error: rpcError } = await supabase.rpc("apply_session_results", { p_session_id: sessionId, p_rows: rows });
   if (rpcError) throw rpcError;
+  return { ...report, written: rows.length };
 }
 
 /**
