@@ -12,6 +12,7 @@ import {
   onLocalSessionChange,
   hasUnpushedChanges,
   listSessionsNeedingPush,
+  setAsideGoneSession,
 } from "./localSession";
 import { flush as flushPendingScores } from "../supabase/scoreSyncQueue";
 import { applySessionRatings } from "../supabase/ratingActions";
@@ -354,7 +355,20 @@ export async function replicateSession(sessionId: string): Promise<void> {
     // person who can act on it is the one holding the phone. So it is recorded
     // against the session, and replicationLagMs() lets the live screen say so
     // once the gap stops looking like a blip.
-    const message = err instanceof Error ? err.message : String(err);
+    // PostgREST errors are plain objects with a message, not Error instances.
+    const message =
+      err instanceof Error ? err.message : String((err as { message?: unknown } | null)?.message ?? err);
+
+    // Deleted on the server after this phone uploaded it. No retry can ever
+    // succeed, so stop asking (see setAsideGoneSession) instead of hammering
+    // the server once a minute for as long as the app is open.
+    if (message.includes("does not exist here yet")) {
+      failures.delete(sessionId);
+      setAsideGoneSession(sessionId);
+      console.warn("Session no longer exists on the server; set aside:", sessionId);
+      return;
+    }
+
     recordSyncError(sessionId, message);
     console.warn("Session replication failed:", message);
     // And try again on our own. This used to wait for the host's next tap —

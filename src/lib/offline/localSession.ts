@@ -386,6 +386,37 @@ export function recordSyncError(sessionId: string, message: string): void {
   writeAll(all, { bookkeeping: true });
 }
 
+const GONE_KEY = "padelier:sessionsGoneFromServer:v1";
+
+/**
+ * The server no longer has this session — it was deleted (by its host from
+ * another device, or by an admin) after this phone uploaded it. Pushing it is
+ * refused forever ("That session does not exist here yet."), and until Oct
+ * 2026 the phone retried every minute for as long as the app was open: 82
+ * identical errors in a week from one browser.
+ *
+ * Taken off the phone's list so nothing shows or retries it, but NOT thrown
+ * away: the copy is kept aside, so a deletion nobody meant can still be
+ * recovered by hand. Re-creating it automatically would undo a deletion that
+ * somebody did mean.
+ */
+export function setAsideGoneSession(sessionId: string): void {
+  const all = readAll();
+  const s = all[sessionId];
+  if (!s) return;
+  try {
+    const gone = JSON.parse(localStorage.getItem(GONE_KEY) ?? "{}") as Record<string, unknown>;
+    gone[sessionId] = { setAsideAt: new Date().toISOString(), session: s };
+    localStorage.setItem(GONE_KEY, JSON.stringify(gone));
+  } catch {
+    // Storage full or unavailable: keep the session where it is rather than
+    // lose the only copy. It will simply be retried, as before.
+    return;
+  }
+  delete all[sessionId];
+  writeAll(all, { bookkeeping: true });
+}
+
 /** Drop sessions that synced more than a day ago. Called at startup. */
 export function forgetSyncedSessions(): void {
   const all = readAll();
