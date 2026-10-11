@@ -20,9 +20,34 @@ import { MatchHistory, PlayerId, pairKey } from "./types";
 
 type Split = { teamA: [PlayerId, PlayerId]; teamB: [PlayerId, PlayerId]; imbalance: number };
 
-export function chooseCourtSplit(group: PlayerId[], history?: MatchHistory): {
+/**
+ * The cost of a repeat grows with the square of how often it has happened:
+ * partnering someone a second time costs 100, a third time 400. So the
+ * scheduler will always rather give two people their second game together
+ * than give one pair its third — and a pair you have never had beats both.
+ * (Until Oct 2026 this only asked "seen before, yes or no", so once every
+ * option on a court had been seen it could not tell a 2nd repeat from a 4th.)
+ */
+const PARTNER_WEIGHT = 100;
+const OPPONENT_WEIGHT = 10;
+
+function partnerCost(history: MatchHistory | undefined, a: PlayerId, b: PlayerId): number {
+  if (!history) return 0;
+  const n = history.partnerCounts.get(pairKey(a, b)) ?? (history.partnerPairsSeen.has(pairKey(a, b)) ? 1 : 0);
+  return n * n * PARTNER_WEIGHT;
+}
+
+function opponentCost(history: MatchHistory | undefined, a: PlayerId, b: PlayerId): number {
+  if (!history) return 0;
+  const n = history.opponentCounts.get(pairKey(a, b)) ?? (history.opponentPairsSeen.has(pairKey(a, b)) ? 1 : 0);
+  return n * OPPONENT_WEIGHT;
+}
+
+/** The best split of one court, and what it costs (0 = nothing repeated, balanced). */
+export function bestCourtSplit(group: PlayerId[], history?: MatchHistory): {
   teamA: [PlayerId, PlayerId];
   teamB: [PlayerId, PlayerId];
+  cost: number;
 } {
   const [p0, p1, p2, p3] = group;
   const options: Split[] = [
@@ -31,22 +56,13 @@ export function chooseCourtSplit(group: PlayerId[], history?: MatchHistory): {
     { teamA: [p0, p1], teamB: [p2, p3], imbalance: 4 }, // C: 1+2 vs 3+4
   ];
 
+  // Priority stays strict: any repeat partnership (>= 100) outweighs every
+  // repeat opponent on the court (4 pairs x 10 each, rarely more), which
+  // outweighs imbalance (max 4).
   const cost = (o: Split): number => {
-    let partnerRepeat = 0;
-    let opponentRepeat = 0;
-    if (history) {
-      if (history.partnerPairsSeen.has(pairKey(o.teamA[0], o.teamA[1]))) partnerRepeat++;
-      if (history.partnerPairsSeen.has(pairKey(o.teamB[0], o.teamB[1]))) partnerRepeat++;
-      for (const x of o.teamA) {
-        for (const y of o.teamB) {
-          if (history.opponentPairsSeen.has(pairKey(x, y))) opponentRepeat++;
-        }
-      }
-    }
-    // Weights keep the priority order strict: one repeat partnership (100)
-    // always outranks any number of repeat opponents (max 4*10=40), which in
-    // turn always outranks imbalance (max 4).
-    return partnerRepeat * 100 + opponentRepeat * 10 + o.imbalance;
+    let c = partnerCost(history, o.teamA[0], o.teamA[1]) + partnerCost(history, o.teamB[0], o.teamB[1]);
+    for (const x of o.teamA) for (const y of o.teamB) c += opponentCost(history, x, y);
+    return c + o.imbalance;
   };
 
   let best = options[0];
@@ -58,5 +74,13 @@ export function chooseCourtSplit(group: PlayerId[], history?: MatchHistory): {
       bestCost = c;
     }
   }
-  return { teamA: best.teamA, teamB: best.teamB };
+  return { teamA: best.teamA, teamB: best.teamB, cost: bestCost };
+}
+
+export function chooseCourtSplit(group: PlayerId[], history?: MatchHistory): {
+  teamA: [PlayerId, PlayerId];
+  teamB: [PlayerId, PlayerId];
+} {
+  const { teamA, teamB } = bestCourtSplit(group, history);
+  return { teamA, teamB };
 }

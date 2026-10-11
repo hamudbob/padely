@@ -20,7 +20,7 @@ import {
   Rng,
 } from "./types";
 import { selectPlayersForRound, hasUnavoidableConsecutiveRest } from "./fairness";
-import { chooseCourtSplit } from "./courtSplit";
+import { bestCourtSplit } from "./courtSplit";
 
 export interface StandingLookup {
   /** Current points or wins (whatever the session's ranking_basis is) — higher is better. */
@@ -71,14 +71,22 @@ export function generateMexicanoRound(input: GenerateMexicanoRoundInput): RoundR
     ? shuffleDeterministic(playPool, rng)
     : [...playPool].sort((a, b) => standings.rankValue(b) - standings.rankValue(a));
 
+  // Courts in rank order, with one allowance: two players either side of a
+  // court boundary (4th and 5th, 8th and 9th, ...) may swap courts when that
+  // spares someone a repeat partner. Players a single place apart in the
+  // standings are as close in level as it gets, so the courts stay Mexicano;
+  // without this, a top four that keeps winning plays only each other all
+  // night and every partnership comes round again and again.
+  const ordered = isFirstRound ? ranked : arrangeCourts(ranked, history);
+
   const matches: Match[] = [];
-  for (let i = 0; i + 3 < ranked.length; i += 4) {
-    const group = ranked.slice(i, i + 4); // [rank1, rank2, rank3, rank4] within this group
+  for (let i = 0; i + 3 < ordered.length; i += 4) {
+    const group = ordered.slice(i, i + 4); // [rank1, rank2, rank3, rank4] within this group
     // Partners are chosen by a soft rule: prefer a split that avoids repeat
     // partnerships (then repeat opponents), with the balanced 1st+4th vs
     // 2nd+3rd as the tiebreak. It never fails — if every split repeats, it
     // takes the least-repeating one.
-    const { teamA, teamB } = chooseCourtSplit(group, history);
+    const { teamA, teamB } = bestCourtSplit(group, history);
     matches.push({ courtIndex: Math.floor(i / 4), teamA, teamB });
   }
 
@@ -101,6 +109,47 @@ export function generateMexicanoRound(input: GenerateMexicanoRoundInput): RoundR
   );
 
   return { courtsUsed, matches, restingIds, explanation: explanationParts.join(" ") };
+}
+
+/** What one boundary swap "costs": a little under one repeat partnership, so a
+ * swap happens only when it actually spares a repeat partner. */
+const SWAP_COST = 90;
+
+/**
+ * Try every combination of boundary swaps (2^(courts-1): at most 32 for six
+ * courts) and keep the cheapest: fewest/least-repeated partners first, then
+ * fewest swaps. No randomness — the same standings and history always give
+ * the same courts, so Refresh and the co-host draw stay deterministic.
+ */
+export function arrangeCourts(ranked: PlayerId[], history?: MatchHistory): PlayerId[] {
+  const courts = Math.floor(ranked.length / 4);
+  if (!history || courts < 2) return ranked;
+
+  const costOf = (order: PlayerId[]): number => {
+    let c = 0;
+    for (let i = 0; i + 3 < order.length; i += 4) c += bestCourtSplit(order.slice(i, i + 4), history).cost;
+    return c;
+  };
+
+  let best = ranked;
+  let bestCost = costOf(ranked);
+  for (let mask = 1; mask < 1 << (courts - 1); mask++) {
+    const order = [...ranked];
+    let swaps = 0;
+    for (let b = 0; b < courts - 1; b++) {
+      if (mask & (1 << b)) {
+        const i = b * 4 + 3;
+        [order[i], order[i + 1]] = [order[i + 1], order[i]];
+        swaps++;
+      }
+    }
+    const c = costOf(order) + swaps * SWAP_COST;
+    if (c < bestCost) {
+      best = order;
+      bestCost = c;
+    }
+  }
+  return best;
 }
 
 function shuffleDeterministic<T>(arr: T[], rng: Rng): T[] {
