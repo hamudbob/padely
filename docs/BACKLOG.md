@@ -373,7 +373,8 @@ co-host. Settings -> Notifications has "Turn on" and "Send a test notification";
 Admin -> Health shows the pipe and send-push's answers.
 Setup: `push_config` row (URL, PUSH_SEND_SECRET, anon key) in the SQL editor;
 pg_net + pg_cron enabled. Mute a type with `push_config.muted_types`.
-Known: 0048's waitlist message formats the time in UTC, not Jakarta.
+(The waitlist message already uses Jakarta time — 0056 fixed it.)
+0074: Admin Health no longer counts empty or guest-only sessions as unrated.
 
 ## Auto-end a forgotten session — DONE in 0072 (11 Oct)
 12 h with no activity -> ended (pg_cron every 15 min, plus the host's phone
