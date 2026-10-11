@@ -5,6 +5,7 @@ import { useParams, useNavigate, useSearchParams } from "react-router-dom";
 import { getPublicSession, PublicSessionData } from "../../lib/supabase/publicSessionQueries";
 import { subscribeLiveUpdates } from "../../lib/supabase/liveChannel";
 import SessionJoinPanel from "./SessionJoinPanel";
+import PersonAvatar from "../shell/PersonAvatar";
 
 /**
  * Public / Spectator live view (`/live/:publicToken`). Read-only, wired to the
@@ -185,7 +186,22 @@ export default function PublicLivePage() {
   // the host uses (rest compensation, ranking_basis, integer wins, Fixed-Partner
   // pair collapse, zero-match players all handled server-side-of-truth). Just map
   // for display, preserving the computed order and shared ranks.
+  // Faces for the board (0069): a photo for an account, dashed initials for a
+  // spot nobody has claimed. On a server without 0069 there is no `linked`
+  // flag, and then nothing is drawn rather than marking everyone "no account".
+  const nameOf = new Map(data.players.map((p) => [p.id, p.displayName]));
+  const facesFor = (subjectId: string) => {
+    if (!data.linkedByPlayerId) return [];
+    const ids = data.pairPlayers.get(subjectId) ?? [subjectId];
+    return ids.map((id) => ({
+      id,
+      name: nameOf.get(id) ?? "?",
+      avatarUrl: data.avatarByPlayerId?.get(id) ?? null,
+      linked: data.linkedByPlayerId?.get(id) ?? false,
+    }));
+  };
   const board = standings.map((s) => ({
+    faces: facesFor(s.subjectId),
     rank: s.rank,
     name: s.playerName,
     points: s.totalPoints,
@@ -360,7 +376,17 @@ export default function PublicLivePage() {
               return (
                 <div key={`${row.rank}-${row.name}`} className={`flex items-center gap-3 px-4 py-2.5 ${top ? "bg-gold-soft/50" : ""}`}>
                   <span className={`w-5 text-center font-mono tnum text-[13px] font-bold ${top ? "text-gold-ink" : "text-warm-gray"}`}>{row.rank}</span>
-                  <span className={`flex-1 min-w-0 truncate text-[13.5px] ${top ? "text-graphite font-semibold" : "text-ink"}`}>{row.name}</span>
+                  {row.faces.length > 0 && (
+                    <span className="flex shrink-0 -space-x-1.5">
+                      {row.faces.map((f) => (
+                        <PersonAvatar key={f.id} name={f.name} avatarUrl={f.avatarUrl} linked={f.linked} size={24} className="ring-2 ring-surface" />
+                      ))}
+                    </span>
+                  )}
+                  <span className="flex-1 min-w-0 flex flex-col leading-tight">
+                    <span className={`truncate text-[13.5px] ${top ? "text-graphite font-semibold" : "text-ink"}`}>{row.name}</span>
+                    {row.faces.some((f) => !f.linked) && <span className="text-[10px] text-warm-gray">no account</span>}
+                  </span>
                   <span className="w-14 text-right font-mono tnum text-[11.5px] text-warm-gray">
                     {row.wins}
                     <span className="text-stone">–</span>

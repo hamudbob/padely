@@ -101,6 +101,7 @@ for i, f in enumerate(files):
     else:
         rows.append((mig, note or "nothing to detect (grants or data only) — check by hand", "null"))
 
+first, last = name_of(files[0])[:4], name_of(files[-1])[:4]
 out = ["""-- =====================================================================
 -- Which migrations are on THIS database?
 --
@@ -118,7 +119,8 @@ out = ["""-- ===================================================================
 --   -     nothing of its own left to detect: a later migration replaced the
 --         same function (see the note), or it only changed grants or data
 --
--- Generated from supabase/migrations (0001-0068) on 9 Oct 2026.
+-- Generated from supabase/migrations ({first}-{last}). Regenerate with
+-- scripts/gen_migration_check.py after adding a migration.
 -- =====================================================================
 select migration,
        case when ok is null then '-' when ok then 'yes' else 'NO' end as applied,
@@ -130,4 +132,4 @@ for mig, what, cond in rows:
 out.append(",\n".join(vals))
 out.append(""") as t(migration, ok, checks)
  order by (case when ok then 2 when ok is null then 1 else 0 end), migration;""")
-print("\n".join(out))
+print("\n".join(out).replace("{first}", first).replace("{last}", last))

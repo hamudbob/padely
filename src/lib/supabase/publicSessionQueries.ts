@@ -25,6 +25,10 @@ export interface PublicSessionData {
   sessionDate?: string | null;
   /** playerId → avatar, for the recap card's podium faces. Only set when loaded by id. */
   avatarByPlayerId?: Map<string, string | null>;
+  /** playerId → does the spot belong to an account (0069). Unset on an older server. */
+  linkedByPlayerId?: Map<string, boolean>;
+  /** pairId → its two player ids, so a Fixed Partner row can show both faces. */
+  pairPlayers: Map<string, [string, string]>;
   players: { id: string; displayName: string; status: string }[];
   rounds: { id: string; sequence: number; status: string }[];
   /** Ranked leaderboard rows, computed via assembleStandings — identical to host. */
@@ -52,7 +56,7 @@ interface RawPublicSession {
     fixed_partner_style?: string | null;
     status?: PublicSessionData["session"]["status"];
   };
-  players?: { id: string; display_name: string; status: string; team_side: "A" | "B" | null; avatar_url?: string | null }[];
+  players?: { id: string; display_name: string; status: string; team_side: "A" | "B" | null; avatar_url?: string | null; linked?: boolean }[];
   public_token?: string | null;
   club_name?: string | null;
   session_date?: string | null;
@@ -114,6 +118,7 @@ function localToRawPublicSession(local: LocalSession): RawPublicSession {
       status: p.status,
       team_side: (p.team_side as "A" | "B" | null) ?? null,
       avatar_url: null,
+      linked: !!p.linked_user_id,
     })),
     public_token: local.session.public_token,
     club_name: null,
@@ -208,6 +213,10 @@ function mapPublicSession(d: RawPublicSession): PublicSessionData {
     players.filter((p) => p.avatar_url !== undefined).map((p) => [p.id, p.avatar_url ?? null]),
   );
 
+  const linkedByPlayerId = new Map<string, boolean>(
+    players.filter((p) => p.linked !== undefined).map((p) => [p.id, !!p.linked]),
+  );
+
   return {
     session: {
       id: d.session?.id ?? "",
@@ -221,6 +230,8 @@ function mapPublicSession(d: RawPublicSession): PublicSessionData {
     clubName: d.club_name ?? null,
     sessionDate: d.session_date ?? null,
     avatarByPlayerId: avatarByPlayerId.size > 0 ? avatarByPlayerId : undefined,
+    linkedByPlayerId: linkedByPlayerId.size > 0 ? linkedByPlayerId : undefined,
+    pairPlayers: new Map(pairs.map((p) => [p.id, [p.player_a_id, p.player_b_id] as [string, string]])),
     players: players.map((p) => ({ id: p.id, displayName: p.display_name, status: p.status })),
     rounds: (d.rounds ?? []).map((r) => ({ id: r.id, sequence: r.sequence, status: r.status })),
     standings: rows,
