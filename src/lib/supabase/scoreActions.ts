@@ -8,6 +8,12 @@ export interface SubmitScoreInput {
   scoreB: number | null;
   editedBy: string; // auth.uid() of the host saving this
   reason?: string;
+  /**
+   * When the host TAPPED this score (ms). A score queued offline reaches the
+   * server later; if a co-host entered one for the same match in between,
+   * theirs is newer and this one is dropped rather than written over it.
+   */
+  scoredAt?: number;
 }
 
 /**
@@ -25,13 +31,24 @@ export async function submitMatchScore(input: SubmitScoreInput): Promise<void> {
     throw new Error("Enter both teams' scores.");
   }
 
-  const { data: existing, error: fetchError } = await supabase
+  // "*" rather than a column list: scored_at/scored_by exist only once 0071
+  // is applied, and naming them before then would fail every score.
+  const { data: existingRow, error: fetchError } = await supabase
     .from("matches")
-    .select("score_a, score_b, status")
+    .select("*")
     .eq("id", input.matchId)
     .single();
   if (fetchError) throw fetchError;
-  if (!existing) throw new Error("Match not found.");
+  if (!existingRow) throw new Error("Match not found.");
+  const existing = existingRow as typeof existingRow & { scored_at?: string | null };
+  const hasScoredAt = "scored_at" in existing;
+
+  // A co-host entered a score for this match AFTER this one was tapped (0071).
+  // Theirs stands; the host's phone picks it up on its next pull.
+  const tappedAt = input.scoredAt ?? Date.now();
+  if (existing.status === "final" && existing.scored_at && Date.parse(existing.scored_at) > tappedAt) {
+    return;
+  }
 
   const wasFinal = existing.status === "final";
 
@@ -43,7 +60,8 @@ export async function submitMatchScore(input: SubmitScoreInput): Promise<void> {
       outcome: validation.outcome,
       status: "final",
       updated_at: new Date().toISOString(),
-    })
+      ...(hasScoredAt ? { scored_at: new Date(tappedAt).toISOString(), scored_by: input.editedBy || null } : {}),
+    } as never)
     .eq("id", input.matchId);
   if (updateError) throw updateError;
 

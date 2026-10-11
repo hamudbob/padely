@@ -1,4 +1,5 @@
 import { useEffect, useState } from "react";
+import { getMyCoHostSessions, CoHostSessionCard } from "../../lib/supabase/coHostActions";
 import ErrorNote from "../shell/ErrorNote";
 import { withFallback } from "../../lib/errors";
 import { Link } from "react-router-dom";
@@ -125,6 +126,20 @@ export default function PlayPage() {
       .then(() => getResumableLobbies())
       .then(setDrafts)
       .catch(() => setDrafts([]));
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [user?.id]);
+
+  // Sessions someone else is hosting and has made you co-host of. Uncached
+  // for the same reason as drafts: it's a thing to act on, right now.
+  const [coHosting, setCoHosting] = useState<CoHostSessionCard[]>([]);
+  useEffect(() => {
+    if (!user) return;
+    const refresh = () => {
+      if (document.visibilityState === "visible") getMyCoHostSessions().then(setCoHosting).catch(() => {});
+    };
+    refresh();
+    document.addEventListener("visibilitychange", refresh);
+    return () => document.removeEventListener("visibilitychange", refresh);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [user?.id]);
 
@@ -262,6 +277,31 @@ export default function PlayPage() {
                 <span className="text-[13px] font-semibold text-gold-ink">Resume hosting ›</span>
               </div>
             </Link>
+            ))}
+          </div>
+        )}
+
+        {/* ── Co-hosting someone else's session ─────────────────────────── */}
+        {coHosting.length > 0 && (
+          <div className="px-5 pt-[18px] flex flex-col gap-2.5">
+            {coHosting.map((c) => (
+              <Link
+                key={c.id}
+                to={`/session/${c.id}/score`}
+                className="block rounded-3xl bg-surface border border-gold/40 px-5 pt-4 pb-4 active:scale-[0.99] transition-transform"
+              >
+                <span className="inline-flex items-center rounded-full bg-gold-soft px-2.5 py-1 font-mono font-semibold text-[9.5px] tracking-[0.16em] text-gold-ink">
+                  CO-HOST
+                </span>
+                <p className="font-serif text-[22px] font-semibold text-graphite tracking-tight mt-3 leading-tight">{c.name}</p>
+                <p className="text-[12.5px] text-warm-gray mt-1">
+                  {c.hostName ? `${c.hostName} made you co-host` : "You're co-hosting"}
+                  {c.clubName ? ` · ${c.clubName}` : ""}
+                </p>
+                <div className="mt-4 pt-3.5 border-t border-line flex items-center justify-end">
+                  <span className="text-[13px] font-semibold text-gold-ink">Enter scores ›</span>
+                </div>
+              </Link>
             ))}
           </div>
         )}

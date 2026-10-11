@@ -29,6 +29,8 @@ import {
   getLocalSession,
   saveLocalSession,
   localUuid,
+  noteDiscardedRound,
+  LocalSession,
   swapLocalRoundPlayers,
   localSessionIdForRound,
 } from "../offline/localSession";
@@ -52,7 +54,24 @@ export interface GenerateNextRoundResult {
  * the server-side backstop), and refuses to persist a round with zero
  * playable courts rather than silently saving an empty one.
  */
-export async function generateNextRound(sessionId: string, seedOverride?: number, forceRandom = false): Promise<GenerateNextRoundResult> {
+export interface GenerateNextRoundOptions {
+  /**
+   * Draw from THIS graph instead of the one stored on the phone. The co-host
+   * screen passes a graph built from get_scorer_session, so a co-host's next
+   * round comes out of exactly the same code — same fairness, same ladder,
+   * same seed — as the host's would have.
+   */
+  graph?: LocalSession;
+  /** Add the round to `graph` but save nothing; the caller sends it on. */
+  dryRun?: boolean;
+}
+
+export async function generateNextRound(
+  sessionId: string,
+  seedOverride?: number,
+  forceRandom = false,
+  opts: GenerateNextRoundOptions = {},
+): Promise<GenerateNextRoundResult> {
   // A session started with no signal. Everything this function does after the
   // fetches — choosing who plays, who rests, and against whom — is already
   // pure computation on the device; only the rows come from somewhere else.
@@ -66,7 +85,7 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
   // offline sessions whatever the format — and it is wrong. A Mexicano whose
   // draw doesn't respond to standings is an Americano wearing its name, and
   // the difference would show up over the night with nobody able to say why.
-  const local = getLocalSession(sessionId);
+  const local = opts.graph ?? getLocalSession(sessionId);
   const useLocal = Boolean(local);
 
   let session: { id: string; format: string; scoring_format: string; ranking_basis: string; scheduling_seed: number; status: string; fixed_partner_style: string | null } | null = null;
@@ -609,7 +628,7 @@ export async function generateNextRound(sessionId: string, seedOverride?: number
       local.rests.push({ round_id: newRoundId, player_id: playerId, consecutive_rest_count: 0 });
     }
 
-    saveLocalSession(local);
+    if (!opts.dryRun) saveLocalSession(local);
     return { roundId: newRoundId, sequence: newSequence };
   }
 
@@ -775,6 +794,7 @@ export async function deleteCurrentRound(sessionId: string): Promise<void> {
     local.participants = local.participants.filter((mp) => !doomed.has(mp.match_id));
     local.rests = local.rests.filter((r) => r.round_id !== latestId);
     local.rounds = local.rounds.filter((r) => r.id !== latestId);
+    noteDiscardedRound(local, latestId);
     const prev = local.rounds.find((r) => r.id === prevId);
     if (prev) prev.status = "in_progress";
     saveLocalSession(local);
@@ -890,6 +910,7 @@ export async function regenerateCurrentRound(sessionId: string, opts: { randomiz
     localForRegen.participants = localForRegen.participants.filter((mp) => !doomed.has(mp.match_id));
     localForRegen.rests = localForRegen.rests.filter((r) => r.round_id !== latestId);
     localForRegen.rounds = localForRegen.rounds.filter((r) => r.id !== latestId);
+    noteDiscardedRound(localForRegen, latestId);
     saveLocalSession(localForRegen);
   } else {
     const { error: deleteError } = await supabase.from("rounds").delete().eq("id", latestId);
@@ -1094,6 +1115,7 @@ export async function redrawRemainingRounds(sessionId: string): Promise<RedrawRe
     const doomedRoundIds = new Set(targets.map((r) => r.id));
     const doomedMatchIds = new Set(local.matches.filter((m) => doomedRoundIds.has(m.round_id)).map((m) => m.id));
     local.rounds = local.rounds.filter((r) => !doomedRoundIds.has(r.id));
+    for (const id of doomedRoundIds) noteDiscardedRound(local, id);
     local.matches = local.matches.filter((m) => !doomedRoundIds.has(m.round_id));
     local.participants = local.participants.filter((mp) => !doomedMatchIds.has(mp.match_id));
     local.rests = local.rests.filter((rr) => !doomedRoundIds.has(rr.round_id));

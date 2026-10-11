@@ -238,6 +238,7 @@ export async function flush(): Promise<void> {
           scoreB: item.scoreB,
           editedBy: item.editedBy,
           reason: item.reason,
+          scoredAt: item.enqueuedAt,
         });
         removeByClientId(item.clientId);
         emit();

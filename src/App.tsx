@@ -26,6 +26,7 @@ import { useScrollRestoration } from "./lib/useScrollRestoration";
 import WatchPage from "./features/watch/WatchPage";
 import CreateSessionPage from "./features/create-session/CreateSessionPage";
 import HostLivePage from "./features/host-live/HostLivePage";
+import CoHostPage from "./features/co-host/CoHostPage";
 import PublicLivePage from "./features/public-live/PublicLivePage";
 import FinalSummaryPage from "./features/final-summary/FinalSummaryPage";
 import TeamsPage from "./features/teams/TeamsPage";
@@ -240,6 +241,15 @@ export default function App() {
         element={
           <RequireHost>
             <CreateSessionPage />
+          </RequireHost>
+        }
+      />
+      {/* A co-host's screen: scores and Next Round, nothing else (0065/0071). */}
+      <Route
+        path="/session/:sessionId/score"
+        element={
+          <RequireHost>
+            <CoHostPage />
           </RequireHost>
         }
       />

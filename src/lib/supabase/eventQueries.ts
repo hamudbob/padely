@@ -273,7 +273,11 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
     // else's still offered the RSVP for a night already being played.
     type Sess = { id: string; status: string; public_token: string; join_code: string };
     let sess: Sess[] | null = null;
-    const rpc = await (supabase.rpc as any)("get_club_event_sessions", { p_session_ids: sessionIds });
+    // Called ON the client, never as a detached function: supabase.rpc reads
+    // `this.rest`, so `(supabase.rpc as any)(...)` threw before it sent
+    // anything, and took the whole club card down with it.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rpc = await (supabase as any).rpc("get_club_event_sessions", { p_session_ids: sessionIds });
     if (!rpc.error) {
       sess = (rpc.data ?? []) as Sess[];
     } else {

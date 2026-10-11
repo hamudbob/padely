@@ -115,6 +115,14 @@ export interface LocalMatchRow {
   score_b: number | null;
   outcome: string | null;
   status: "not_started" | "in_progress" | "final" | "cancelled";
+  /**
+   * When this score was TAPPED (ISO), on this phone or — for a score a
+   * co-host entered — on the server. Not when it was pushed: a score entered
+   * offline may reach the server an hour later and must still lose to a
+   * co-host's correction made in between. 0071 keeps whichever is later.
+   * Absent on sessions stored before co-hosts existed.
+   */
+  scored_at?: string | null;
 }
 
 export interface LocalParticipantRow {
@@ -164,6 +172,15 @@ export interface LocalSession {
    * not, and that is the only question replication needs answered.
    */
   pushedChangedAt?: number | null;
+  /**
+   * Rounds this phone deliberately deleted. Sent as discarded_round_ids, so
+   * the server deletes a co-host's round only when the host MEANT to — a
+   * round the phone simply hasn't pulled yet is left alone (0071). Also what
+   * stops the next pull from bringing a deleted round straight back.
+   */
+  discardedRoundIds?: string[];
+  /** How many co-hosts this session has, as last seen. Gates the pull. */
+  coHostCount?: number;
 }
 
 /* ── Persistence ─────────────────────────────────────────────────────────── */
@@ -207,7 +224,7 @@ function announce(ids: string[]): void {
 }
 
 /** Everything on a LocalSession that is about syncing it rather than about it. */
-const BOOKKEEPING = new Set(["syncedAt", "lastReplicatedAt", "lastError", "changedAt", "pushedChangedAt"]);
+const BOOKKEEPING = new Set(["syncedAt", "lastReplicatedAt", "lastError", "changedAt", "pushedChangedAt", "coHostCount"]);
 
 function contentOf(s: LocalSession | undefined): string {
   if (!s) return "";
@@ -580,6 +597,7 @@ export function setLocalMatchScore(
   match.score_a = scoreA;
   match.score_b = scoreB;
   match.status = scoreA !== null && scoreB !== null ? "final" : "not_started";
+  match.scored_at = scoreA !== null && scoreB !== null ? new Date().toISOString() : null;
   match.outcome =
     scoreA === null || scoreB === null ? null : scoreA > scoreB ? "win_a" : scoreB > scoreA ? "win_b" : "draw";
 
@@ -594,6 +612,13 @@ export function setLocalMatchScore(
 
   // matches_played drives rest fairness in the next draw, so it has to move
   // here too — the online path has a trigger doing this.
+  recountMatchesPlayed(s);
+
+  writeAll(all);
+}
+
+/** matches_played for every player, from the final matches they sat in. */
+export function recountMatchesPlayed(s: LocalSession): void {
   for (const p of s.players) {
     p.matches_played = s.participants.filter((mp) => {
       if (mp.player_id !== p.id) return false;
@@ -601,8 +626,39 @@ export function setLocalMatchScore(
       return m?.status === "final";
     }).length;
   }
+}
 
+/** Record that the host deleted this round on purpose (see discardedRoundIds). */
+export function noteDiscardedRound(s: LocalSession, roundId: string): void {
+  const list = s.discardedRoundIds ?? [];
+  if (!list.includes(roundId)) list.push(roundId);
+  // Bounded: only rounds that could still exist on the server matter, and a
+  // night has tens of rounds, not thousands.
+  s.discardedRoundIds = list.slice(-200);
+}
+
+/** Bookkeeping only: how many co-hosts the server says this session has. */
+export function setLocalCoHostCount(sessionId: string, count: number): void {
+  const all = readAll();
+  const s = all[sessionId];
+  if (!s || s.coHostCount === count) return;
+  s.coHostCount = count;
+  writeAll(all, { bookkeeping: true });
+}
+
+/**
+ * Fold a co-host's work into this phone's copy: replace the copy wholesale
+ * with the merged one `merge` returns, in the same synchronous step as the
+ * read, so a tap that lands while the server request was in flight is never
+ * overwritten by a stale snapshot. Returns whatever `merge` reported.
+ */
+export function updateLocalSession<T>(sessionId: string, merge: (s: LocalSession) => T): T | null {
+  const all = readAll();
+  const s = all[sessionId];
+  if (!s) return null;
+  const result = merge(s);
   writeAll(all);
+  return result;
 }
 
 export function setLocalSessionEnded(sessionId: string): void {
@@ -625,6 +681,7 @@ export function toSyncPayload(s: LocalSession): Record<string, unknown> {
     rests: s.rests,
     matches: s.matches,
     participants: s.participants,
+    discarded_round_ids: s.discardedRoundIds ?? [],
   };
 }
 

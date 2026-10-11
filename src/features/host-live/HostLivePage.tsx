@@ -32,6 +32,8 @@ import { publicUrl, shareUrl } from "../../lib/shareLink";
 import { getSessionPeople, SessionPeople, unlinkedPlayers, nonMembers } from "../../lib/supabase/sessionPeopleQueries";
 import PersonAvatar from "../shell/PersonAvatar";
 import { BottomSheet } from "../shell/Sheet";
+import CoHostSheet from "./CoHostSheet";
+import { listCoHosts, pullCoHostChanges, CoHost } from "../../lib/offline/coHostSync";
 
 /**
  * Overlays any locally-queued (not-yet-synced) scores on top of the server's
@@ -195,7 +197,10 @@ export default function HostLivePage() {
   const [endSessionError, setEndSessionError] = useState<unknown>(null);
 
   const [showManage, setShowManage] = useState(false);
-  const [showMenu, setShowMenu] = useState(false); // header overflow (⋯) dropdown → Manage / End
+  const [showMenu, setShowMenu] = useState(false); // header overflow (⋯) dropdown → Manage / Co-hosts / End
+  // Co-hosts (0065/0071): people who may enter scores and start the next round.
+  const [coHosts, setCoHosts] = useState<CoHost[]>([]);
+  const [showCoHosts, setShowCoHosts] = useState(false);
   const [manageError, setManageError] = useState<unknown>(null);
   // Which unplayed rounds a redraw would replace — loaded when the Manage
   // panel opens so the button can name them before it's tapped.
@@ -277,6 +282,11 @@ export default function HostLivePage() {
         setPeopleFailed(false);
       })
       .catch(() => setPeopleFailed(true)); // faces and the check are additive; never block the screen
+  }
+
+  function loadCoHosts() {
+    if (!sessionId || isLocalOnly(sessionId)) return;
+    listCoHosts(sessionId).then(setCoHosts).catch(() => {}); // additive; never block the screen
   }
 
   function loadStandings() {
@@ -398,6 +408,50 @@ export default function HostLivePage() {
     return () => window.clearInterval(t);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showEndConfirm]);
+
+  useEffect(loadCoHosts, [sessionId]);
+
+  // A co-host writes to the server, not to this phone. While the screen is
+  // open, pull their scores and rounds in, so the host sees them land and
+  // Next Round draws from them. Only when there IS a co-host: one small RPC
+  // every few seconds is fine for a night that needs it, wasteful for the rest.
+  const liveStatus = snapshot?.session.status;
+  useEffect(() => {
+    if (!sessionId || coHosts.length === 0 || liveStatus !== "live") return;
+    let stopped = false;
+    async function tick() {
+      if (stopped || (typeof document !== "undefined" && document.visibilityState !== "visible")) return;
+      try {
+        if (hasLocalSession(sessionId!)) {
+          const r = await pullCoHostChanges(sessionId!);
+          if (stopped || !r || (r.scores === 0 && r.rounds === 0)) return;
+          if (r.rounds > 0) setViewedIndex(0); // a co-host started the next round: show it
+          load();
+          loadRoundHistory();
+          loadStandings();
+        } else {
+          // This phone doesn't hold the session; the screen reads the server,
+          // which already has the co-host's work.
+          load();
+          loadRoundHistory();
+        }
+      } catch {
+        // Offline or a blip — the next tick tries again.
+      }
+    }
+    void tick();
+    const t = window.setInterval(tick, 6000);
+    const onVisible = () => {
+      if (document.visibilityState === "visible") void tick();
+    };
+    document.addEventListener("visibilitychange", onVisible);
+    return () => {
+      stopped = true;
+      window.clearInterval(t);
+      document.removeEventListener("visibilitychange", onVisible);
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [sessionId, coHosts.length, liveStatus]);
 
   // Every hook above this line. The two returns below stop early while the
   // session loads; a hook placed after them runs on some renders and not
@@ -994,6 +1048,11 @@ export default function HostLivePage() {
     setEndingSession(true);
     setEndSessionError(null);
     try {
+      // Take in a co-host's last scores before the night is closed on this
+      // phone. Best effort: the server keeps them regardless (0071).
+      if (coHosts.length > 0 && hasLocalSession(sessionId)) {
+        await pullCoHostChanges(sessionId).catch(() => null);
+      }
       const canShowPodium = podiumReachable(sessionId);
       await endSession(sessionId);
       setShowEndConfirm(false);
@@ -1064,6 +1123,21 @@ export default function HostLivePage() {
                     >
                       Manage session
                     </button>
+                    {!isLocalOnly(snapshot.session.id) && (
+                      <>
+                        <div className="h-px bg-line" />
+                        <button
+                          onClick={() => {
+                            setShowMenu(false);
+                            setShowCoHosts(true);
+                            loadPeople();
+                          }}
+                          className="w-full text-left px-4 py-3 text-[13px] font-semibold text-ink active:bg-surface-2"
+                        >
+                          Co-hosts{coHosts.length > 0 ? ` · ${coHosts.length}` : ""}
+                        </button>
+                      </>
+                    )}
                     <div className="h-px bg-line" />
                     <button
                       onClick={() => {
@@ -1097,6 +1171,14 @@ export default function HostLivePage() {
       <p className="text-[12px] text-warm-gray mb-4">
         {FORMAT_LABELS[snapshot.session.format] ?? snapshot.session.format}
         {snapshot.session.fixedPartnerStyle ? " · Fixed Partner" : ""} · Code <span className="font-mono tnum">{snapshot.session.joinCode}</span>
+        {!sessionEnded && coHosts.length > 0 && (
+          <>
+            {" · "}
+            <button onClick={() => { setShowCoHosts(true); loadPeople(); }} className="underline decoration-line underline-offset-2">
+              Co-host{coHosts.length > 1 ? "s" : ""}: {coHosts.map((c) => c.displayName.split(" ")[0]).join(", ")}
+            </button>
+          </>
+        )}
       </p>
 
       {/* Claim requests — late joiners taking over a manual spot */}
@@ -1732,6 +1814,18 @@ export default function HostLivePage() {
             </div>
           </div>
         </div>
+      )}
+
+      {showCoHosts && (
+        <CoHostSheet
+          sessionId={snapshot.session.id}
+          sessionName={snapshot.session.name}
+          hostUserId={hostUserId}
+          people={people}
+          coHosts={coHosts}
+          onChange={loadCoHosts}
+          onClose={() => setShowCoHosts(false)}
+        />
       )}
 
       {showManage && (

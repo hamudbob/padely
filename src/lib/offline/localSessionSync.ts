@@ -16,6 +16,7 @@ import {
 import { flush as flushPendingScores } from "../supabase/scoreSyncQueue";
 import { applySessionRatings } from "../supabase/ratingActions";
 import { applySessionResults } from "../supabase/resultActions";
+import { pullCoHostChanges } from "./coHostSync";
 
 /**
  * Push sessions that were started offline up to the server.
@@ -255,12 +256,28 @@ export async function replicateSession(sessionId: string): Promise<void> {
   inFlight.add(sessionId);
 
   // What this push carries. Changes made from here on are newer than this.
-  const pushedThrough = local.changedAt ?? null;
+  let pushedThrough = local.changedAt ?? null;
   let succeeded = false;
 
   try {
+    // Co-hosts write to the server directly. Take their work in BEFORE sending
+    // ours, so this push carries their scores and rounds back up instead of
+    // arguing with them. 0071 already stops a push from deleting a co-host's
+    // round or overwriting a newer score, so a failed pull is not a reason to
+    // hold back the push — the host's own scores are what matter most here.
+    let toPush = local;
+    if ((local.coHostCount ?? 0) > 0 && local.session.status === "live") {
+      try {
+        await pullCoHostChanges(sessionId);
+      } catch (e) {
+        console.warn("Co-host pull skipped for", sessionId, e);
+      }
+      toPush = getLocalSession(sessionId) ?? local;
+      pushedThrough = toPush.changedAt ?? null;
+    }
+
     const { data, error } = await supabase.rpc("sync_session_state", {
-      p_payload: toSyncPayload(local) as never,
+      p_payload: toSyncPayload(toPush) as never,
     });
     if (error) throw error;
 
