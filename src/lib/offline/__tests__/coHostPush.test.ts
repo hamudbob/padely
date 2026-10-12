@@ -96,10 +96,11 @@ describe("pushing a session that has co-hosts", () => {
     expect(pushed[0].matches[0].score_a).toBeNull();
   });
 
-  it("does not pull at all for a session with no co-hosts", async () => {
+  it("pulls first even with no co-hosts: the host's other device may be ahead", async () => {
     hostCopy(0);
     await replicateSession(SID);
-    expect(calls).toEqual(["sync_session_state"]);
+    expect(calls).toEqual(["get_scorer_session", "sync_session_state"]);
+    expect(pushed[0].matches[0].score_a).toBe(15);
   });
 
   it("sends the rounds the host deleted, by name", async () => {

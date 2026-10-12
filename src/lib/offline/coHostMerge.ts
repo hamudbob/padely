@@ -21,13 +21,16 @@ import { recountMatchesPlayed } from "./localSession";
  *    only if the server's was entered LATER (scored_at). A server score with
  *    no timestamp never replaces one the phone has.
  *
- *  - ROUNDS: a round the co-host drew past the phone's last round is added,
- *    with its matches, lineups and rests. Never one the host deleted on
- *    purpose (discardedRoundIds), and never at a sequence the phone already
- *    has — there the host's own round wins, as it does on the server.
+ *  - ROUNDS: a round drawn elsewhere (a co-host, or the host on another
+ *    device) past the phone's last round is added, with its matches, lineups
+ *    and rests. Never one the host deleted on purpose (discardedRoundIds).
+ *    At a sequence the phone already has, the phone's own round wins — unless
+ *    the server's has been PLAYED and the phone's hasn't: then the phone drew
+ *    its round while behind, and the server (0076) has already refused it.
  *
- *  - Nothing else. A co-host cannot add players, change courts or settings,
- *    so there is nothing else to pull, and the phone stays the authority.
+ *  - PLAYERS the phone has never seen (added on another device) are added.
+ *
+ *  - Nothing else. Courts, settings and player statuses stay the phone's.
  */
 
 /* ── What get_scorer_session returns (0071) ─────────────────────────────── */
@@ -136,26 +139,62 @@ export function mergeScorerState(local: LocalSession, server: ScorerSession): Me
     report.scores++;
   }
 
-  // ── Rounds a co-host drew ─────────────────────────────────────────────
+  // ── Players added somewhere else ──────────────────────────────────────
+  // Only the host adds players, but the host may have done it on another
+  // device. A live session never hard-deletes a player (leaving is a status),
+  // so one the phone lacks is new, not one it removed. Without this a round
+  // pulled below could seat someone this phone has never heard of.
+  for (const p of server.players) {
+    if (local.players.some((l) => l.id === p.id)) continue;
+    local.players.push({
+      id: p.id,
+      session_id: local.session.id,
+      display_name: p.display_name,
+      gender: p.gender,
+      linked_user_id: p.linked_user_id,
+      team_side: p.team_side,
+      preferred_side: p.preferred_side,
+      status: p.status,
+      matches_played: p.matches_played,
+      rests: p.rests,
+      joined_at: p.joined_at,
+    });
+  }
+
+  // ── Rounds drawn somewhere else ───────────────────────────────────────
+  // By a co-host, or by the host on another device (12 Oct 2026: a night
+  // run on the web while the phone's copy sat on round 1).
   const discarded = new Set(local.discardedRoundIds ?? []);
-  const haveIds = new Set(local.rounds.map((r) => r.id));
-  const haveSeqs = new Set(local.rounds.map((r) => r.sequence));
-  const lastSeq = local.rounds.reduce((max, r) => Math.max(max, r.sequence), 0);
+  const played = (roundId: string, ms: { round_id: string; status: string }[]) =>
+    ms.some((m) => m.round_id === roundId && m.status === "final");
 
   const incoming = server.rounds
-    .filter((r) => !haveIds.has(r.id) && !discarded.has(r.id) && r.sequence > lastSeq && !haveSeqs.has(r.sequence))
+    .filter((r) => !local.rounds.some((l) => l.id === r.id) && !discarded.has(r.id))
     .sort((a, b) => a.sequence - b.sequence);
 
-  // Only a run that continues the phone's own: 4, 5 after 3 — never 5 after 3
-  // with 4 missing, which would leave a hole the scheduler reads as a round
-  // nobody played.
-  let expected = lastSeq + 1;
   for (const r of incoming) {
-    if (r.sequence !== expected) break;
-    expected++;
-
     const matches = server.matches.filter((m) => m.round_id === r.id);
     if (matches.length === 0) continue;
+
+    const mine = local.rounds.find((l) => l.sequence === r.sequence);
+    if (mine) {
+      // Two rounds with the same number. The server's wins only if it has
+      // been PLAYED and this phone's hasn't: then this phone drew its round
+      // while behind, and 0076 already refused it. Otherwise this phone's
+      // own round stands, as it does on the server.
+      if (!played(r.id, server.matches) || played(mine.id, local.matches)) continue;
+      const gone = new Set(local.matches.filter((m) => m.round_id === mine.id).map((m) => m.id));
+      local.matches = local.matches.filter((m) => m.round_id !== mine.id);
+      local.participants = local.participants.filter((p) => !gone.has(p.match_id));
+      local.rests = local.rests.filter((x) => x.round_id !== mine.id);
+      local.rounds = local.rounds.filter((l) => l.id !== mine.id);
+    } else {
+      // Only a run that continues the phone's own: 4, 5 after 3 — never 5
+      // after 3 with 4 missing, which would leave a hole the scheduler reads
+      // as a round nobody played.
+      const lastSeq = local.rounds.reduce((max, l) => Math.max(max, l.sequence), 0);
+      if (r.sequence !== lastSeq + 1) continue;
+    }
 
     local.rounds.push({
       id: r.id,

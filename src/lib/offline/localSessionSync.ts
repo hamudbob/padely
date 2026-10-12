@@ -273,7 +273,10 @@ export async function replicateSession(sessionId: string): Promise<void> {
     // round or overwriting a newer score, so a failed pull is not a reason to
     // hold back the push — the host's own scores are what matter most here.
     let toPush = local;
-    if ((local.coHostCount ?? 0) > 0 && local.session.status === "live") {
+    // Not only when there is a co-host: the host may be running the same
+    // night on another device too (the web, say), and a push from a copy that
+    // is behind must carry the other device's rounds back, not ignore them.
+    if (local.session.status === "live") {
       try {
         await pullCoHostChanges(sessionId);
       } catch (e) {

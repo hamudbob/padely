@@ -32,7 +32,8 @@ import { replicateSession } from "../localSessionSync";
 
 let calls = 0;
 let reply: { data: unknown; error: unknown };
-g.__fakeRpc = () => {
+g.__fakeRpc = (name: string) => {
+  if (name !== "sync_session_state") return Promise.resolve({ data: null, error: { message: "That session does not exist here yet." } });
   calls++;
   return Promise.resolve(reply);
 };

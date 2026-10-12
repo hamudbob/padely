@@ -253,3 +253,87 @@ describe("the co-host's next round", () => {
     expect(mergeScorerState(local, srv).rounds).toBe(0);
   });
 });
+
+/**
+ * 12 Oct 2026: the night ran to round 7 on the web while the iPhone's copy
+ * sat on round 1. The phone must catch up, not pull the web back.
+ */
+describe("a copy that fell behind (the host's other device)", () => {
+  /** The server's night, rounds 1..n all played, plus an unplayed n+1. */
+  function serverAhead(n: number): ScorerSession {
+    const srv = server();
+    score(srv, M1, 15, 6, "2026-10-11T12:20:00Z");
+    score(srv, M2, 10, 11, "2026-10-11T12:21:00Z");
+    srv.rounds[0].status = "scored";
+    for (let seq = 2; seq <= n + 1; seq++) {
+      const rid = `r-web-${seq}`;
+      const done = seq <= n;
+      srv.rounds.push({ id: rid, sequence: seq, status: done ? "scored" : "in_progress", generation_reason: "web",
+                        seed_used: seq, generated_at: `2026-10-11T12:${10 + seq}:00Z`, added_by_scorer: null });
+      for (const [k, court] of [[1, C1], [2, C2]] as const) {
+        const half = k === 1 ? P.slice(0, 4) : P.slice(4);
+        srv.matches.push({ id: `m-web-${seq}-${k}`, round_id: rid, court_id: court, pair_a_id: null, pair_b_id: null,
+          status: done ? "final" : "not_started", outcome: done ? "win_a" : null,
+          score_a: done ? 15 : null, score_b: done ? 9 : null, scored_at: done ? `2026-10-11T12:${10 + seq}:30Z` : null,
+          participants: half.map((pid, i) => ({ player_id: pid, side: i < 2 ? "A" : "B" })) });
+      }
+    }
+    return srv;
+  }
+
+  it("takes every round it missed, in order, played and unplayed", () => {
+    const local = phone();
+    const r = mergeScorerState(local, serverAhead(6));
+    expect(r.rounds).toBe(6);
+    expect(local.rounds.map((x) => x.sequence)).toEqual([1, 2, 3, 4, 5, 6, 7]);
+    expect(local.rounds.find((x) => x.sequence === 7)!.status).toBe("in_progress");
+    expect(local.matches.filter((m) => m.status === "final").length).toBe(12);
+  });
+
+  it("a round this phone drew while behind gives way to the played one", () => {
+    const local = phone();
+    local.matches.forEach((m) => { m.status = "final"; m.score_a = 15; m.score_b = 6; m.outcome = "win_a"; m.scored_at = "2026-10-11T12:20:00Z"; });
+    local.rounds[0].status = "scored";
+    local.rounds.push({ id: "stale-r2", session_id: SID, sequence: 2, status: "in_progress",
+                        generation_reason: "phone", seed_used: 99, generated_at: "2026-10-12T09:00:00Z" });
+    local.matches.push({ id: "stale-m2", round_id: "stale-r2", court_id: C1, pair_a_id: null, pair_b_id: null,
+                         score_a: null, score_b: null, outcome: null, status: "not_started", scored_at: null });
+    local.participants.push({ match_id: "stale-m2", player_id: P[0], side: "A" });
+
+    mergeScorerState(local, serverAhead(3));
+    expect(local.rounds.map((x) => x.id)).toEqual([R1, "r-web-2", "r-web-3", "r-web-4"]);
+    expect(local.matches.some((m) => m.id === "stale-m2")).toBe(false);
+    expect(local.participants.some((p) => p.match_id === "stale-m2")).toBe(false);
+  });
+
+  it("but a round this phone has PLAYED is never replaced", () => {
+    const local = phone();
+    local.rounds.push({ id: "mine-r2", session_id: SID, sequence: 2, status: "scored",
+                        generation_reason: "phone", seed_used: 99, generated_at: "2026-10-12T09:00:00Z" });
+    local.matches.push({ id: "mine-m2", round_id: "mine-r2", court_id: C1, pair_a_id: null, pair_b_id: null,
+                         score_a: 21, score_b: 3, outcome: "win_a", status: "final", scored_at: "2026-10-12T09:10:00Z" });
+    mergeScorerState(local, serverAhead(3));
+    expect(local.rounds.find((x) => x.sequence === 2)!.id).toBe("mine-r2");
+  });
+
+  it("a player added on the other device comes along with the rounds", () => {
+    const srv = serverAhead(2);
+    srv.players.push({ id: "p-new", display_name: "Late", gender: "M", status: "active", team_side: null,
+      preferred_side: null, matches_played: 1, rests: 0, joined_at: "2026-10-11T12:30:00Z", linked_user_id: null, avatar_url: null });
+    srv.matches.find((m) => m.id === "m-web-3-1")!.participants[0].player_id = "p-new";
+    const local = phone();
+    mergeScorerState(local, srv);
+    expect(local.players.map((p) => p.id)).toContain("p-new");
+    const seated = local.participants.map((p) => p.player_id);
+    expect(seated.every((id) => local.players.some((p) => p.id === id))).toBe(true);
+  });
+
+  it("merging it twice changes nothing the second time", () => {
+    const local = phone();
+    const srv = serverAhead(4);
+    mergeScorerState(local, srv);
+    const before = JSON.stringify(local);
+    expect(mergeScorerState(local, srv)).toEqual({ scores: 0, rounds: 0 });
+    expect(JSON.stringify(local)).toBe(before);
+  });
+});

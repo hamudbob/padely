@@ -109,9 +109,9 @@ async function run(onlyId?: string): Promise<string[]> {
 
       if (row.status === "ended" && localStatus === "live") {
         // Ended elsewhere: the idle sweep, or the host on another device.
-        // Take any co-host scores in first, while the copy is still live, so
-        // the podium this phone builds has them.
-        if ((local.coHostCount ?? 0) > 0) await pullCoHostChanges(row.id).catch(() => null);
+        // Take in what was scored elsewhere first (a co-host, or the host's other
+        // device), while the copy is still live, so the podium this phone builds has it.
+        await pullCoHostChanges(row.id).catch(() => null);
         setLocalSessionEnded(row.id, row.ended_at);
         changed.push(row.id);
         continue;
@@ -129,7 +129,7 @@ async function run(onlyId?: string): Promise<string[]> {
         // the server applies its own rule for this one session.
         const { data, error } = await db.rpc("end_session_if_idle", { p_session_id: row.id });
         if (!error && data === "ended") {
-          if ((local.coHostCount ?? 0) > 0) await pullCoHostChanges(row.id).catch(() => null);
+          await pullCoHostChanges(row.id).catch(() => null);
           setLocalSessionEnded(row.id, row.last_activity_at);
           changed.push(row.id);
         }

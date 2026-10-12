@@ -451,7 +451,10 @@ export default function HostLivePage() {
   // every few seconds is fine for a night that needs it, wasteful for the rest.
   const liveStatus = snapshot?.session.status;
   useEffect(() => {
-    if (!sessionId || coHosts.length === 0 || liveStatus !== "live") return;
+    // Every live session, not only one with a co-host: the same night may be
+    // open on another device of the host's. Quicker when someone else is
+    // known to be scoring.
+    if (!sessionId || liveStatus !== "live") return;
     let stopped = false;
     async function tick() {
       if (stopped || (typeof document !== "undefined" && document.visibilityState !== "visible")) return;
@@ -474,7 +477,7 @@ export default function HostLivePage() {
       }
     }
     void tick();
-    const t = window.setInterval(tick, 6000);
+    const t = window.setInterval(tick, coHosts.length > 0 ? 6000 : 15000);
     const onVisible = () => {
       if (document.visibilityState === "visible") void tick();
     };

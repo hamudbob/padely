@@ -109,7 +109,7 @@ describe("idle, and cron hasn't run", () => {
     local("s1", { lastChangeAgo: 13 * H });
     rows.s1 = { id: "s1", status: "live", ended_at: null, reopened_at: null, last_activity_at: new Date(Date.now() - 13 * H).toISOString() };
     expect(await reconcileSessionStatus()).toEqual(["s1"]);
-    expect(rpcCalls).toEqual(["end_session_if_idle"]);
+    expect(rpcCalls.filter((n) => n !== "get_scorer_session")).toEqual(["end_session_if_idle"]);
     expect(getLocalSession("s1")!.session.status).toBe("ended");
   });
 
