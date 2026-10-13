@@ -256,7 +256,8 @@ export function codeFor(error: unknown, where = ""): string {
   const status = e.status ?? 0;
 
   // 1. Database and API codes — the most reliable identity there is.
-  if (pg === "PGRST116") return "PLR-2002"; // single-object request, wrong row count
+  // single-object request, wrong row count: none is absence, several is a duplicate
+  if (pg === "PGRST116") return /\b0 rows\b/.test(e.details ?? "") ? "PLR-3002" : "PLR-2002";
   if (pg === "23505") return "PLR-9004";
   if (pg === "42501") return "PLR-9003";
   if (pg === "23514") return "PLR-3001"; // check constraint — a rejected format

@@ -27,7 +27,8 @@ import {
 import { supabase } from "../../lib/supabase/client";
 import { notifyLiveUpdate } from "../../lib/supabase/liveChannel";
 import { SkeletonScreen, SkeletonLine, SkeletonCourts } from "../shell/Skeleton";
-import { isLocalOnly, hasLocalSession, setLocalPlayerLink, getLocalSession } from "../../lib/offline/localSession";
+import { isLocalOnly, hasLocalSession, setLocalPlayerLink, getLocalSession, wasSetAsideAsGone } from "../../lib/offline/localSession";
+import { invalidateQuery } from "../../lib/cache/useCachedQuery";
 import { publicUrl, shareUrl } from "../../lib/shareLink";
 import { getSessionPeople, SessionPeople, unlinkedPlayers, nonMembers } from "../../lib/supabase/sessionPeopleQueries";
 import PersonAvatar from "../shell/PersonAvatar";
@@ -175,6 +176,10 @@ export default function HostLivePage() {
   const [tab, setTab] = useState<Tab>("round");
   const [snapshot, setSnapshot] = useState<HostLiveSnapshot | null>(null);
   const [error, setError] = useState<unknown>(null);
+  // Not on the server and not on this device: deleted, or not this account's.
+  // "deleted" when this device set its own copy aside because the server
+  // refused it (13 Oct 2026: ending a days-old session still on Home).
+  const [missing, setMissing] = useState<null | "deleted" | "unknown">(null);
   const [pickerMatchId, setPickerMatchId] = useState<string | null>(null);
   const [pickerSide, setPickerSide] = useState<"A" | "B" | null>(null);
   const [pendingA, setPendingA] = useState<number | null>(null);
@@ -282,7 +287,14 @@ export default function HostLivePage() {
         }
         setSnapshot(snap);
       })
-      .catch((err) => setError(withFallback(err, "Could not load this session.")));
+      .catch((err) => {
+        if (err instanceof Error && err.message === "Session not found." && sessionId && !hasLocalSession(sessionId)) {
+          invalidateQuery("home:sessions"); // so Home stops offering it
+          setMissing(wasSetAsideAsGone(sessionId) ? "deleted" : "unknown");
+          return;
+        }
+        setError(withFallback(err, "Could not load this session."));
+      });
   }
 
   function loadPeople() {
@@ -494,6 +506,25 @@ export default function HostLivePage() {
   // session loads; a hook placed after them runs on some renders and not
   // others, and React fails the whole screen with error #310. (That is
   // exactly what the end-check effect did on 11 Oct 2026.)
+  if (missing) {
+    return (
+      <div className="mx-auto max-w-sm min-h-screen bg-ivory px-4 py-8 safe-top">
+        <h1 className="font-serif text-[24px] font-semibold text-graphite leading-tight">This session isn't here any more</h1>
+        <p className="mt-2 text-[14px] leading-relaxed text-warm-gray">
+          {missing === "deleted"
+            ? "It was deleted from the server (from another device, or by an admin), so it has been taken off this device too. Nothing else is affected."
+            : "It may have been deleted, or it belongs to another account. If someone added you as a co-host, open it from the link they shared."}
+        </p>
+        <Link
+          to="/play"
+          replace
+          className="inline-block mt-6 rounded-full px-5 py-3 font-semibold text-[14px] text-ivory bg-graphite active:opacity-90"
+        >
+          Back to home
+        </Link>
+      </div>
+    );
+  }
   if (error) {
     return (
       <div className="mx-auto max-w-sm min-h-screen bg-ivory px-4 py-8 safe-top">

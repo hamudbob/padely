@@ -114,7 +114,10 @@ export async function getHostLiveSnapshot(sessionId: string): Promise<HostLiveSn
         .from("sessions")
         .select("id, name, format, scoring_format, join_code, public_token, status, team_score_mode, fixed_partner_style, ranking_basis")
         .eq("id", sessionId)
-        .single(),
+        // maybeSingle: a session that no longer exists is "not found" below,
+        // not PostgREST's "Cannot coerce the result to a single JSON object"
+        // (13 Oct 2026: reported as "Expected one row, found several").
+        .maybeSingle(),
       supabase.from("courts").select("id, display_name, available").eq("session_id", sessionId).order("ordinal", { ascending: true }),
       supabase.from("players").select("id, display_name, gender, status, team_side, matches_played").eq("session_id", sessionId),
       supabase.from("rounds").select("id, sequence").eq("session_id", sessionId).order("sequence", { ascending: false }).limit(1),

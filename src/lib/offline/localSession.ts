@@ -417,6 +417,16 @@ export function setAsideGoneSession(sessionId: string): void {
   writeAll(all, { bookkeeping: true });
 }
 
+/** Was this session set aside because the server no longer has it? */
+export function wasSetAsideAsGone(sessionId: string): boolean {
+  try {
+    const gone = JSON.parse(localStorage.getItem(GONE_KEY) ?? "{}") as Record<string, unknown>;
+    return sessionId in gone;
+  } catch {
+    return false;
+  }
+}
+
 /** Drop sessions that synced more than a day ago. Called at startup. */
 export function forgetSyncedSessions(): void {
   const all = readAll();
