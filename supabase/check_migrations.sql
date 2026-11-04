@@ -15,7 +15,7 @@
 --   -     nothing of its own left to detect: a later migration replaced the
 --         same function (see the note), or it only changed grants or data
 --
--- Generated from supabase/migrations (0001-0076). Regenerate with
+-- Generated from supabase/migrations (0001-0077). Regenerate with
 -- scripts/gen_migration_check.py after adding a migration.
 -- =====================================================================
 select migration,
@@ -97,6 +97,7 @@ select migration,
   ('0073_push_notifications', ((to_regclass('public.push_config') is not null) and (to_regclass('public.push_log') is not null) and (exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'notification_path')) and (exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'trg_push_notifications')))::boolean, 'table push_config, table push_log, function notification_path, function trg_push_notifications'),
   ('0074_health_ignores_empty_sessions', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'admin_health' and p.prosrc like '%and exists (select 1 from matches m join rounds r on r.id = m.round_id%')))::boolean, 'new code in admin_health()'),
   ('0075_admin_session_real_counts', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'admin_session_detail' and p.prosrc like '%(select count(*) from match_participants mp%')))::boolean, 'new code in admin_session_detail()'),
-  ('0076_stale_device_cannot_delete_played_rounds', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'sync_session_state' and p.prosrc like '%v_skip       uuid[] := ''{}'';%')))::boolean, 'new code in sync_session_state()')
+  ('0076_stale_device_cannot_delete_played_rounds', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'sync_session_state' and p.prosrc like '%v_skip       uuid[] := ''{}'';%')))::boolean, 'new code in sync_session_state()'),
+  ('0077_every_account_has_a_team', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'ensure_team_for_user')) and (exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'trg_auth_user_team')))::boolean, 'function ensure_team_for_user, function trg_auth_user_team')
 ) as t(migration, ok, checks)
  order by (case when ok then 2 when ok is null then 1 else 0 end), migration;
