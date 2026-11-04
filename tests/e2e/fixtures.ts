@@ -702,9 +702,9 @@ export interface RatingSnapshot {
   rating: number;
   games: number;
   /**
-   * e.g. "main lagi", "cacing sr", "jago". The strip uppercases in CSS, so the
-   * rendered text is "CACING SR"; this is lower-cased back to the value
-   * `tierFor()` actually returns.
+   * e.g. "play more", "challenger", "master". The strip uppercases in CSS, so
+   * the rendered text is "CHALLENGER"; this is the lower-cased form of what
+   * `tierFor()` returns ("Challenger").
    */
   tier: string;
 }

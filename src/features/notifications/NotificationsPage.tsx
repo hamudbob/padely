@@ -5,11 +5,13 @@ import {
   markAllNotificationsRead,
   markNotificationRead,
   deleteNotification,
+  deleteAllNotifications,
   pruneNotifications,
   AppNotification,
 } from "../../lib/supabase/notificationQueries";
 import { respondInvite } from "../../lib/supabase/clubJoinQueries";
 import { useBackNav } from "../../lib/useBackNav";
+import ConfirmSheet, { ConfirmRequest } from "../shell/ConfirmSheet";
 
 function timeAgo(iso: string): string {
   const secs = Math.max(0, (Date.now() - new Date(iso).getTime()) / 1000);
@@ -27,6 +29,7 @@ export default function NotificationsPage() {
   const back = useBackNav("/profile");
   const [items, setItems] = useState<AppNotification[] | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 
   function load() {
     getNotifications().then(setItems).catch(() => setItems([]));
@@ -62,6 +65,27 @@ export default function NotificationsPage() {
     deleteNotification(n.id).catch(() => load());
   }
 
+  function askClearAll() {
+    const pendingInvites = (items ?? []).filter((n) => n.type === "invite" && !!n.data?.invite_id).length;
+    setConfirm({
+      title: "Clear all notifications?",
+      body:
+        pendingInvites > 0
+          ? "This removes every notification, including club invites. You can still join a club later from its own page or a new invite."
+          : "This removes every notification. It can't be undone.",
+      confirmLabel: "Clear all",
+      tone: "danger",
+      run: async () => {
+        setItems([]); // optimistic
+        try {
+          await deleteAllNotifications();
+        } catch {
+          load();
+        }
+      },
+    });
+  }
+
   async function respond(n: AppNotification, accept: boolean) {
     const inviteId = n.data?.invite_id as string | undefined;
     if (!inviteId) return;
@@ -89,7 +113,14 @@ export default function NotificationsPage() {
         <div className="w-9" />
       </div>
 
-      <h1 className="font-serif text-[26px] font-medium tracking-tight text-graphite mb-4">Notifications</h1>
+      <div className="flex items-baseline justify-between mb-4">
+        <h1 className="font-serif text-[26px] font-medium tracking-tight text-graphite">Notifications</h1>
+        {items && items.length > 0 && (
+          <button onClick={askClearAll} className="text-[12.5px] font-semibold text-warm-gray active:text-ink px-1 py-1">
+            Clear all
+          </button>
+        )}
+      </div>
 
       {items === null ? (
         <div className="space-y-2">{[0, 1, 2].map((i) => <div key={i} className="h-[64px] rounded-2xl skeleton" />)}</div>
@@ -131,6 +162,7 @@ export default function NotificationsPage() {
           })}
         </div>
       )}
+      {confirm && <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />}
     </div>
   );
 }

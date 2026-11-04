@@ -17,6 +17,15 @@ type Stage = "checking" | "ready" | "invalid" | "done";
  * URL on load (detectSessionInUrl) and emits PASSWORD_RECOVERY, which gives us
  * a short-lived session that's allowed to call updateUser({ password }).
  *
+ * Since Nov 2026 the email can also carry `?token_hash=…&type=recovery`
+ * (the Supabase "Reset password" template points here with {{ .TokenHash }}).
+ * That one is verified here with verifyOtp, and unlike the `?code=` link it
+ * works in ANY browser or in the app: the code link only works in the browser
+ * that asked for it, because the PKCE verifier lives there, which is why
+ * "the link doesn't work" kept coming back from people who asked on the app
+ * and opened the email in Gmail. The code link still works for emails already
+ * sent with the old template.
+ *
  * We wait for that rather than assuming: landing here with no token (someone
  * bookmarked the page, or the link expired) has to show a real dead end instead
  * of a form that can't work. An expired link comes back as #error=... in the
@@ -46,6 +55,30 @@ export default function ResetPasswordPage() {
     if (hashError) {
       setError(hashError.replace(/\+/g, " "));
       setStage("invalid");
+      return;
+    }
+
+    // token_hash link: verify it ourselves. One-time, so it is dropped from
+    // the address straight away; a reload must not try to spend it twice.
+    const query = new URLSearchParams(window.location.search);
+    const tokenHash = query.get("token_hash");
+    if (tokenHash) {
+      window.history.replaceState(null, "", window.location.pathname);
+      supabase.auth
+        .verifyOtp({ token_hash: tokenHash, type: "recovery" })
+        .then(({ data, error: verifyError }) => {
+          if (verifyError || !data.session) {
+            setError(verifyError ?? "This link has already been used or has expired.");
+            setStage("invalid");
+            return;
+          }
+          setEmail(data.session.user?.email ?? null);
+          setStage("ready");
+        })
+        .catch((err: unknown) => {
+          setError(err);
+          setStage("invalid");
+        });
       return;
     }
 

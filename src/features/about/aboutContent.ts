@@ -228,7 +228,7 @@ export const GROUPS: Group[] = [
         q: { en: "What is a club for?", id: "Untuk apa klub itu?" },
         a: {
           en: [
-            "A club turns a group that plays together regularly into something with a memory: a league table across many sessions, a schedule people can RSVP to, and a record of who has won what.",
+            "A club turns a group that plays together regularly into something with a memory: a league table across many sessions, Call-ups people can answer, and a record of who has won what.",
             "You can use the app perfectly well without one — a club is for groups that keep score across weeks, not just within one evening.",
           ],
           id: [
@@ -256,8 +256,8 @@ export const GROUPS: Group[] = [
         q: { en: "What can admins do that members can't?", id: "Apa yang bisa dilakukan admin tapi tidak bisa oleh anggota?" },
         a: {
           en: [
-            "Admins accept people into the club, schedule sessions, and edit the club's name, logo and league settings. The owner can additionally promote and remove admins.",
-            "Members can see everything about the club — the league, the champions hall, the roster — and RSVP to sessions.",
+            "Admins accept people into the club, post Call-ups, and edit the club's name, logo and league settings. The owner can additionally promote and remove admins.",
+            "Members can see everything about the club — the league, the champions hall, the roster — and answer Call-ups.",
           ],
           id: [
             "Admin menerima orang ke dalam klub, menjadwalkan sesi, serta mengubah nama, logo, dan pengaturan liga klub. Pemilik juga bisa mengangkat dan menghapus admin.",
@@ -267,15 +267,15 @@ export const GROUPS: Group[] = [
       },
       {
         key: "scheduled",
-        q: { en: "What are scheduled sessions and RSVPs?", id: "Apa itu sesi terjadwal dan konfirmasi kehadiran?" },
+        q: { en: "What is a Call-up?", id: "Apa itu Call-up?" },
         a: {
           en: [
-            "An admin can put a session on the calendar before it happens. Every member is notified and can answer going, maybe or can't make it, so the host knows the numbers in advance.",
-            "When the time comes, the admin starts the real session from that entry.",
+            "A Call-up is a club night posted before it happens. Every member is notified and can answer I'm in, maybe or can't make it, so the host knows the numbers in advance.",
+            "When the time comes, the admin starts the real session from the Call-up.",
           ],
           id: [
-            "Admin bisa memasukkan sesi ke kalender sebelum hari-H. Semua anggota mendapat notifikasi dan bisa menjawab ikut, mungkin, atau tidak bisa, sehingga host tahu jumlahnya lebih awal.",
-            "Saat waktunya tiba, admin memulai sesi sungguhan dari entri tersebut.",
+            "Call-up adalah malam klub yang diumumkan sebelum hari-H. Semua anggota mendapat notifikasi dan bisa menjawab ikut, mungkin, atau tidak bisa, sehingga host tahu jumlahnya lebih awal.",
+            "Saat waktunya tiba, admin memulai sesi sungguhan dari Call-up tersebut.",
           ],
         },
       },

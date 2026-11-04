@@ -283,7 +283,7 @@ export default function TeamsPage() {
                 You're not in a club yet.
               </p>
               <p className="text-[12.5px] text-warm-gray leading-relaxed mt-1.5">
-                Clubs keep a league table, schedule sessions and track champions. Search above for the one you play with —
+                Clubs keep a league table, post Call-ups and track champions. Search above for the one you play with —
                 or start your own below.
               </p>
             </div>

@@ -17,6 +17,7 @@
 
 import { Match, MatchHistory, PlayerFairnessState, PlayerId, RoundResult, Rng, pairKey } from "./types";
 import { selectPlayersForRound, hasUnavoidableConsecutiveRest, balancePoolByKey } from "./fairness";
+import { splitRepeatCost } from "./courtSplit";
 
 export type Gender = "M" | "F";
 
@@ -43,38 +44,83 @@ function bestGenderSplit(
   group: [PlayerId, PlayerId, PlayerId, PlayerId],
   genderById: Map<PlayerId, Gender>,
   history?: MatchHistory,
-): { teamA: [PlayerId, PlayerId]; teamB: [PlayerId, PlayerId] } {
+): { teamA: [PlayerId, PlayerId]; teamB: [PlayerId, PlayerId]; nonMixed: number; cost: number } {
   const [a, b, c, d] = group;
   const candidates: [[PlayerId, PlayerId], [PlayerId, PlayerId]][] = [
     [[a, d], [b, c]], // default: rank1+rank4 vs rank2+rank3 (most balanced)
     [[a, b], [c, d]],
     [[a, c], [b, d]],
   ];
-  const repeatCost = (teamA: [PlayerId, PlayerId], teamB: [PlayerId, PlayerId]): number => {
-    if (!history) return 0;
-    let partnerRepeat = 0;
-    let opponentRepeat = 0;
-    if (history.partnerPairsSeen.has(pairKey(teamA[0], teamA[1]))) partnerRepeat++;
-    if (history.partnerPairsSeen.has(pairKey(teamB[0], teamB[1]))) partnerRepeat++;
-    for (const x of teamA) for (const y of teamB) if (history.opponentPairsSeen.has(pairKey(x, y))) opponentRepeat++;
-    return partnerRepeat * 100 + opponentRepeat * 10;
-  };
   // Gender-mix is the hard priority; among the equally-mixed splits, prefer the
-  // freshest (fewest repeat partners/opponents); the balanced default is first
-  // so it wins any remaining tie. Never fails — always returns a valid split.
+  // freshest. Repeats are counted the way plain Mexicano counts them since Oct
+  // 2026 (courtSplit.splitRepeatCost): a third time together costs four times
+  // a second, so "seen before" no longer hides the difference between a 2nd
+  // and a 5th partnership. The balanced default is first, so it wins any
+  // remaining tie. Never fails — always returns a valid split.
   let best = candidates[0];
   let bestMixed = -1;
   let bestCost = Infinity;
   for (const [teamA, teamB] of candidates) {
     const mixedCount = (isMixedTeam(teamA, genderById) ? 1 : 0) + (isMixedTeam(teamB, genderById) ? 1 : 0);
-    const cost = repeatCost(teamA, teamB);
+    const cost = splitRepeatCost(teamA, teamB, history);
     if (mixedCount > bestMixed || (mixedCount === bestMixed && cost < bestCost)) {
       bestMixed = mixedCount;
       bestCost = cost;
       best = [teamA, teamB];
     }
   }
-  return { teamA: best[0], teamB: best[1] };
+  return { teamA: best[0], teamB: best[1], nonMixed: 2 - bestMixed, cost: bestCost };
+}
+
+/** A team that can't be mixed outweighs any amount of repeat partnering. */
+const NON_MIXED_WEIGHT = 1_000_000;
+/** Same as plain Mexicano: a swap is worth it only when it spares a repeat partner. */
+const SWAP_COST = 90;
+
+/**
+ * Plain Mexicano's court-boundary rule (mexicano.arrangeCourts), with gender
+ * mixing kept as the first priority: the 4th and 5th (8th and 9th, ...) may
+ * trade courts when that spares someone a repeat partner, and never when it
+ * would leave a team unmixed that wasn't. Players one place apart in the
+ * standings are as close in level as it gets, so the courts stay Mexicano.
+ * Deterministic: the same standings and history always give the same courts.
+ */
+export function arrangeMixCourts(
+  ranked: PlayerId[],
+  genderById: Map<PlayerId, Gender>,
+  history?: MatchHistory,
+): PlayerId[] {
+  const courts = Math.floor(ranked.length / 4);
+  if (!history || courts < 2) return ranked;
+
+  const costOf = (order: PlayerId[]): number => {
+    let c = 0;
+    for (let i = 0; i + 3 < order.length; i += 4) {
+      const split = bestGenderSplit(order.slice(i, i + 4) as [PlayerId, PlayerId, PlayerId, PlayerId], genderById, history);
+      c += split.nonMixed * NON_MIXED_WEIGHT + split.cost;
+    }
+    return c;
+  };
+
+  let best = ranked;
+  let bestCost = costOf(ranked);
+  for (let mask = 1; mask < 1 << (courts - 1); mask++) {
+    const order = [...ranked];
+    let swaps = 0;
+    for (let b = 0; b < courts - 1; b++) {
+      if (mask & (1 << b)) {
+        const i = b * 4 + 3;
+        [order[i], order[i + 1]] = [order[i + 1], order[i]];
+        swaps++;
+      }
+    }
+    const c = costOf(order) + swaps * SWAP_COST;
+    if (c < bestCost) {
+      best = order;
+      bestCost = c;
+    }
+  }
+  return best;
 }
 
 export interface GenerateMixMexicanoRoundInput {
@@ -147,7 +193,11 @@ export function generateMixMexicanoRound(input: GenerateMixMexicanoRoundInput): 
     }
     ranked = best;
   } else {
-    ranked = [...playPool].sort((a, b) => standings.rankValue(b) - standings.rankValue(a));
+    ranked = arrangeMixCourts(
+      [...playPool].sort((a, b) => standings.rankValue(b) - standings.rankValue(a)),
+      genderById,
+      history,
+    );
   }
 
   const matches: Match[] = [];

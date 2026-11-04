@@ -28,9 +28,10 @@ import { PeerStat } from "../../lib/supabase/insightsQueries";
 export type FormResult = "W" | "L" | "D";
 
 /**
- * The club's own tier names, set by Hamud. Deliberately in-jokes rather than
- * generic labels — "cacing sr" is a word from the group chat and people will
- * actually talk about it, which "Steady" never managed.
+ * The tier names, set by Hamud in Nov 2026: Starter, Rally, Challenger,
+ * Competitor, Master, Elite (replacing the group-chat names fuad / cacing /
+ * cacing sr / lumayan / jago / ahmad, which meant nothing outside the club).
+ * Not Bronze/Silver/Gold: official padel grading already uses those.
  *
  * The BANDS are tuned to how ratings really spread here, which is far narrower
  * than the raw Glicko scale suggests. Simulating 200 average players on this
@@ -39,13 +40,13 @@ export type FormResult = "W" | "L" | "D";
  * flipped people's label on noise alone. Measured over those players the old
  * bands changed a label 2.34 times on average; these change it 0.48 times.
  *
- * The middle band ("cacing sr") is 150 wide and centred on 1500, the starting
+ * The middle band (Challenger) is 150 wide and centred on 1500, the starting
  * rating, so one bad night can't demote someone who hasn't actually got worse.
  * It's also where most of the club will sit — that's the joke working, not a
  * bug.
  *
  * The top three bands were widened downward in Aug 2026 (1575/1700/1800,
- * from 1575/1725/1850). "ahmad" at 1850 was unreachable — the strongest player
+ * from 1575/1725/1850). The top band at 1850 was unreachable — the strongest player
  * in a 200-player simulation settled on 1849 — which made the best tier a
  * rumour nobody could ever verify. At 1800 it's rare but real.
  */
@@ -61,20 +62,19 @@ export interface Tier {
 }
 
 /**
- * The ladder, bottom to top. The first and last names are deliberately not
- * shown on the tier sheet: the bottom one because being told you're at the
- * bottom of a named ladder is worse than not knowing, and the top one because
- * an unnamed prize is a better prize. Both still show on the person's own
+ * The ladder, bottom to top. Only the top name is withheld on the tier sheet
+ * (Hamud, Nov 2026): an unnamed prize is a better prize. "Starter" reads as a
+ * beginning rather than a verdict, so the bottom one is shown. Both still show on the person's own
  * strip once they're in it — the secret is what the band is CALLED before you
  * get there, not where you are.
  */
 export const TIERS: Tier[] = [
-  { from: 0, to: 1299, name: "fuad", secret: true },
-  { from: 1300, to: 1424, name: "cacing" },
-  { from: 1425, to: 1574, name: "cacing sr" },
-  { from: 1575, to: 1699, name: "lumayan" },
-  { from: 1700, to: 1799, name: "jago" },
-  { from: 1800, to: null, name: "ahmad", secret: true },
+  { from: 0, to: 1299, name: "Starter" },
+  { from: 1300, to: 1424, name: "Rally" },
+  { from: 1425, to: 1574, name: "Challenger" },
+  { from: 1575, to: 1699, name: "Competitor" },
+  { from: 1700, to: 1799, name: "Master" },
+  { from: 1800, to: null, name: "Elite", secret: true },
 ];
 
 export function tierFor(rating: number, provisional: boolean): string {
@@ -82,7 +82,7 @@ export function tierFor(rating: number, provisional: boolean): string {
   // still too wide to trust the number at all. Takes about three sessions to
   // clear, win or lose — hence an instruction ("play more") rather than a rank,
   // which is the one label that can't be misread as a verdict on a new player.
-  if (provisional) return "main lagi";
+  if (provisional) return "Play more";
   const band = TIERS.find((t) => rating >= t.from && (t.to === null || rating <= t.to));
   return band?.name ?? TIERS[TIERS.length - 1].name;
 }

@@ -28,6 +28,7 @@ import { supabase } from "../../lib/supabase/client";
 import { notifyLiveUpdate } from "../../lib/supabase/liveChannel";
 import { SkeletonScreen, SkeletonLine, SkeletonCourts } from "../shell/Skeleton";
 import { isLocalOnly, hasLocalSession, setLocalPlayerLink, getLocalSession, wasSetAsideAsGone } from "../../lib/offline/localSession";
+import SyncStatusBanner from "./SyncStatusBanner";
 import { invalidateQuery } from "../../lib/cache/useCachedQuery";
 import { publicUrl, shareUrl } from "../../lib/shareLink";
 import { getSessionPeople, SessionPeople, unlinkedPlayers, nonMembers } from "../../lib/supabase/sessionPeopleQueries";
@@ -1248,6 +1249,9 @@ export default function HostLivePage() {
           </>
         )}
       </p>
+
+      {/* Not reaching the server (15 Oct 2026: a whole night, silently) */}
+      {hasLocalSession(snapshot.session.id) && <SyncStatusBanner sessionId={snapshot.session.id} />}
 
       {/* Claim requests — late joiners taking over a manual spot */}
       {!sessionEnded && claims.length > 0 && (

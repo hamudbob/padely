@@ -740,33 +740,33 @@ export const FEATURES: Feature[] = [
     slug: "club-events",
     family: "club",
     poster: "calendar",
-    name: { en: "Scheduled sessions", id: "Sesi terjadwal" },
+    name: { en: "Call-ups", id: "Call-up" },
     promise: {
       en: "Next Thursday, on a page — with a straight answer from everyone about whether they're coming.",
       id: "Kamis depan, dalam satu halaman — dengan jawaban jelas dari semua orang soal datang atau tidak.",
     },
     what: {
       en: [
-        "An admin puts a session on the club's calendar before it happens: date, time, and where. Every member is notified, and each of them answers going, maybe, or can't make it.",
+        "An admin posts a Call-up for a night before it happens: date, time, and where. Every member is notified, and each of them answers I'm in, maybe, or can't make it.",
         "The point is knowing the numbers before you book courts. Six going and two maybes is two courts; eleven going is three and a longer night. Nobody has to scroll back through a chat counting thumbs-up emojis.",
       ],
       id: [
-        "Admin memasukkan sesi ke kalender klub sebelum hari-H: tanggal, jam, dan lokasi. Semua anggota mendapat notifikasi, dan masing-masing menjawab ikut, mungkin, atau tidak bisa.",
+        "Admin memasang Call-up untuk sebuah malam sebelum hari-H: tanggal, jam, dan lokasi. Semua anggota mendapat notifikasi, dan masing-masing menjawab ikut, mungkin, atau tidak bisa.",
         "Intinya adalah mengetahui jumlah pemain sebelum memesan lapangan. Enam ikut dan dua mungkin berarti dua lapangan; sebelas ikut berarti tiga lapangan dan malam yang lebih panjang. Tidak ada yang perlu menggulir grup chat menghitung emoji jempol.",
       ],
     },
     steps: {
       en: [
-        "An admin creates the entry with the date, the time and the place.",
-        "Members are notified and answer going, maybe or can't make it.",
+        "An admin posts the Call-up with the date, the time and the place.",
+        "Members are notified and answer I'm in, maybe or can't make it.",
         "The organiser watches the count and books the courts to match.",
-        "On the night, the admin starts the real session from that entry.",
+        "On the night, the admin starts the real session from the Call-up.",
       ],
       id: [
-        "Admin membuat entri berisi tanggal, jam, dan lokasi.",
+        "Admin memasang Call-up berisi tanggal, jam, dan lokasi.",
         "Anggota mendapat notifikasi dan menjawab ikut, mungkin, atau tidak bisa.",
         "Penyelenggara memantau jumlahnya dan memesan lapangan sesuai kebutuhan.",
-        "Pada hari-H, admin memulai sesi sungguhan dari entri tersebut.",
+        "Pada hari-H, admin memulai sesi sungguhan dari Call-up tersebut.",
       ],
     },
     bestFor: {
@@ -782,16 +782,16 @@ export const FEATURES: Feature[] = [
       ],
     },
     notFor: {
-      en: "An RSVP is an answer, not a reserved spot in the draw. When the session starts, the host still puts the players in — which is the right way round, because the people who actually walk onto the court are never quite the people who said they would.",
-      id: "Konfirmasi kehadiran adalah jawaban, bukan tempat yang sudah dikunci di undian. Saat sesi dimulai, host tetap memasukkan pemainnya sendiri — dan memang seharusnya begitu, karena orang yang benar-benar melangkah ke lapangan tidak pernah persis sama dengan yang menyatakan akan datang.",
+      en: "Answering a Call-up is an answer, not a reserved spot in the draw. When the session starts, the host still puts the players in — which is the right way round, because the people who actually walk onto the court are never quite the people who said they would.",
+      id: "Menjawab Call-up adalah jawaban, bukan tempat yang sudah dikunci di undian. Saat sesi dimulai, host tetap memasukkan pemainnya sendiri — dan memang seharusnya begitu, karena orang yang benar-benar melangkah ke lapangan tidak pernah persis sama dengan yang menyatakan akan datang.",
     },
     cta: {
       label: { en: "Open your clubs", id: "Buka klubmu" },
       to: "/teams",
     },
     ctaNote: {
-      en: "Scheduling is an admin job — open your club and it's on the club's page.",
-      id: "Penjadwalan adalah tugas admin — buka klubmu dan fiturnya ada di halaman klub.",
+      en: "Posting a Call-up is an admin job — open your club and it's on the club's page.",
+      id: "Memasang Call-up adalah tugas admin — buka klubmu dan fiturnya ada di halaman klub.",
     },
   },
 

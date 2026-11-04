@@ -149,6 +149,27 @@ export function reportHandledError(error: unknown, where: string, context?: Reco
 }
 
 /**
+ * The human part of a failing response: PostgREST's `message`, GoTrue's
+ * `msg` / `error_description`, or the start of a plain-text body. Never an
+ * HTML error page. Exported for the tests.
+ */
+export function serverReason(body: string): string | null {
+  const text = body.trim();
+  if (!text) return null;
+  try {
+    const j = JSON.parse(text) as Record<string, unknown>;
+    for (const k of ["message", "msg", "error_description", "error"]) {
+      const v = j[k];
+      if (typeof v === "string" && v.trim()) return v.trim().slice(0, 160);
+    }
+    return null;
+  } catch {
+    if (text.startsWith("<")) return null;
+    return text.slice(0, 120);
+  }
+}
+
+/**
  * A fetch that records every failing response before handing it back
  * unchanged. Given to the Supabase client, so every PostgREST and GoTrue call
  * the app makes is covered — including the ones the app catches and turns into
@@ -180,7 +201,13 @@ export function reportingFetch(input: RequestInfo | URL, init?: RequestInit): Pr
         .clone()
         .text()
         .then((body) => {
-          reportError(new Error(`${response.status} on ${path}`), "query", {
+          // The server's own reason goes IN the message, not only in context:
+          // the Errors tab and its grouping read the message, and "400 on
+          // /rest/v1/rpc/create_session_from_payload" said nothing on 15 Oct,
+          // when the reason sitting in context was "Could not find your team."
+          const reason = serverReason(body);
+          const message = reason ? `${response.status} on ${path}: ${reason}` : `${response.status} on ${path}`;
+          reportError(new Error(message), "query", {
             status: response.status,
             path,
             method: (init?.method ?? "GET").toUpperCase(),

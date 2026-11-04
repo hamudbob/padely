@@ -130,7 +130,9 @@ export async function syncLocalSessions(): Promise<SyncOutcome> {
         }
       } catch (err) {
         outcome.failed += 1;
-        const message = err instanceof Error ? err.message : String(err);
+        // PostgREST errors are plain objects: String() of one is "[object Object]".
+        const message =
+          err instanceof Error ? err.message : String((err as { message?: unknown } | null)?.message ?? err);
         recordSyncError(local.session.id, message);
         // Keep going: one session refusing to sync must not hold up another.
         console.warn(`Session ${local.session.id} did not sync:`, message);

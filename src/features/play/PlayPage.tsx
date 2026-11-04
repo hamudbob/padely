@@ -189,11 +189,11 @@ export default function PlayPage() {
     })),
     ...upcoming.map((e) => ({
       key: `ev-${e.id}`,
-      kicker: e.myResponse === "in" ? "You're in" : "Scheduled",
+      kicker: e.myResponse === "in" ? "You're in" : "Call-up",
       title: e.title,
       meta: `${eventWhen(e.scheduledAt)} · ${e.clubName}`,
       to: `/e/${e.id}`,
-      cta: e.myResponse === "in" ? "Change RSVP" : "Say you're in",
+      cta: e.myResponse === "in" ? "Change answer" : "Say you're in",
     })),
   ];
 

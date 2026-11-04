@@ -1,0 +1,12 @@
+#!/bin/sh
+# Runs on `git push` from this Mac: type check, then the tests.
+# A failure stops the push. Skip once in an emergency: git push --no-verify
+# Turned on with: git config core.hooksPath .githooks
+set -e
+echo "pre-push: type check…"
+npx tsc --noEmit -p .
+echo "pre-push: tests…"
+VITE_SUPABASE_URL=${VITE_SUPABASE_URL:-http://localhost} \
+VITE_SUPABASE_ANON_KEY=${VITE_SUPABASE_ANON_KEY:-test} \
+npx vitest run --reporter=dot
+echo "pre-push: all good."

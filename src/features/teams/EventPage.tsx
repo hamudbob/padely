@@ -37,9 +37,9 @@ function dateParts(iso: string): DateParts | null {
 }
 
 const RSVP_OPTS: { value: RsvpResponse; label: string }[] = [
-  { value: "in", label: "In" },
+  { value: "in", label: "I'm in" },
   { value: "maybe", label: "Maybe" },
-  { value: "out", label: "Out" },
+  { value: "out", label: "Can't make it" },
 ];
 
 export default function EventPage() {
@@ -110,7 +110,7 @@ export default function EventPage() {
           ? `You're in for this session. Leaving hands your spot straight to the next person waiting${
               waiting > 1 ? ` (${waiting} are in the queue)` : ""
             } — if you change your mind you'd rejoin at the back of the list.`
-          : "You're in for this session. You can RSVP again later, though if the night fills up in the meantime you'd join the waiting list.",
+          : "You're in for this session. You can answer again later, though if the night fills up in the meantime you'd join the waiting list.",
         confirmLabel: next === "out" ? "Yes, I'm out" : "Change me to maybe",
         tone: "danger" as const,
       };
@@ -222,8 +222,8 @@ export default function EventPage() {
     setConfirm({
       title: `Take ${who} out?`,
       body: waiting > 0
-        ? `${who} is in for this session. Taking them out gives their spot to the next person on the waiting list — you'd have to ask them to RSVP again, and the night may be full by then.`
-        : `${who} is in for this session. They'll need to RSVP again themselves if this was a mistake.`,
+        ? `${who} is in for this session. Taking them out gives their spot to the next person on the waiting list — you'd have to ask them to answer again, and the night may be full by then.`
+        : `${who} is in for this session. They'll need to answer again themselves if this was a mistake.`,
       confirmLabel: `Take ${who} out`,
       tone: "danger",
       run: () => doSetFor(userId, response, who),
@@ -316,8 +316,10 @@ export default function EventPage() {
         </Link>
 
         <div className="border-t border-line px-5 pt-5 pb-6 text-center">
-          {cancelled && (
+          {cancelled ? (
             <span className="inline-block rounded-full bg-loss-soft text-loss text-[10px] font-bold uppercase tracking-[0.1em] px-2.5 py-1 mb-3">Cancelled</span>
+          ) : (
+            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-warm-gray mb-1.5">Call-up</p>
           )}
           <h1 className={`font-serif text-[25px] font-semibold tracking-tight leading-tight ${cancelled ? "text-warm-gray line-through" : "text-graphite"}`}>{ev.title}</h1>
           {/* The same shorthand that goes into the share text, so the message
@@ -384,17 +386,17 @@ export default function EventPage() {
                 {live ? "This session is being played" : "This session has finished"}
               </p>
               <p className="text-[12px] text-warm-gray mt-1 leading-snug">
-                RSVPs are closed — who played is on the session itself now.
+                Answers are closed — who played is on the session itself now.
               </p>
             </div>
           )}
         </div>
       )}
 
-      {/* RSVP */}
+      {/* The answer to the Call-up */}
       {!started && !cancelled && ev.isMember && (
         <div className="mt-6">
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray text-center mb-2">Your RSVP</p>
+          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray text-center mb-2">Your answer</p>
           <div className="flex rounded-full bg-surface border border-line p-1">
             {RSVP_OPTS.map((o) => (
               <button
@@ -428,7 +430,7 @@ export default function EventPage() {
       )}
       {!started && !cancelled && !ev.isMember && (
         <div className="mt-6 rounded-2xl border border-dashed border-line bg-surface px-4 py-5 text-center">
-          <p className="text-[13px] text-graphite font-semibold">Members-only RSVP</p>
+          <p className="text-[13px] text-graphite font-semibold">Members-only Call-up</p>
           {user ? (
             <>
               <p className="text-[12px] text-warm-gray mt-1 leading-snug">Join {ev.teamName} to reserve your spot.</p>
@@ -438,7 +440,7 @@ export default function EventPage() {
             </>
           ) : (
             <>
-              <p className="text-[12px] text-warm-gray mt-1 leading-snug">Sign in and join {ev.teamName} to RSVP.</p>
+              <p className="text-[12px] text-warm-gray mt-1 leading-snug">Sign in and join {ev.teamName} to answer this Call-up.</p>
               <Link to={loginHref} className="inline-block mt-3 rounded-full bg-graphite text-ivory text-[13px] font-semibold px-6 py-2.5 active:scale-[0.98] transition-transform">
                 Sign in
               </Link>

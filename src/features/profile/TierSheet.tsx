@@ -4,10 +4,9 @@ import { TIERS, tierFor } from "./playerStats";
 /**
  * The tier ladder.
  *
- * Two of the six names are withheld — the bottom and the top. The bottom
- * because being shown the name of the rung below you is a worse experience
- * than not knowing there's a name at all, and the top because a prize nobody
- * can see is a better prize than one everybody can price. Your own band always
+ * One of the six names is withheld: the top (Elite), because a prize nobody
+ * can see is a better prize than one everybody can price. The bottom one used
+ * to be hidden too; "Starter" reads as a beginning, so since Nov 2026 it shows. Your own band always
  * shows its name on your profile strip: the secret is what a band is CALLED
  * before you reach it, never where you stand.
  *
@@ -68,7 +67,7 @@ export default function TierSheet({
 
           {provisional && (
             <p className="text-[12px] text-warm-gray leading-relaxed mt-3.5 px-1">
-              Yours says <b className="text-gold-ink">main lagi</b> because the rating hasn't settled yet — about three
+              Yours says <b className="text-gold-ink">Play more</b> because the rating hasn't settled yet — about three
               sessions, win or lose. It isn't a rung on this ladder.
             </p>
           )}

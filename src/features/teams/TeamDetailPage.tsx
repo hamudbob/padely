@@ -752,7 +752,7 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
       setShowForm(false);
       load();
     } catch (e2) {
-      setErr(e2 instanceof Error ? e2.message : "Couldn't schedule.");
+      setErr(e2 instanceof Error ? e2.message : "Couldn't post the Call-up.");
     } finally {
       setBusy(false);
     }
@@ -784,7 +784,7 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
               ? `You're in for ${ev.title}. Leaving hands your spot straight to the next person waiting${
                   waiting > 1 ? ` (${waiting} are in the queue)` : ""
                 } — if you change your mind you'd rejoin at the back of the list.`
-              : `You're in for ${ev.title}. You can RSVP again later, though if the night fills up in the meantime you'd join the waiting list.`,
+              : `You're in for ${ev.title}. You can answer again later, though if the night fills up in the meantime you'd join the waiting list.`,
             confirmLabel: response === "out" ? "Yes, I'm out" : "Change me to maybe",
             tone: "danger",
             run: () => doRsvp(eventId, response),
@@ -815,7 +815,7 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
   }
 
   async function cancel(eventId: string) {
-    if (!confirm("Cancel this scheduled session?")) return;
+    if (!confirm("Cancel this Call-up?")) return;
     try {
       await cancelEvent(eventId);
       eventsQ.mutate((prev) => (prev ?? []).filter((e) => e.id !== eventId));
@@ -835,25 +835,25 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
   }
 
   const RSVP_OPTS: { value: RsvpResponse; label: string }[] = [
-    { value: "in", label: "In" },
+    { value: "in", label: "I'm in" },
     { value: "maybe", label: "Maybe" },
-    { value: "out", label: "Out" },
+    { value: "out", label: "Can't make it" },
   ];
 
   return (
     <div className="mt-7">
       <div className="flex items-center justify-between mb-2 px-0.5">
-        <h3 className="text-[13px] font-semibold text-ink-2">Upcoming</h3>
+        <h3 className="text-[13px] font-semibold text-ink-2">Call-ups</h3>
         {isAdmin && (
           <button onClick={() => setShowForm((v) => !v)} className="text-[12.5px] font-semibold text-gold-ink active:opacity-70">
-            {showForm ? "Close" : "+ Schedule"}
+            {showForm ? "Close" : "+ Call-up"}
           </button>
         )}
       </div>
 
       {isAdmin && showForm && (
         <form onSubmit={submit} className="rounded-2xl bg-surface p-3.5 mb-2.5 space-y-2 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Session title" maxLength={80} className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
+          <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Call-up title" maxLength={80} className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
           <input value={when} onChange={(e) => setWhen(e.target.value)} type="datetime-local" className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
 
           {/* A warning, not a block. Recording a session that has already
@@ -911,14 +911,14 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
           )}
           {err && <p className="text-[11px] text-loss">{err}</p>}
           <button type="submit" disabled={busy || !title.trim() || !when} className="w-full rounded-full bg-graphite text-ivory text-[13px] font-semibold py-2.5 disabled:opacity-40">
-            {busy ? "Scheduling…" : "Schedule session"}
+            {busy ? "Posting…" : "Post Call-up"}
           </button>
         </form>
       )}
 
       {events.length === 0 ? (
         <div className="rounded-2xl bg-surface px-4 py-4 text-center shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-          <p className="text-[12.5px] text-warm-gray">No sessions scheduled{isAdmin ? " — tap + Schedule to plan one." : "."}</p>
+          <p className="text-[12.5px] text-warm-gray">No Call-ups yet{isAdmin ? " — tap + Call-up to post one." : "."}</p>
         </div>
       ) : (
         /* One card per night, not rows in a list. A scheduled session is the
@@ -1055,7 +1055,7 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
                       value={eTitle}
                       onChange={(e) => setETitle(e.target.value)}
                       maxLength={80}
-                      placeholder="Session title"
+                      placeholder="Call-up title"
                       className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink"
                     />
                     <input

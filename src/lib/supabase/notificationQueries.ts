@@ -76,3 +76,12 @@ export async function deleteNotification(id: string): Promise<void> {
   const { error } = await supabase.from("notifications").delete().eq("id", id);
   if (error) throw error;
 }
+
+/** Clear all: every notification of the caller's (RLS limits the delete to their own rows, 0016). */
+export async function deleteAllNotifications(): Promise<void> {
+  const { data: userData } = await supabase.auth.getUser();
+  const uid = userData.user?.id;
+  if (!uid) return;
+  const { error } = await supabase.from("notifications").delete().eq("user_id", uid);
+  if (error) throw error;
+}

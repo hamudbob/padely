@@ -43,6 +43,21 @@ function opponentCost(history: MatchHistory | undefined, a: PlayerId, b: PlayerI
   return n * OPPONENT_WEIGHT;
 }
 
+/**
+ * What a split repeats: both partnerships (squared, see PARTNER_WEIGHT) plus
+ * the four opponent pairs. Shared with Mix Mexicano so both formats count a
+ * third time together the same way.
+ */
+export function splitRepeatCost(
+  teamA: [PlayerId, PlayerId],
+  teamB: [PlayerId, PlayerId],
+  history: MatchHistory | undefined,
+): number {
+  let c = partnerCost(history, teamA[0], teamA[1]) + partnerCost(history, teamB[0], teamB[1]);
+  for (const x of teamA) for (const y of teamB) c += opponentCost(history, x, y);
+  return c;
+}
+
 /** The best split of one court, and what it costs (0 = nothing repeated, balanced). */
 export function bestCourtSplit(group: PlayerId[], history?: MatchHistory): {
   teamA: [PlayerId, PlayerId];
@@ -59,11 +74,7 @@ export function bestCourtSplit(group: PlayerId[], history?: MatchHistory): {
   // Priority stays strict: any repeat partnership (>= 100) outweighs every
   // repeat opponent on the court (4 pairs x 10 each, rarely more), which
   // outweighs imbalance (max 4).
-  const cost = (o: Split): number => {
-    let c = partnerCost(history, o.teamA[0], o.teamA[1]) + partnerCost(history, o.teamB[0], o.teamB[1]);
-    for (const x of o.teamA) for (const y of o.teamB) c += opponentCost(history, x, y);
-    return c + o.imbalance;
-  };
+  const cost = (o: Split): number => splitRepeatCost(o.teamA, o.teamB, history) + o.imbalance;
 
   let best = options[0];
   let bestCost = cost(options[0]);

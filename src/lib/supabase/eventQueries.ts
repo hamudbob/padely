@@ -87,6 +87,7 @@ export function formatEventWhen(iso: string): string {
  *
  * ONE function, because there were two: the club card sent
  * "Tuesday Night 2C3H12P · Tue 14 Oct, 20:00 @ Kemang (Rp 75k) — Padelier"
+ * (since Nov 2026 prefixed "Call-up: ")
  * and the event page sent "Are you in?". Same night, two different invites in
  * the group chat depending on which screen the host happened to be on.
  */
@@ -101,7 +102,8 @@ export function eventShareText(e: {
 }): string {
   const code = eventCode(e);
   const when = formatEventWhen(e.scheduledAt);
-  return `${e.title}${code ? ` ${code}` : ""}${when ? ` · ${when}` : ""}${e.location ? ` @ ${e.location}` : ""}${
+  // "Call-up:" first, so the group chat can tell an invite from a result.
+  return `Call-up: ${e.title}${code ? ` ${code}` : ""}${when ? ` · ${when}` : ""}${e.location ? ` @ ${e.location}` : ""}${
     e.cost ? ` (${e.cost})` : ""
   } — Padelier`;
 }

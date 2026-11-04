@@ -115,8 +115,15 @@ update profiles pr
  where pr.id = p.id;
 
 -- --- The club ------------------------------------------------------------
+-- Since 0077 the database makes every new account a team at sign-up, so Ana
+-- already has one with a random id. Swap it for the fixed id the sessions
+-- below are filed under.
+delete from teams
+ where owner_id = 'dddd0000-0000-0000-0000-000000000001'
+   and id <> 'dddd0000-0000-0000-0000-0000000000f0';
 insert into teams (id, name, owner_id)
-values ('dddd0000-0000-0000-0000-0000000000f0','Ana''s Team','dddd0000-0000-0000-0000-000000000001');
+values ('dddd0000-0000-0000-0000-0000000000f0','Ana''s Team','dddd0000-0000-0000-0000-000000000001')
+on conflict (id) do nothing;
 
 insert into clubs (id, name, club_code, created_by, created_at)
 values ('dddd0000-0000-0000-0000-0000000000c1','Kemang Padel Club','KEMANG',
