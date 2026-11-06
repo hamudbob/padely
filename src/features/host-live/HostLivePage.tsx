@@ -683,12 +683,16 @@ export default function HostLivePage() {
   const advanceAvailable = canEdit && isViewingCurrent && allMatchesFinal;
 
   // Round actions (Refresh / Randomize / Delete) only apply to the LIVE round
-  // of a round-by-round (Mexicano-family) session, and only once there's a
-  // prior round to fall back to — pre-generated formats (Americano etc.) draw
-  // their whole schedule up front, so redrawing a single round mid-schedule
-  // isn't a meaningful operation there.
-  const roundActionsAvailable =
-    !fullyPreGenerated && isViewingCurrent && canEdit && !sessionEnded && (roundHistory?.length ?? 0) > 1;
+  // of a round-by-round (Mexicano-family) session — pre-generated formats
+  // (Americano etc.) draw their whole schedule up front, so redrawing a single
+  // round mid-schedule isn't a meaningful operation there.
+  //
+  // From round 1 since Nov 2026: a player who hasn't arrived is marked "not
+  // here yet" and round 1 is redrawn without them, by whoever is hosting (it
+  // used to need an admin). Delete still needs a round to go back to.
+  const roundCount = roundHistory?.length ?? 0;
+  const roundActionsAvailable = !fullyPreGenerated && isViewingCurrent && canEdit && !sessionEnded && roundCount >= 1;
+  const canDeleteRound = roundCount > 1;
 
   // The rank BADGE always reflects the session's official ranking_basis
   // (points_first/wins_first — set at session creation and used for the
@@ -1398,18 +1402,22 @@ export default function HostLivePage() {
                       <div className="absolute right-0 top-10 z-50 w-64 rounded-2xl border border-line bg-surface shadow-[0_20px_44px_-16px_rgba(13,13,13,0.35)] overflow-hidden">
                         <button onClick={() => onRoundAction("refresh")} className="w-full text-left px-4 py-3 active:bg-surface-2">
                           <span className="block text-[13px] font-semibold text-ink">Refresh round</span>
-                          <span className="block text-[11px] text-warm-gray mt-0.5 leading-snug">Re-draw with the current players — use after marking someone left.</span>
+                          <span className="block text-[11px] text-warm-gray mt-0.5 leading-snug">Re-draw with the current players — use after marking someone left or not here yet.</span>
                         </button>
                         <div className="h-px bg-line" />
                         <button onClick={() => onRoundAction("randomize")} className="w-full text-left px-4 py-3 active:bg-surface-2">
                           <span className="block text-[13px] font-semibold text-ink">Randomize</span>
                           <span className="block text-[11px] text-warm-gray mt-0.5 leading-snug">Shuffle a fresh draw — the least-played still get on court, just mixed up.</span>
                         </button>
-                        <div className="h-px bg-line" />
-                        <button onClick={() => onRoundAction("delete")} className="w-full text-left px-4 py-3 active:bg-surface-2">
-                          <span className="block text-[13px] font-semibold text-loss">Delete round</span>
-                          <span className="block text-[11px] text-warm-gray mt-0.5 leading-snug">Remove this round and go back to the previous one.</span>
-                        </button>
+                        {canDeleteRound && (
+                          <>
+                            <div className="h-px bg-line" />
+                            <button onClick={() => onRoundAction("delete")} className="w-full text-left px-4 py-3 active:bg-surface-2">
+                              <span className="block text-[13px] font-semibold text-loss">Delete round</span>
+                              <span className="block text-[11px] text-warm-gray mt-0.5 leading-snug">Remove this round and go back to the previous one.</span>
+                            </button>
+                          </>
+                        )}
                       </div>
                     </>
                   )}

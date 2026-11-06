@@ -64,6 +64,15 @@ export interface GenerateNextRoundOptions {
   graph?: LocalSession;
   /** Add the round to `graph` but save nothing; the caller sends it on. */
   dryRun?: boolean;
+  /**
+   * Draw ROUND 1 again (Refresh / Randomize on round 1, Nov 2026). Only from
+   * regenerateCurrentRound, after it has removed the old round 1: with no
+   * rounds left, the draw is a first round — nobody has a standing, nobody has
+   * played — from whoever is active NOW. That is the whole point: a player
+   * marked "not here yet" before the first ball is left out, and someone who
+   * joined by code is put in.
+   */
+  firstRound?: boolean;
 }
 
 export async function generateNextRound(
@@ -197,9 +206,12 @@ export async function generateNextRound(
   const pairs: Pair[] = pairRows.map((p) => ({ pairId: p.id, playerA: p.player_a_id, playerB: p.player_b_id }));
 
   const rounds = roundRows;
-  if (rounds.length === 0) throw new Error("This session has no rounds yet.");
+  const firstRoundRedraw = rounds.length === 0 && opts.firstRound === true;
+  if (rounds.length === 0 && !firstRoundRedraw) throw new Error("This session has no rounds yet.");
 
-  const latestRound = rounds[rounds.length - 1];
+  // For a round-1 redraw there is no previous round: a stand-in with sequence
+  // 0, so the new round is 1 and every per-round lookup below finds nothing.
+  const latestRound = rounds[rounds.length - 1] ?? { id: "", sequence: 0, status: "scored" };
   const roundIds = rounds.map((r) => r.id);
 
   // matches and rests both only depend on roundIds (not on each other) —
@@ -216,7 +228,7 @@ export async function generateNextRound(
     allRests = local.rests.filter((r) => ids.has(r.round_id));
     const mids = new Set(matches.map((m) => m.id));
     participants = local.participants.filter((mp) => mids.has(mp.match_id));
-  } else {
+  } else if (roundIds.length > 0) {
     const [matchesResult, restsResult] = await Promise.all([
       supabase.from("matches").select("id, round_id, court_id, score_a, score_b, outcome, status, pair_a_id, pair_b_id").in("round_id", roundIds),
       supabase.from("round_rests").select("round_id, player_id").in("round_id", roundIds),
@@ -236,7 +248,7 @@ export async function generateNextRound(
   }
 
   const latestMatches = matches.filter((m) => m.round_id === latestRound.id);
-  if (latestMatches.length === 0 || latestMatches.some((m) => m.status !== "final")) {
+  if (!firstRoundRedraw && (latestMatches.length === 0 || latestMatches.some((m) => m.status !== "final"))) {
     throw new Error("Finish scoring every match in this round before generating the next one.");
   }
 
@@ -499,7 +511,9 @@ export async function generateNextRound(
             statsById: pairStatsById,
             courtsAvailable: availableCourts.length,
             standings: pairStandingsLookup,
-            isFirstRound: false, // round 1 is always handled by CreateSessionPage's preview + sessionActions.ts
+            // Round 1 normally comes from CreateSessionPage's preview; the one
+            // exception is a round-1 Refresh / Randomize.
+            isFirstRound: firstRoundRedraw,
             rng,
           })
         : // Legacy 'fixed_partner' format rows from before the rework — treat
@@ -559,7 +573,7 @@ export async function generateNextRound(
                         statsById,
                         courtsAvailable: availableCourts.length,
                         standings: standingsLookup,
-                        isFirstRound: false,
+                        isFirstRound: firstRoundRedraw,
                         history,
                         rng,
                       })
@@ -572,7 +586,7 @@ export async function generateNextRound(
                       statsById,
                       courtsAvailable: availableCourts.length,
                       standings: standingsLookup,
-                      isFirstRound: false,
+                      isFirstRound: firstRoundRedraw,
                       history,
                       rng,
                     });
@@ -600,7 +614,9 @@ export async function generateNextRound(
       session_id: sessionId,
       sequence: newSequence,
       status: "in_progress",
-      generation_reason: `Round ${newSequence} generated automatically after Round ${latestRound.sequence} was fully scored.`,
+      generation_reason: firstRoundRedraw
+        ? "Round 1 redrawn by the host from the players present."
+        : `Round ${newSequence} generated automatically after Round ${latestRound.sequence} was fully scored.`,
       seed_used: roundSeed,
       generated_at: now,
     });
@@ -636,14 +652,18 @@ export async function generateNextRound(
   // one, in parallel — neither write depends on the other's result (the new
   // round doesn't reference the old round's status).
   const [{ error: markScoredError }, { data: newRoundRow, error: newRoundError }] = await Promise.all([
-    supabase.from("rounds").update({ status: "scored" }).eq("id", latestRound.id),
+    firstRoundRedraw
+      ? Promise.resolve({ error: null })
+      : supabase.from("rounds").update({ status: "scored" }).eq("id", latestRound.id),
     supabase
       .from("rounds")
       .insert({
         session_id: sessionId,
         sequence: newSequence,
         status: "in_progress",
-        generation_reason: `Round ${newSequence} generated automatically after Round ${latestRound.sequence} was fully scored.`,
+        generation_reason: firstRoundRedraw
+        ? "Round 1 redrawn by the host from the players present."
+        : `Round ${newSequence} generated automatically after Round ${latestRound.sequence} was fully scored.`,
         seed_used: roundSeed,
       })
       .select("id")
@@ -728,7 +748,10 @@ export async function generateNextRound(
  * prior round to regenerate from, and deleting it would leave a live session
  * with no rounds at all).
  */
-async function loadLatestTwoRounds(sessionId: string): Promise<{ latestId: string; latestSeq: number; prevId: string }> {
+async function loadLatestTwoRounds(
+  sessionId: string,
+  opts: { allowSingle?: boolean } = {},
+): Promise<{ latestId: string; latestSeq: number; prevId: string | null }> {
   const localForRounds = getLocalSession(sessionId);
   let rounds: { id: string; sequence: number }[] | null;
   if (localForRounds) {
@@ -743,12 +766,12 @@ async function loadLatestTwoRounds(sessionId: string): Promise<{ latestId: strin
     rounds = data;
   }
   if (!rounds || rounds.length === 0) throw new Error("This session has no rounds yet.");
-  if (rounds.length < 2) {
+  if (rounds.length < 2 && !opts.allowSingle) {
     throw new Error("This is the first round — there's nothing before it to fall back to. Add or remove players and it'll apply on the next round.");
   }
   const latest = rounds[rounds.length - 1];
-  const prev = rounds[rounds.length - 2];
-  return { latestId: latest.id, latestSeq: latest.sequence, prevId: prev.id };
+  const prev = rounds[rounds.length - 2] ?? null;
+  return { latestId: latest.id, latestSeq: latest.sequence, prevId: prev?.id ?? null };
 }
 
 /**
@@ -781,6 +804,7 @@ export async function swapRoundPlayers(roundId: string, playerA: string, playerB
 
 export async function deleteCurrentRound(sessionId: string): Promise<void> {
   const { latestId, prevId } = await loadLatestTwoRounds(sessionId);
+  if (!prevId) throw new Error("This is the first round — there's nothing before it to go back to.");
 
   // Local session: delete the round and everything hanging off it by hand.
   // The database does this with ON DELETE CASCADE; here the cascade is ours
@@ -891,7 +915,10 @@ async function assertRegenerable(sessionId: string): Promise<void> {
  * caller confirms that first.
  */
 export async function regenerateCurrentRound(sessionId: string, opts: { randomize: boolean }): Promise<GenerateNextRoundResult> {
-  const { latestId } = await loadLatestTwoRounds(sessionId);
+  // Round 1 too (Nov 2026): a host whose player hasn't arrived marks them
+  // "not here yet" and redraws the first round without them. Before, only an
+  // admin could fix it, from the console.
+  const { latestId, prevId } = await loadLatestTwoRounds(sessionId, { allowSingle: true });
   // Check BEFORE deleting anything. This used to delete first and regenerate
   // second, so any condition that made generation throw — the previous round
   // not fully scored, or the active roster having dropped below a full court —
@@ -922,7 +949,7 @@ export async function regenerateCurrentRound(sessionId: string, opts: { randomiz
   // On Randomize, also tell generation to ignore the standings ladder so rank-
   // based formats (Mexicano / Mix Mexicano) produce a genuinely random draw
   // rather than just reshuffling within the same court tiers.
-  return generateNextRound(sessionId, randomSeed, opts.randomize);
+  return generateNextRound(sessionId, randomSeed, opts.randomize, { firstRound: prevId === null });
 }
 export interface RedrawRemainingResult {
   /** First round sequence that was replaced. */
