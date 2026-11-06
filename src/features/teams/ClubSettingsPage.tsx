@@ -4,6 +4,7 @@ import { getTeam, getTeamMembers, saveClubSettings, ClubSettings } from "../../l
 import { getSeasonRules } from "../../lib/supabase/leagueQueries";
 import { SEASON_LENGTHS, SeasonLength, SeasonRule, seasonBounds, plannedChange, pendingRule, seasonDates } from "../../lib/league/seasons";
 import { FORMAT_OPTIONS, SCORING_OPTIONS } from "../create-session/CreateSessionPage";
+import { PaymentModePicker } from "./CallupPayment";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
 import { useCachedQuery, invalidateQuery } from "../../lib/cache/useCachedQuery";
@@ -226,6 +227,19 @@ export default function ClubSettingsPage() {
             <input value={c.cost ?? ""} onChange={(e) => setCallup("cost", e.target.value.slice(0, 40) || null)} placeholder="—" className={field} />
           </Mini>
         </div>
+        <Row label="Payment">
+          <PaymentModePicker value={c.paymentMode ?? "none"} onChange={(v) => setCallup("paymentMode", v)} />
+        </Row>
+        <Row label="Notes for members">
+          <textarea
+            value={c.notes ?? ""}
+            onChange={(e) => setCallup("notes", e.target.value.slice(0, 1000) || null)}
+            rows={3}
+            placeholder="Bank details, QRIS, what to bring…"
+            className={`${field} leading-snug`}
+          />
+          <p className="text-[11.5px] text-warm-gray mt-1.5 leading-snug">Shown to members on every new Call-up. Not shown on the public link.</p>
+        </Row>
         <Row label="Guests each member may bring">
           <Segmented
             value={String(s.maxGuests)}

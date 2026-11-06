@@ -1,5 +1,5 @@
 import { supabase } from "./client";
-import { getProfiles } from "./profileQueries";
+import { getProfiles, resizeImage } from "./profileQueries";
 import { ensurePushRegistered } from "../push";
 
 /**
@@ -26,6 +26,8 @@ export interface ClubEvent {
   durationHours: number | null;
   maxPlayers: number | null;
   cost: string | null;
+  /** 0080. "none" on a database without it. */
+  paymentMode: PaymentMode;
   myResponse: RsvpResponse | null;
   counts: { in: number; maybe: number; out: number; waitlist: number };
   goingNames: string[];
@@ -237,7 +239,9 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
   const { data: events, error } = await supabase
     .from("club_events")
     .select(
-      "id, club_id, title, scheduled_at, location, notes, status, session_id, created_by, created_at, court_count, duration_hours, max_players, cost, slug",
+      // "*" rather than a list, so payment_mode (0080) comes along when the
+      // column exists and its absence isn't an error when it doesn't.
+      "*",
     )
     .eq("club_id", clubId)
     .eq("status", "scheduled")
@@ -344,6 +348,7 @@ export async function getClubEvents(clubId: string): Promise<ClubEvent[]> {
           durationHours: e.duration_hours === null || e.duration_hours === undefined ? null : Number(e.duration_hours),
           maxPlayers: e.max_players ?? null,
           cost: e.cost ?? null,
+          paymentMode: paymentModeOf((e as { payment_mode?: unknown }).payment_mode),
           myResponse: rec.mine,
           counts: { in: rec.in.length, maybe: rec.maybe.length, out: rec.out.length, waitlist: rec.waitlist.length },
           goingNames: rec.in,
@@ -646,4 +651,190 @@ export async function getCallupRules(clubId: string): Promise<{ maxGuests: numbe
     maxGuests: typeof data.max_guests === "number" ? data.max_guests : 3,
     waitlist: data.waitlist_enabled !== false,
   };
+}
+
+/* ── Paying for a Call-up (0080, ADR-001) ─────────────────────────────────
+ * Money never moves through the app; this only records who paid.
+ *   none     as before
+ *   tick     admins tick who paid. Bookkeeping only.
+ *   receipt  players who are in upload a transfer receipt, admins check it.
+ *            6 h before the start, anyone in without a receipt moves to the
+ *            back of the waiting list; whoever moves up gets an hour.
+ */
+export type PaymentMode = "none" | "tick" | "receipt";
+
+export const PAYMENT_MODES: { value: PaymentMode; label: string; hint: string }[] = [
+  { value: "none", label: "No payment", hint: "Nothing to pay in the app." },
+  { value: "tick", label: "Tick only", hint: "You tick who has paid. Nobody is moved." },
+  {
+    value: "receipt",
+    label: "Receipt needed",
+    hint: "Players upload their transfer receipt. 6 hours before, anyone in without one moves to the waiting list.",
+  },
+];
+
+export function paymentModeOf(v: unknown): PaymentMode {
+  return v === "tick" || v === "receipt" ? v : "none";
+}
+
+export interface CallupMe {
+  /** Places this person holds: themselves and their guests who are in. */
+  spots: number;
+  paid: boolean;
+  paidAt: string | null;
+  hasReceipt: boolean;
+  receiptAt: string | null;
+  rejectedReason: string | null;
+  /** Their personal hour, while it runs. */
+  payBy: string | null;
+  movedUnpaid: boolean;
+}
+
+export interface CallupExtras {
+  member: boolean;
+  notes: string | null;
+  paymentMode: PaymentMode;
+  /** Receipt mode only: 6 hours before the start. */
+  deadline: string | null;
+  /** 1 hour before the start: nothing moves after this. */
+  frozenAt: string | null;
+  inSpots: number;
+  paidSpots: number;
+  isAdmin: boolean;
+  me: CallupMe | null;
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const rpcAny = (fn: string, args: Record<string, unknown>) => (supabase as any).rpc(fn, args);
+
+function extrasFromJson(j: Record<string, unknown> | null): CallupExtras | null {
+  if (!j) return null;
+  const me = j.me as Record<string, unknown> | null | undefined;
+  const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+  return {
+    member: j.member === true,
+    notes: str(j.notes),
+    paymentMode: paymentModeOf(j.payment_mode),
+    deadline: str(j.deadline),
+    frozenAt: str(j.frozen_at),
+    inSpots: Number(j.in_spots ?? 0),
+    paidSpots: Number(j.paid_spots ?? 0),
+    isAdmin: j.is_admin === true,
+    me: me
+      ? {
+          spots: Number(me.spots ?? 0),
+          paid: me.paid === true,
+          paidAt: str(me.paid_at),
+          hasReceipt: me.has_receipt === true,
+          receiptAt: str(me.receipt_at),
+          rejectedReason: str(me.rejected_reason),
+          payBy: str(me.pay_by),
+          movedUnpaid: me.moved_unpaid === true,
+        }
+      : null,
+  };
+}
+
+/** Notes and the payment picture, from the caller's side. Null before 0080
+ *  is applied, so the page simply shows nothing new. */
+export async function getCallupExtras(eventId: string): Promise<CallupExtras | null> {
+  const { data, error } = await rpcAny("get_callup_extras", { p_event_id: eventId });
+  if (error) return null;
+  return extrasFromJson(data as Record<string, unknown> | null);
+}
+
+/** Admin: payment option and notes, when posting or editing. */
+export async function setCallupOptions(eventId: string, mode: PaymentMode, notes: string | null): Promise<void> {
+  const { error } = await rpcAny("set_callup_options", {
+    p_event_id: eventId,
+    p_payment_mode: mode,
+    p_notes: notes?.trim() || null,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export interface CallupPaymentRow {
+  userId: string;
+  displayName: string;
+  avatarUrl: string | null;
+  ownIn: boolean;
+  guestsIn: number;
+  paidAt: string | null;
+  hasReceipt: boolean;
+  receiptAt: string | null;
+  rejectedReason: string | null;
+  payBy: string | null;
+}
+
+/** Admin: everyone holding a place (and anyone who paid and left). Receipts to
+ *  check come first, paid people last. */
+export async function getCallupPayments(eventId: string): Promise<CallupPaymentRow[]> {
+  const { data, error } = await rpcAny("get_callup_payments", { p_event_id: eventId });
+  if (error) throw new Error(error.message);
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    userId: String(r.user_id),
+    displayName: (r.display_name as string) || "Player",
+    avatarUrl: (r.avatar_url as string) || null,
+    ownIn: r.own_in === true,
+    guestsIn: Number(r.guests_in ?? 0),
+    paidAt: (r.paid_at as string) || null,
+    hasReceipt: r.has_receipt === true,
+    receiptAt: (r.receipt_at as string) || null,
+    rejectedReason: (r.rejected_reason as string) || null,
+    payBy: (r.pay_by as string) || null,
+  }));
+}
+
+/** The server takes up to 900 KB; a phone screenshot resized to 1400px as a
+ *  JPEG is ~150-300 KB, so the second, smaller try is only for odd images. */
+const RECEIPT_MAX_BYTES = 900_000;
+
+function blobToBase64(b: Blob): Promise<string> {
+  return new Promise((resolve, reject) => {
+    const r = new FileReader();
+    r.onload = () => {
+      const s = String(r.result ?? "");
+      resolve(s.slice(s.indexOf(",") + 1));
+    };
+    r.onerror = () => reject(new Error("That image couldn't be read."));
+    r.readAsDataURL(b);
+  });
+}
+
+/** Player: upload (or replace) the transfer receipt. */
+export async function uploadCallupReceipt(eventId: string, file: File): Promise<CallupExtras | null> {
+  let blob = await resizeImage(file, 1400, 0.8);
+  if (blob.size > RECEIPT_MAX_BYTES) blob = await resizeImage(file, 1000, 0.7);
+  if (blob.size > RECEIPT_MAX_BYTES) throw new Error("That image is too large.");
+  const { data, error } = await rpcAny("upload_callup_receipt", {
+    p_event_id: eventId,
+    p_image_base64: await blobToBase64(blob),
+    p_mime: "image/jpeg",
+  });
+  if (error) throw new Error(error.message);
+  return extrasFromJson(data as Record<string, unknown> | null);
+}
+
+/** The uploader or an admin: the receipt as a data: URL, or null if none. */
+export async function getCallupReceipt(eventId: string, userId: string): Promise<string | null> {
+  const { data, error } = await rpcAny("get_callup_receipt", { p_event_id: eventId, p_user_id: userId });
+  if (error) throw new Error(error.message);
+  const j = data as { mime?: string; image?: string } | null;
+  return j?.image ? `data:${j.mime ?? "image/jpeg"};base64,${j.image}` : null;
+}
+
+/** Admin: paid, not paid, or receipt rejected (with a reason). */
+export async function setCallupPayment(
+  eventId: string,
+  userId: string,
+  action: "paid" | "unpaid" | "reject",
+  reason?: string | null,
+): Promise<void> {
+  const { error } = await rpcAny("set_callup_payment", {
+    p_event_id: eventId,
+    p_user_id: userId,
+    p_action: action,
+    p_reason: reason?.trim() || null,
+  });
+  if (error) throw new Error(error.message);
 }

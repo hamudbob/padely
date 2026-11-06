@@ -11,6 +11,8 @@ import {
   setRsvp,
   cancelEvent,
   updateEventDetails,
+  setCallupOptions,
+  PaymentMode,
   eventCode,
   ClubEvent,
   RsvpResponse,
@@ -25,6 +27,7 @@ import { useCachedQuery, invalidateQuery } from "../../lib/cache/useCachedQuery"
 import OfflineNote from "../shell/OfflineNote";
 import { shareUrl } from "../../lib/shareLink";
 import ConfirmSheet, { ConfirmRequest } from "../shell/ConfirmSheet";
+import { PaymentModePicker } from "./CallupPayment";
 
 const ROLE_LABEL: Record<TeamRole, string> = { owner: "Owner", admin: "Admin", member: "Member" };
 
@@ -657,6 +660,10 @@ function EventsSection({ clubId, isAdmin, defaults }: { clubId: string; isAdmin:
   const [hours, setHours] = useState("");
   const [maxPlayers, setMaxPlayers] = useState("");
   const [cost, setCost] = useState("");
+  // 0080: how it's paid for, and notes for members (bank details…).
+  const [payMode, setPayMode] = useState<PaymentMode>("none");
+  const [notes, setNotes] = useState("");
+  const [postWarn, setPostWarn] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   const [err, setErr] = useState<string | null>(null);
   // Named confirmReq, not confirm: this file already calls window.confirm(),
@@ -675,6 +682,8 @@ function EventsSection({ clubId, isAdmin, defaults }: { clubId: string; isAdmin:
   const [eHours, setEHours] = useState("");
   const [eMax, setEMax] = useState("");
   const [eCost, setECost] = useState("");
+  const [ePayMode, setEPayMode] = useState<PaymentMode>("none");
+  const [eNotes, setENotes] = useState("");
   const [editBusy, setEditBusy] = useState(false);
   const [editErr, setEditErr] = useState<string | null>(null);
 
@@ -693,6 +702,8 @@ function EventsSection({ clubId, isAdmin, defaults }: { clubId: string; isAdmin:
     setEHours(ev.durationHours != null ? String(ev.durationHours) : "");
     setEMax(ev.maxPlayers != null ? String(ev.maxPlayers) : "");
     setECost(ev.cost ?? "");
+    setEPayMode(ev.paymentMode);
+    setENotes(ev.notes ?? "");
   }
 
   async function saveEdit(e: FormEvent, ev: ClubEvent) {
@@ -709,6 +720,9 @@ function EventsSection({ clubId, isAdmin, defaults }: { clubId: string; isAdmin:
         maxPlayers: eMax ? Number(eMax) : null,
         cost: eCost,
       });
+      if (ePayMode !== ev.paymentMode || eNotes.trim() !== (ev.notes ?? "").trim()) {
+        await setCallupOptions(ev.id, ePayMode, eNotes);
+      }
       setEditId(null);
       load();
     } catch (e2) {
@@ -746,6 +760,8 @@ function EventsSection({ clubId, isAdmin, defaults }: { clubId: string; isAdmin:
       if (!hours && defaults.hours) setHours(String(defaults.hours));
       if (!maxPlayers && defaults.maxPlayers) setMaxPlayers(String(defaults.maxPlayers));
       if (!cost && defaults.cost) setCost(defaults.cost);
+      if (!notes && defaults.notes) setNotes(defaults.notes);
+      if (payMode === "none" && defaults.paymentMode) setPayMode(defaults.paymentMode);
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showForm]);
@@ -761,15 +777,26 @@ function EventsSection({ clubId, isAdmin, defaults }: { clubId: string; isAdmin:
     setBusy(true);
     setErr(null);
     try {
-      await createEvent(clubId, {
+      const id = await createEvent(clubId, {
         title,
         scheduledAt: new Date(when).toISOString(),
         location,
+        notes,
         courtCount: courts ? Number(courts) : null,
         durationHours: hours ? Number(hours) : null,
         maxPlayers: maxPlayers ? Number(maxPlayers) : null,
         cost,
       });
+      setPostWarn(null);
+      if (payMode !== "none") {
+        try {
+          await setCallupOptions(id, payMode, notes);
+        } catch (e3) {
+          // Posted, but the payment option didn't stick: say so rather than
+          // let the admin believe receipts are being collected.
+          setPostWarn(`Posted, but the payment option couldn't be saved (${e3 instanceof Error ? e3.message : "error"}). Tap Edit on the Call-up to try again.`);
+        }
+      }
       setTitle("");
       setWhen("");
       setLocation("");
@@ -777,6 +804,8 @@ function EventsSection({ clubId, isAdmin, defaults }: { clubId: string; isAdmin:
       setHours("");
       setMaxPlayers("");
       setCost("");
+      setNotes("");
+      setPayMode("none");
       setShowForm(false);
       load();
     } catch (e2) {
@@ -879,6 +908,7 @@ function EventsSection({ clubId, isAdmin, defaults }: { clubId: string; isAdmin:
         )}
       </div>
 
+      {postWarn && <p className="text-[11.5px] text-loss mb-2 px-0.5">{postWarn}</p>}
       {isAdmin && showForm && (
         <form onSubmit={submit} className="rounded-2xl bg-surface p-3.5 mb-2.5 space-y-2 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
           <input value={title} onChange={(e) => setTitle(e.target.value)} placeholder="Call-up title" maxLength={80} className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55" />
@@ -949,6 +979,20 @@ function EventsSection({ clubId, isAdmin, defaults }: { clubId: string; isAdmin:
               no limit.
             </p>
           )}
+          <div className="pt-1">
+            <span className="block text-[10.5px] font-semibold text-warm-gray mb-1 px-0.5">Payment</span>
+            <PaymentModePicker value={payMode} onChange={setPayMode} />
+          </div>
+          <label className="block">
+            <span className="block text-[10.5px] font-semibold text-warm-gray mb-0.5 px-0.5">Notes for members</span>
+            <textarea
+              value={notes}
+              onChange={(e) => setNotes(e.target.value.slice(0, 1000))}
+              rows={3}
+              placeholder="Bank details, QRIS, what to bring…"
+              className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink leading-snug focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+            />
+          </label>
           {err && <p className="text-[11px] text-loss">{err}</p>}
           <button type="submit" disabled={busy || !title.trim() || !when} className="w-full rounded-full bg-graphite text-ivory text-[13px] font-semibold py-2.5 disabled:opacity-40">
             {busy ? "Posting…" : "Post Call-up"}
@@ -1135,6 +1179,30 @@ function EventsSection({ clubId, isAdmin, defaults }: { clubId: string; isAdmin:
                         new joins.
                       </p>
                     )}
+                    <div className="pt-1">
+                      <span className="block text-[10.5px] font-semibold text-warm-gray mb-1 px-0.5">Payment</span>
+                      <PaymentModePicker value={ePayMode} onChange={setEPayMode} />
+                      {ePayMode !== ev.paymentMode && ePayMode === "receipt" && lateForReceipts(eWhen || ev.scheduledAt) && (
+                        <p className="text-[11px] text-gold-ink mt-1.5 px-0.5 leading-snug">
+                          It's past the 6-hour deadline, so everyone who's in gets 1 hour from now to upload a receipt.
+                        </p>
+                      )}
+                      {ePayMode !== ev.paymentMode && ev.paymentMode === "receipt" && (
+                        <p className="text-[11px] text-warm-gray mt-1.5 px-0.5 leading-snug">
+                          Nobody will be moved for not paying.
+                        </p>
+                      )}
+                    </div>
+                    <label className="block">
+                      <span className="block text-[10.5px] font-semibold text-warm-gray mb-0.5 px-0.5">Notes for members</span>
+                      <textarea
+                        value={eNotes}
+                        onChange={(e) => setENotes(e.target.value.slice(0, 1000))}
+                        rows={3}
+                        placeholder="Bank details, QRIS, what to bring…"
+                        className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink leading-snug"
+                      />
+                    </label>
                     {editErr && <p className="text-[11px] text-loss">{editErr}</p>}
                     <div className="flex gap-2">
                       <button type="button" onClick={() => setEditId(null)} className="rounded-full border border-line text-ink-2 bg-surface text-[12px] font-semibold py-2 px-4">
@@ -1179,6 +1247,12 @@ function EventsSection({ clubId, isAdmin, defaults }: { clubId: string; isAdmin:
       {confirmReq && <ConfirmSheet request={confirmReq} onClose={() => setConfirmReq(null)} />}
     </div>
   );
+}
+
+/** Within 6 hours of the start: the receipt deadline has already passed. */
+function lateForReceipts(when: string): boolean {
+  const t = new Date(when).getTime();
+  return Number.isFinite(t) && t - Date.now() < 6 * 3600 * 1000;
 }
 
 const FORMAT_LABELS: Record<string, string> = {

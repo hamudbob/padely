@@ -13,7 +13,10 @@ import {
   addEventGuest,
   removeEventGuest,
   getCallupRules,
+  getCallupExtras,
+  CallupExtras,
 } from "../../lib/supabase/eventQueries";
+import { AdminPayments, CallupNotes, PlayerPayment } from "./CallupPayment";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
 import { SkeletonScreen, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
@@ -52,12 +55,23 @@ export default function EventPage() {
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
 
+  // Notes and payments (0080). Separate from the event itself: the public
+  // page is readable signed out, these are for members only.
+  const [extras, setExtras] = useState<CallupExtras | null>(null);
+  const [payVersion, setPayVersion] = useState(0);
+
   function load() {
     if (!eventId) return;
     getPublicEvent(eventId)
       .then((e) => {
         if (!e) setNotFound(true);
-        else setEv(e);
+        else {
+          setEv(e);
+          if (e.isMember || e.isAdmin) {
+            getCallupExtras(e.id).then(setExtras);
+            setPayVersion((v) => v + 1);
+          }
+        }
       })
       .catch(() => setNotFound(true))
       .finally(() => setLoading(false));
@@ -115,6 +129,16 @@ export default function EventPage() {
     if (!leavingSpot && !leavingQueue) return null;
 
     const waiting = ev.counts.waitlist;
+    if (leavingSpot && extras?.me?.paid) {
+      return {
+        title: "You've already paid",
+        body: `You're marked as paid for ${ev.title}. Leaving gives up your spot${
+          waiting > 0 ? " to the next person waiting" : ""
+        }, and the money isn't returned by the app: the admins will be told, so sort out a refund with them.`,
+        confirmLabel: next === "out" ? "Yes, I'm out" : "Change me to maybe",
+        tone: "danger" as const,
+      };
+    }
     if (leavingSpot) {
       return {
         title: "Give up your spot?",
@@ -407,6 +431,9 @@ export default function EventPage() {
         </div>
       )}
 
+      {/* Notes (bank details…), members only. */}
+      {!cancelled && extras?.member && extras.notes && <CallupNotes notes={extras.notes} />}
+
       {/* The answer to the Call-up */}
       {!started && !cancelled && ev.isMember && (
         <div className="mt-6">
@@ -440,6 +467,15 @@ export default function EventPage() {
             </p>
           )}
           {note && <p className="text-[12px] text-ink-2 text-center mt-2 leading-snug">{note}</p>}
+          {extras?.member && user && (
+            <PlayerPayment
+              eventId={ev.id}
+              myUserId={user.id}
+              extras={extras}
+              amIn={ev.myResponse === "in" || (extras.me?.spots ?? 0) > 0}
+              onChanged={(x) => (x ? setExtras(x) : load())}
+            />
+          )}
         </div>
       )}
       {!started && !cancelled && !ev.isMember && (
@@ -482,6 +518,16 @@ export default function EventPage() {
           </p>
         )}
       </div>
+
+      {/* Who has paid: the owner and admins only. */}
+      {ev.isAdmin && !cancelled && extras && extras.paymentMode !== "none" && (
+        <AdminPayments
+          eventId={ev.id}
+          mode={extras.paymentMode}
+          version={payVersion}
+          onChanged={() => getCallupExtras(ev.id).then(setExtras)}
+        />
+      )}
 
       {/* Bringing someone who isn't on the app.
           Any member can, not just the host — "we bring friends" is a thing

@@ -69,7 +69,7 @@ export const LEGAL_UI = {
   },
 } as const;
 
-const UPDATED: Bi = { en: "13 August 2026", id: "13 Agustus 2026" };
+const UPDATED: Bi = { en: "6 November 2026", id: "6 November 2026" };
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Account deletion — the public page
@@ -258,6 +258,14 @@ export const PRIVACY: Doc = {
           d: {
             en: "Which clubs you belong to, your role in them, the sessions you host or join, and notifications about them.",
             id: "Klub yang Anda ikuti, peran Anda di dalamnya, sesi yang Anda selenggarakan atau ikuti, serta notifikasi terkait.",
+          },
+        },
+        {
+          // Added 6 Nov 2026 with 0080 (Call-up payments).
+          t: { en: "Payment receipts", id: "Bukti transfer" },
+          d: {
+            en: "If a club asks for a transfer receipt for a Call-up, the image you upload is seen only by you and that club's owner and admins. It is deleted automatically 3 days after the night; the record that you paid stays. Padelier never handles the money itself.",
+            id: "Jika klub meminta bukti transfer untuk sebuah Call-up, gambar yang Anda unggah hanya dapat dilihat oleh Anda serta pemilik dan admin klub tersebut. Gambar itu dihapus otomatis 3 hari setelah sesi; catatan bahwa Anda sudah membayar tetap disimpan. Padelier tidak pernah memegang uangnya.",
           },
         },
         {

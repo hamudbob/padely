@@ -37,6 +37,10 @@ export interface CallupDefaults {
   hours?: number | null;
   maxPlayers?: number | null;
   cost?: string | null;
+  /** 0080: how the night is paid for, and the notes shown to members (bank
+   *  details, QRIS…). */
+  paymentMode?: "none" | "tick" | "receipt" | null;
+  notes?: string | null;
 }
 
 /** What a new club session starts with. */
@@ -106,6 +110,8 @@ function callupFromJson(j: Record<string, unknown> | null | undefined): CallupDe
     hours: num(o.hours),
     maxPlayers: num(o.max_players),
     cost: str(o.cost),
+    paymentMode: o.payment_mode === "tick" || o.payment_mode === "receipt" || o.payment_mode === "none" ? o.payment_mode : null,
+    notes: str(o.notes),
   };
 }
 
@@ -153,6 +159,7 @@ export async function saveClubSettings(
     callup_defaults: {
       weekday: c.weekday ?? null, time: c.time ?? null, title: c.title ?? null, location: c.location ?? null,
       courts: c.courts ?? null, hours: c.hours ?? null, max_players: c.maxPlayers ?? null, cost: c.cost ?? null,
+      payment_mode: c.paymentMode ?? null, notes: c.notes?.trim() ? c.notes.trim().slice(0, 1000) : null,
     },
     session_defaults: {
       format: d.format ?? null, scoring_format: d.scoringFormat ?? null, courts: d.courts ?? null,
