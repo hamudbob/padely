@@ -202,6 +202,29 @@ export async function signUpAndClassify(
   return { needsConfirmation: !data.session && !alreadyRegistered, alreadyRegistered };
 }
 
+/** Digits in the sign-up code. Must match Supabase → Authentication → Email → "Email OTP Length". */
+export const SIGNUP_CODE_LENGTH = 6;
+
+/**
+ * Confirm a new account with the code from the sign-up email (Nov 2026).
+ *
+ * The email carries a link AND a code: the link for app versions that only
+ * know links (1.2 and earlier), the code for everything since. A code is typed
+ * in the screen the person is already on, so it never lands in the wrong
+ * browser, Gmail's in-app browser, or Safari instead of the app.
+ *
+ * GoTrue accepts a sign-up code as type "email" on current versions and as
+ * "signup" on older ones; try the first, fall back to the second.
+ */
+export async function verifySignupCode(email: string, code: string) {
+  const token = code.replace(/\D/g, "");
+  const first = await supabase.auth.verifyOtp({ email, token, type: "email" });
+  if (!first.error) return first.data;
+  const second = await supabase.auth.verifyOtp({ email, token, type: "signup" });
+  if (!second.error) return second.data;
+  throw first.error;
+}
+
 /** Re-send the sign-up confirmation email (for the "didn't get it / check spam" case). */
 export async function resendConfirmation(email: string, redirectTo?: string) {
   const { error } = await supabase.auth.resend({ type: "signup", email, options: { emailRedirectTo: redirectTo } });

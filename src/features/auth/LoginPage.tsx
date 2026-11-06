@@ -1,13 +1,15 @@
 import { FormEvent, useEffect, useMemo, useRef, useState } from "react";
 import { PUBLIC_ORIGIN } from "../../lib/shareLink";
 import ErrorNote from "../shell/ErrorNote";
-import { withFallback } from "../../lib/errors";
+import { withFallback, messageOf } from "../../lib/errors";
 import { Link, useNavigate, useSearchParams } from "react-router-dom";
 import {
   signInHost,
   InvalidCredentialsError,
   signUpAndClassify,
   resendConfirmation,
+  verifySignupCode,
+  SIGNUP_CODE_LENGTH,
   ensureHostTeamForCurrentUser,
   sendPasswordReset,
   emailHasAccount,
@@ -67,6 +69,9 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(false);
   const [pwFocused, setPwFocused] = useState(false);
   const [resend, setResend] = useState<"idle" | "sending" | "sent">("idle");
+  const [code, setCode] = useState("");
+  const [verifying, setVerifying] = useState(false);
+  const codeRef = useRef<HTMLInputElement>(null);
   // Set only on the fallback path, where we genuinely can't tell whether the
   // address has an account — it offers the sign-up door without ever guessing.
   const [offerSignup, setOfferSignup] = useState(false);
@@ -285,11 +290,37 @@ export default function LoginPage() {
     }
   }
 
+  // The code from the sign-up email. Success signs them in; the effect above
+  // (watching `user`) then makes the team and sends them to /welcome, exactly
+  // as the confirmation link does.
+  async function submitCode(value: string) {
+    const digits = value.replace(/\D/g, "");
+    if (digits.length !== SIGNUP_CODE_LENGTH || verifying) return;
+    setVerifying(true);
+    setError(null);
+    try {
+      await verifySignupCode(email, digits);
+    } catch (err) {
+      setCode("");
+      // Back into the box, ready for the next try (it was disabled while checking).
+      setTimeout(() => codeRef.current?.focus(), 0);
+      // GoTrue says "Token has expired or is invalid" for both; say what to do.
+      setError(
+        /expired|invalid/i.test(messageOf(err, ""))
+          ? "That code didn't work — it may have expired. Check you typed the newest one, or send a new code."
+          : withFallback(err, "That code didn't work."),
+      );
+    } finally {
+      setVerifying(false);
+    }
+  }
+
   async function handleResend() {
     setResend("sending");
     setError(null);
     try {
       await resendConfirmation(email, emailRedirectTo);
+      setCode("");
       setResend("sent");
     } catch (err) {
       // Surfaced rather than swallowed — a silent reset to "Resend email" looks
@@ -474,16 +505,39 @@ export default function LoginPage() {
         <p className="text-[14px] text-ink-2 mt-3 leading-relaxed">
           {isPending ? (
             <>
-              There's already an account for <span className="font-semibold text-graphite">{email}</span>, but the
-              confirmation link was never opened. Send yourself a fresh one and you're in.
+              There's already an account for <span className="font-semibold text-graphite">{email}</span>, but it
+              was never confirmed. Send yourself a new code and type it below.
             </>
           ) : (
             <>
-              We sent a confirmation link to <span className="font-semibold text-graphite">{email}</span>. Open it to
-              activate your account — you'll set your name and photo straight after.
+              We sent a {SIGNUP_CODE_LENGTH}-digit code to <span className="font-semibold text-graphite">{email}</span>.
+              Type it below — or tap the link in the same email. You'll set your name and photo straight after.
             </>
           )}
         </p>
+
+        {/* One field, not six boxes: pasting the whole code works, and iOS can
+            offer it from Mail ("one-time-code"). Fills itself in → confirms. */}
+        <label className="block mt-6">
+          <span className="sr-only">Confirmation code</span>
+          <input
+            ref={codeRef}
+            value={code}
+            onChange={(e) => {
+              const v = e.target.value.replace(/\D/g, "").slice(0, SIGNUP_CODE_LENGTH);
+              setCode(v);
+              if (v.length === SIGNUP_CODE_LENGTH) void submitCode(v);
+            }}
+            inputMode="numeric"
+            autoComplete="one-time-code"
+            autoFocus={!isPending}
+            disabled={verifying}
+            placeholder={"•".repeat(SIGNUP_CODE_LENGTH)}
+            aria-label={`${SIGNUP_CODE_LENGTH}-digit code`}
+            className="w-full rounded-2xl border border-line bg-surface px-4 py-4 text-center font-mono tnum text-[28px] tracking-[0.5em] text-graphite placeholder:text-stone focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55 disabled:opacity-60"
+          />
+        </label>
+        {verifying && <p className="text-[12.5px] text-warm-gray mt-2 text-center">Checking…</p>}
         <p className="text-[13px] text-warm-gray mt-3 leading-relaxed">
           Can't find it? Give it a minute, and <span className="font-semibold text-ink-2">check your spam / junk folder</span> —
           these sometimes land there.
@@ -492,7 +546,7 @@ export default function LoginPage() {
 
         <div className="mt-auto pt-8 space-y-2.5">
           <button type="button" onClick={handleResend} disabled={resend !== "idle"} className={quietBtn}>
-            {resend === "sending" ? "Sending…" : resend === "sent" ? "Sent again ✓" : "Resend email"}
+            {resend === "sending" ? "Sending…" : resend === "sent" ? "New code sent ✓" : "Send a new code"}
           </button>
           {/* The way out of a typo'd address — without this, the only options
               are resending to the wrong inbox or giving up entirely. */}
