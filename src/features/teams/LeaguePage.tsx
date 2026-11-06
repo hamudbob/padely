@@ -5,7 +5,8 @@ import { Link, useParams } from "react-router-dom";
 import { useBackNav } from "../../lib/useBackNav";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { getTeam, getTeamMembers, updateTeam, Team } from "../../lib/supabase/teamQueries";
-import { getClubLeague, shiftPeriodReference, LeagueBoard, LeagueRow, LeaguePeriod } from "../../lib/supabase/leagueQueries";
+import { getClubLeague, LeagueBoard, LeagueRow } from "../../lib/supabase/leagueQueries";
+import { SEASON_LENGTHS } from "../../lib/league/seasons";
 import { SkeletonScreen, SkeletonTable } from "../shell/Skeleton";
 import { useCachedQuery } from "../../lib/cache/useCachedQuery";
 import OfflineNote from "../shell/OfflineNote";
@@ -61,8 +62,8 @@ export default function LeaguePage() {
   // you already looked at is then instant, which is the whole reason anyone
   // pages back and forth.
   const boardQ = useCachedQuery(
-    teamId && team ? `club:${teamId}:league:${team.leaguePeriod}:${periodOffset}` : null,
-    () => getClubLeague(teamId!, shiftPeriodReference(team!.leaguePeriod as LeaguePeriod, new Date(), periodOffset)),
+    teamId && team ? `club:${teamId}:league:season:${periodOffset}` : null,
+    () => getClubLeague(teamId!, periodOffset),
   );
   const board = boardQ.data;
   const boardLoading = boardQ.loading;
@@ -128,10 +129,21 @@ export default function LeaguePage() {
       {/* Period */}
       {board && (
         <div className="flex items-center justify-center gap-4 mt-4">
-          <button onClick={() => setPeriodOffset((o) => o - 1)} aria-label="Previous period" className="w-[30px] h-[30px] rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center active:scale-95">‹</button>
-          <span className="text-[13px] font-semibold text-graphite tnum">{board.periodLabel}</span>
-          <button onClick={() => setPeriodOffset((o) => Math.min(0, o + 1))} disabled={periodOffset >= 0} aria-label="Next period" className="w-[30px] h-[30px] rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center active:scale-95 disabled:opacity-30">›</button>
+          <button
+            onClick={() => setPeriodOffset((o) => Math.max(-(board.seasonCount - 1), o - 1))}
+            disabled={board.offset <= -(board.seasonCount - 1)}
+            aria-label="Previous season"
+            className="w-[30px] h-[30px] rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center active:scale-95 disabled:opacity-30"
+          >‹</button>
+          <span className="text-[13px] font-semibold text-graphite tnum text-center">{board.periodLabel}</span>
+          <button onClick={() => setPeriodOffset((o) => Math.min(0, o + 1))} disabled={periodOffset >= 0} aria-label="Next season" className="w-[30px] h-[30px] rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center active:scale-95 disabled:opacity-30">›</button>
         </div>
+      )}
+      {board && board.offset === 0 && board.pendingChange && (
+        <p className="text-[11.5px] text-warm-gray text-center mt-2">
+          From {new Date(board.pendingChange.startsAt).toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric", timeZone: "UTC" })},
+          seasons are {(SEASON_LENGTHS.find((l) => l.value === board.pendingChange!.length)?.label ?? "").toLowerCase()} long.
+        </p>
       )}
 
       {/* Standings header + sort */}
@@ -175,9 +187,9 @@ export default function LeaguePage() {
           <p className="text-[13px] text-ink-2 font-semibold mb-1">No standings yet</p>
           <p className="text-[12px] text-warm-gray leading-snug">
             {board && board.totalSessions === 0
-              ? "No team sessions this period yet. Attach a session to this team when you create it and it'll count here."
+              ? "No club sessions this season yet. Start a session from this club (or one of its Call-ups) and it'll count here."
               : board && board.qualifyingSessions === 0
-                ? `${board.totalSessions} session${board.totalSessions === 1 ? "" : "s"} this period, but none were set to count for the league, so no points were awarded.`
+                ? `${board.totalSessions} session${board.totalSessions === 1 ? "" : "s"} this season, but none were set to count for the league, so no points were awarded.`
                 : board
                   ? `${board.qualifyingSessions} counting session${board.qualifyingSessions === 1 ? "" : "s"} so far — standings appear as soon as one is played.`
                   : ""}
@@ -193,7 +205,7 @@ export default function LeaguePage() {
               </div>
               <div className="flex-1 min-w-0">
                 <b className="block text-[14.5px] font-semibold text-graphite truncate">{r.displayName}</b>
-                <span className="block text-[11px] text-warm-gray tnum">{r.sessions} sessions · {r.totalPoints} pts · CS {r.clubScore}</span>
+                <span className="block text-[11px] text-warm-gray tnum">{r.sessions} {r.sessions === 1 ? "night" : "nights"} · {r.totalPoints} pts · CS {r.clubScore}</span>
               </div>
               <div className="text-right shrink-0">
                 <span className="font-mono tnum text-[18px] font-semibold text-graphite leading-none">{fmtValue(sortKey, r)}</span>
@@ -207,7 +219,7 @@ export default function LeaguePage() {
       {board && (sortedRows.length > 0 || board.belowThreshold > 0) && (
         <p className="text-[11px] text-warm-gray mt-3.5 leading-relaxed px-0.5">
           Tap “Sort” to rank by total, wins, Club Score, or rating.
-          {board.belowThreshold > 0 ? ` ${board.belowThreshold} member${board.belowThreshold === 1 ? "" : "s"} haven't reached ${board.minSessions} qualifying sessions yet — they'll appear once they do.` : ""}
+          {board.belowThreshold > 0 ? ` ${board.belowThreshold} member${board.belowThreshold === 1 ? "" : "s"} haven't played ${board.minSessions} ${board.minSessions === 1 ? "night" : "nights"} this season yet — they'll appear once they do.` : ""}
         </p>
       )}
     </div>

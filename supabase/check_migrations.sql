@@ -15,7 +15,7 @@
 --   -     nothing of its own left to detect: a later migration replaced the
 --         same function (see the note), or it only changed grants or data
 --
--- Generated from supabase/migrations (0001-0078). Regenerate with
+-- Generated from supabase/migrations (0001-0079). Regenerate with
 -- scripts/gen_migration_check.py after adding a migration.
 -- =====================================================================
 select migration,
@@ -99,6 +99,7 @@ select migration,
   ('0075_admin_session_real_counts', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'admin_session_detail' and p.prosrc like '%(select count(*) from match_participants mp%')))::boolean, 'new code in admin_session_detail()'),
   ('0076_stale_device_cannot_delete_played_rounds', (null)::boolean, 'replaced later by 0078_round_status_guard_and_call_up — that row decides'),
   ('0077_every_account_has_a_team', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'ensure_team_for_user')) and (exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'trg_auth_user_team')))::boolean, 'function ensure_team_for_user, function trg_auth_user_team'),
-  ('0078_round_status_guard_and_call_up', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'sync_session_state' and p.prosrc like '%on conflict (id) do update set status = case%')) and (exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'create_club_event' and p.prosrc like '%raise exception ''Only admins can post a Call-up.'' using errcode = ''P0001'';%')))::boolean, 'new code in sync_session_state(), new code in create_club_event()')
+  ('0078_round_status_guard_and_call_up', ((exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'sync_session_state' and p.prosrc like '%on conflict (id) do update set status = case%')) and (exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'create_club_event' and p.prosrc like '%raise exception ''Only admins can post a Call-up.'' using errcode = ''P0001'';%')))::boolean, 'new code in sync_session_state(), new code in create_club_event()'),
+  ('0079_club_settings_and_seasons', ((to_regclass('public.club_season_rules') is not null) and (exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'trg_club_first_season_rule')) and (exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'sync_league_periods')) and (exists (select 1 from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'update_club_settings')))::boolean, 'table club_season_rules, function trg_club_first_season_rule, function sync_league_periods, function update_club_settings')
 ) as t(migration, ok, checks)
  order by (case when ok then 2 when ok is null then 1 else 0 end), migration;

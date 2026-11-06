@@ -264,7 +264,7 @@ export const USER_HELP: Record<string, UserHelp> = {
       id: "Tabel liga tidak bisa disusun.",
     },
     do: {
-      en: "An empty board can also just mean no session has counted yet this period. If sessions have been played, send us the code.",
+      en: "An empty board can also just mean no session has counted yet this season. If sessions have been played, send us the code.",
       id: "Papan kosong bisa juga berarti belum ada sesi yang dihitung pada periode ini. Kalau sesi sudah dimainkan, kirimkan kodenya.",
     },
   },

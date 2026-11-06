@@ -41,7 +41,7 @@ type RankingBasis = Database["public"]["Tables"]["sessions"]["Row"]["ranking_bas
 
 const STEPS = ["Name", "Format", "Players", "Courts", "Points", "Review"];
 
-const FORMAT_OPTIONS: { value: SessionFormat; label: string; sub: string; enabled: boolean }[] = [
+export const FORMAT_OPTIONS: { value: SessionFormat; label: string; sub: string; enabled: boolean }[] = [
   { value: "americano", label: "Americano", sub: "Individual · partners rotate every round", enabled: true },
   { value: "mexicano", label: "Mexicano", sub: "Individual · live rank-based pairing", enabled: true },
   { value: "mix_americano", label: "Mix Americano", sub: "Individual · partners rotate, every team gender-mixed", enabled: true },
@@ -71,7 +71,7 @@ const TEAM_SCORE_MODE_OPTIONS: { value: TeamScoreMode; label: string; descriptio
   },
 ];
 
-const SCORING_OPTIONS: { value: ScoringFormat; label: string }[] = [
+export const SCORING_OPTIONS: { value: ScoringFormat; label: string }[] = [
   { value: "fixed_21", label: "Fixed 21 points" },
   { value: "fixed_4_games", label: "Fixed 4 games" },
   { value: "fixed_5_games", label: "Fixed 5 games" },
@@ -253,6 +253,29 @@ export default function CreateSessionPage() {
       active = false;
     };
   }, []);
+
+  // The club's session defaults (Club settings, 0079), once, for a session
+  // started FOR a club (?club=, e.g. from a Call-up). Never over a resumed
+  // draft, and never over a format the link itself asked for.
+  const clubDefaultsAppliedRef = useRef(false);
+  useEffect(() => {
+    if (clubDefaultsAppliedRef.current || !teamsLoaded || resumeId) return;
+    const urlClub = searchParams.get("club");
+    const club = urlClub ? myTeams.find((t) => t.id === urlClub) : undefined;
+    if (!club?.settings) return;
+    clubDefaultsAppliedRef.current = true;
+    const d = club.settings.sessionDefaults;
+    const fmt = FORMAT_OPTIONS.find((o) => o.value === d.format && o.enabled);
+    if (fmt && !searchParams.get("format")) setFormat(fmt.value);
+    const sc = SCORING_OPTIONS.find((o) => o.value === d.scoringFormat);
+    if (sc) setScoringFormat(sc.value);
+    if (typeof d.courts === "number" && d.courts >= 1 && d.courts <= 20) {
+      setCourtCount(d.courts);
+      setCourtCountTouched(true);
+    }
+    if (typeof d.countsForLeague === "boolean") setCountsForLeague(d.countsForLeague);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [teamsLoaded, myTeams, resumeId]);
 
   // Guard against an attached club the host isn't actually a member of (audit
   // #4) — e.g. a crafted ?club=<uuid>. Once teams are loaded, drop any clubId

@@ -12,6 +12,7 @@ import {
   EventAttendee,
   addEventGuest,
   removeEventGuest,
+  getCallupRules,
 } from "../../lib/supabase/eventQueries";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
@@ -67,12 +68,23 @@ export default function EventPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
+  const clubIdForRules = ev?.clubId ?? null;
+  useEffect(() => {
+    if (!clubIdForRules) return;
+    let live = true;
+    getCallupRules(clubIdForRules).then((r) => live && setRules(r));
+    return () => {
+      live = false;
+    };
+  }, [clubIdForRules]);
+
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Bringing someone who isn't on the app (0056).
   const [guestName, setGuestName] = useState("");
   const [guestGender, setGuestGender] = useState<"M" | "F">("M");
   const [guestBusy, setGuestBusy] = useState(false);
+  const [rules, setRules] = useState<{ maxGuests: number; waitlist: boolean }>({ maxGuests: 3, waitlist: true });
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 
   // NOTE ON eventId vs ev.id, which is the bug this page shipped with.
@@ -263,6 +275,8 @@ export default function EventPage() {
   // Full is a real state, not a styling detail: it changes what the In button
   // says, what a tap does, and whether the counts read 8/12 or just 8.
   const full = !!ev && ev.maxPlayers != null && ev.counts.in >= ev.maxPlayers;
+  // Full with no waiting list (Club settings): the In button can't do anything.
+  const closedWhenFull = full && !rules.waitlist;
   // The night stopped being a plan and became a thing that happened. Once a
   // session has been started from this event the RSVP list is no longer what
   // decides who plays — the session roster is — so the form comes down. The
@@ -415,7 +429,7 @@ export default function EventPage() {
                 {/* "In" becomes "Join waitlist" when the night is full and you
                     aren't already in it — the label has to tell the truth
                     BEFORE the tap, not after. */}
-                {o.value === "in" && full && ev.myResponse !== "in" ? "Join waitlist" : o.label}
+                {o.value === "in" && full && ev.myResponse !== "in" ? (rules.waitlist ? "Join waitlist" : "Full") : o.label}
               </button>
             ))}
           </div>
@@ -474,11 +488,11 @@ export default function EventPage() {
           members do, and routing it through an admin would mean a WhatsApp
           message every time. Who brought whom is recorded, and they're the one
           who can take them out again. */}
-      {ev.isMember && !cancelled && !ev.session && (
+      {ev.isMember && !cancelled && !ev.session && rules.maxGuests > 0 && !closedWhenFull && (
         <div className="mt-5 rounded-2xl border border-line bg-surface px-4 py-3.5">
           <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray">Bringing someone?</p>
           <p className="text-[11.5px] text-warm-gray mt-1 leading-snug">
-            Add a friend who isn't on Padelier. They take a place like anyone else{full ? " — the session is full, so they'll join the waiting list." : "."}
+            Add a friend who isn't on Padelier ({rules.maxGuests === 1 ? "one guest" : `up to ${rules.maxGuests} guests`} each). They take a place like anyone else{full ? " — it's full, so they'll join the waiting list." : "."}
           </p>
           <div className="flex gap-2 mt-2.5">
             <input

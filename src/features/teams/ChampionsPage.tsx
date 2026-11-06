@@ -1,6 +1,7 @@
 import { useEffect, useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { getClubChampions, ClubChampions } from "../../lib/supabase/championsQueries";
+import { getClubLeagueHistory, SeasonPodium } from "../../lib/supabase/leagueQueries";
 import { getTeam } from "../../lib/supabase/teamQueries";
 import { useBackNav } from "../../lib/useBackNav";
 import { SkeletonScreen, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
@@ -28,6 +29,9 @@ export default function ChampionsPage() {
   const back = useBackNav(teamId ? `/teams/${teamId}` : "/teams");
   const championsQ = useCachedQuery(teamId ? `club:${teamId}:champions` : null, () => getClubChampions(teamId!));
   const teamQ = useCachedQuery(teamId ? `club:${teamId}` : null, () => getTeam(teamId!));
+  // Two halls (Nov 2026): each night's podium, and each season's league podium.
+  const [tab, setTab] = useState<"nights" | "league">("nights");
+  const historyQ = useCachedQuery(teamId && tab === "league" ? `club:${teamId}:league-history` : null, () => getClubLeagueHistory(teamId!));
 
   const data = championsQ.data;
   const teamName = teamQ.data?.name ?? "";
@@ -63,6 +67,7 @@ export default function ChampionsPage() {
 
   const { titles, recent } = data;
   const empty = titles.length === 0 && recent.length === 0;
+  const history = historyQ.data;
 
   return (
     <div className={shell}>
@@ -75,7 +80,23 @@ export default function ChampionsPage() {
         {teamName && <p className="text-[12.5px] text-warm-gray mt-1">{teamName}</p>}
       </div>
 
-      {empty ? (
+      <div className="flex rounded-full bg-surface border border-line p-1 mt-6" role="tablist">
+        {(["nights", "league"] as const).map((k) => (
+          <button
+            key={k}
+            role="tab"
+            aria-selected={tab === k}
+            onClick={() => setTab(k)}
+            className={`flex-1 rounded-full py-2 text-[13px] font-semibold transition-colors ${tab === k ? "bg-graphite text-ivory" : "text-warm-gray"}`}
+          >
+            {k === "nights" ? "Nights" : "League"}
+          </button>
+        ))}
+      </div>
+
+      {tab === "league" ? (
+        <LeagueHall history={history ?? null} loading={historyQ.loading} failed={Boolean(historyQ.error) && !history} teamId={teamId ?? ""} />
+      ) : empty ? (
         <div className="mt-8 rounded-2xl border border-dashed border-line bg-surface px-4 py-8 text-center">
           <p className="text-[13px] font-semibold text-ink-2">No champions yet</p>
           <p className="text-[12px] text-warm-gray mt-1.5 leading-relaxed">Finish a club session and its winner is crowned here.</p>
@@ -157,6 +178,125 @@ export default function ChampionsPage() {
             </>
           )}
         </>
+      )}
+    </div>
+  );
+}
+
+/** The League tab: every finished season's top three, and the season in progress. */
+function LeagueHall({
+  history,
+  loading,
+  failed,
+  teamId,
+}: {
+  history: import("../../lib/supabase/leagueQueries").LeagueHistory | null;
+  loading: boolean;
+  failed: boolean;
+  teamId: string;
+}) {
+  if (loading && !history) {
+    return (
+      <SkeletonScreen label="Loading the league champions">
+        <SkeletonBlock h={120} className="mt-6 mb-3" />
+        <SkeletonRows n={3} avatar />
+      </SkeletonScreen>
+    );
+  }
+  if (failed || !history) {
+    return <p className="text-[13px] text-warm-gray mt-10 text-center">Couldn't load the league champions just now.</p>;
+  }
+  const { finished, current, titles } = history;
+  if (finished.length === 0 && (!current || current.podium.length === 0)) {
+    return (
+      <div className="mt-8 rounded-2xl border border-dashed border-line bg-surface px-4 py-8 text-center">
+        <p className="text-[13px] font-semibold text-ink-2">No league champions yet</p>
+        <p className="text-[12px] text-warm-gray mt-1.5 leading-relaxed">When a season ends, its top three are kept here for good.</p>
+      </div>
+    );
+  }
+  return (
+    <>
+      {titles.length > 0 && (
+        <>
+          <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-8 mb-2 px-0.5">Most seasons won</h3>
+          <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+            {titles.map((t, i) => (
+              <Link key={t.userId} to={`/u/${t.userId}`} className={`flex items-center gap-3 px-4 py-3 border-t border-line first:border-t-0 active:bg-surface-2 ${i === 0 ? "bg-gold-soft/50" : ""}`}>
+                <span className={`w-5 text-center font-mono tnum text-[13px] font-bold ${i === 0 ? "text-gold-ink" : "text-warm-gray"}`}>{i + 1}</span>
+                <span className="w-[34px] h-[34px] rounded-full bg-graphite text-ivory flex items-center justify-center text-[13px] font-semibold overflow-hidden shrink-0">
+                  {t.avatarUrl ? <img src={t.avatarUrl} alt="" className="w-full h-full object-cover" /> : initialsOf(t.displayName)}
+                </span>
+                <span className="flex-1 min-w-0">
+                  <b className="block text-[14px] font-semibold text-graphite truncate">{t.displayName}</b>
+                  <span className="block text-[11px] text-warm-gray">{t.podiums} season podium{t.podiums === 1 ? "" : "s"}</span>
+                </span>
+                <span className="text-right shrink-0">
+                  <span className="font-mono tnum text-[17px] font-semibold text-gold-ink">{t.titles}</span>
+                  <span className="block text-[9px] font-bold uppercase tracking-[0.1em] text-warm-gray -mt-0.5">{t.titles === 1 ? "season" : "seasons"}</span>
+                </span>
+              </Link>
+            ))}
+          </div>
+        </>
+      )}
+
+      {current && current.podium.length > 0 && (
+        <>
+          <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-8 mb-2 px-0.5">This season so far</h3>
+          <SeasonCard s={current} inProgress teamId={teamId} />
+        </>
+      )}
+
+      {finished.length > 0 && (
+        <>
+          <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-8 mb-2 px-0.5">Past seasons</h3>
+          <div className="flex flex-col gap-2.5">
+            {finished.map((s) => (
+              <SeasonCard key={s.start} s={s} teamId={teamId} />
+            ))}
+          </div>
+        </>
+      )}
+    </>
+  );
+}
+
+function SeasonCard({ s, inProgress = false, teamId }: { s: SeasonPodium; inProgress?: boolean; teamId: string }) {
+  const [champ, ...rest] = s.podium;
+  return (
+    <div className="rounded-2xl border border-line bg-surface px-4 py-3.5 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
+      <Link to={`/teams/${teamId}/league`} className="flex items-baseline justify-between gap-2 active:opacity-70">
+        <b className="text-[13.5px] font-semibold text-graphite truncate">
+          {s.label}
+          <span className="text-stone font-normal"> ›</span>
+        </b>
+        <span className="text-[11px] text-warm-gray shrink-0">{inProgress ? "in progress" : `${s.nights} night${s.nights === 1 ? "" : "s"}`}</span>
+      </Link>
+      {champ && (
+        <Link to={`/u/${champ.userId}`} className="flex items-center gap-2.5 mt-2.5 active:opacity-70">
+          <span className="w-[36px] h-[36px] rounded-full bg-gold-soft text-gold-ink border border-gold/30 flex items-center justify-center text-[14px] font-semibold overflow-hidden shrink-0">
+            {champ.avatarUrl ? <img src={champ.avatarUrl} alt="" className="w-full h-full object-cover" /> : initialsOf(champ.displayName)}
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="flex items-center gap-1.5">
+              <span aria-hidden>🥇</span>
+              <b className="text-[14px] font-semibold text-graphite truncate">{champ.displayName}</b>
+            </span>
+            <span className="block text-[11px] text-warm-gray">
+              {inProgress ? "Leading" : "Champion"} · {champ.pointsPerSession.toFixed(1)} pts / night · {champ.sessions} night{champ.sessions === 1 ? "" : "s"}
+            </span>
+          </span>
+        </Link>
+      )}
+      {rest.length > 0 && (
+        <p className="text-[11.5px] text-warm-gray mt-2.5 pt-2.5 border-t border-line flex flex-wrap gap-x-3 gap-y-1">
+          {rest.map((p, i) => (
+            <span key={p.userId}>
+              <span aria-hidden>{MEDAL[i + 1]}</span> {firstNameOf(p.displayName)}
+            </span>
+          ))}
+        </p>
       )}
     </div>
   );

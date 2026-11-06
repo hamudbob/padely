@@ -21,6 +21,42 @@ export interface Team {
   defaultSort: string;
   createdBy: string | null;
   createdAt: string;
+  /** Club settings (0079). Defaults match how clubs behaved before them. */
+  settings: ClubSettings;
+}
+
+/** What a new Call-up form starts with. Every field optional. */
+export interface CallupDefaults {
+  /** 0 = Sunday … 6 = Saturday, in the club's local time. */
+  weekday?: number | null;
+  /** "19:00". */
+  time?: string | null;
+  title?: string | null;
+  location?: string | null;
+  courts?: number | null;
+  hours?: number | null;
+  maxPlayers?: number | null;
+  cost?: string | null;
+}
+
+/** What a new club session starts with. */
+export interface SessionDefaults {
+  format?: string | null;
+  scoringFormat?: string | null;
+  courts?: number | null;
+  countsForLeague?: boolean | null;
+}
+
+export interface ClubSettings {
+  joinMode: "approval" | "open";
+  listed: boolean;
+  maxGuests: number;
+  waitlistEnabled: boolean;
+  reminderMinutes: 0 | 60 | 120;
+  leagueMinSessions: number;
+  defaultSort: string;
+  callupDefaults: CallupDefaults;
+  sessionDefaults: SessionDefaults;
 }
 
 export interface MyTeam extends Team {
@@ -47,6 +83,89 @@ interface ClubRow {
   default_sort: string;
   created_by: string | null;
   created_at: string;
+  join_mode?: string | null;
+  listed?: boolean | null;
+  max_guests?: number | null;
+  waitlist_enabled?: boolean | null;
+  reminder_minutes?: number | null;
+  callup_defaults?: Record<string, unknown> | null;
+  session_defaults?: Record<string, unknown> | null;
+}
+
+/** jsonb (snake_case) → CallupDefaults. Unknown or malformed fields are dropped. */
+function callupFromJson(j: Record<string, unknown> | null | undefined): CallupDefaults {
+  const o = j ?? {};
+  const num = (v: unknown) => (typeof v === "number" && Number.isFinite(v) ? v : null);
+  const str = (v: unknown) => (typeof v === "string" && v.trim() ? v : null);
+  return {
+    weekday: num(o.weekday),
+    time: typeof o.time === "string" && /^\d{2}:\d{2}$/.test(o.time) ? o.time : null,
+    title: str(o.title),
+    location: str(o.location),
+    courts: num(o.courts),
+    hours: num(o.hours),
+    maxPlayers: num(o.max_players),
+    cost: str(o.cost),
+  };
+}
+
+function sessionFromJson(j: Record<string, unknown> | null | undefined): SessionDefaults {
+  const o = j ?? {};
+  return {
+    format: typeof o.format === "string" ? o.format : null,
+    scoringFormat: typeof o.scoring_format === "string" ? o.scoring_format : null,
+    courts: typeof o.courts === "number" ? o.courts : null,
+    countsForLeague: typeof o.counts_for_league === "boolean" ? o.counts_for_league : null,
+  };
+}
+
+export function settingsFromRow(r: ClubRow): ClubSettings {
+  const minutes = r.reminder_minutes === 0 || r.reminder_minutes === 120 ? r.reminder_minutes : 60;
+  return {
+    joinMode: r.join_mode === "open" ? "open" : "approval",
+    listed: r.listed !== false,
+    maxGuests: typeof r.max_guests === "number" ? r.max_guests : 3,
+    waitlistEnabled: r.waitlist_enabled !== false,
+    reminderMinutes: minutes,
+    leagueMinSessions: Math.max(1, r.league_min_sessions ?? 1),
+    defaultSort: r.default_sort ?? "pointsPerSession",
+    callupDefaults: callupFromJson(r.callup_defaults),
+    sessionDefaults: sessionFromJson(r.session_defaults),
+  };
+}
+
+/** Save the club settings screen (owner and admins; 0079 update_club_settings). */
+export async function saveClubSettings(
+  clubId: string,
+  s: ClubSettings,
+  seasonChange?: { length: string; startsAt: Date } | null,
+): Promise<void> {
+  const c = s.callupDefaults;
+  const d = s.sessionDefaults;
+  const payload: Record<string, unknown> = {
+    join_mode: s.joinMode,
+    listed: s.listed,
+    max_guests: s.maxGuests,
+    waitlist_enabled: s.waitlistEnabled,
+    reminder_minutes: s.reminderMinutes,
+    league_min_sessions: s.leagueMinSessions,
+    default_sort: s.defaultSort,
+    callup_defaults: {
+      weekday: c.weekday ?? null, time: c.time ?? null, title: c.title ?? null, location: c.location ?? null,
+      courts: c.courts ?? null, hours: c.hours ?? null, max_players: c.maxPlayers ?? null, cost: c.cost ?? null,
+    },
+    session_defaults: {
+      format: d.format ?? null, scoring_format: d.scoringFormat ?? null, courts: d.courts ?? null,
+      counts_for_league: d.countsForLeague ?? null,
+    },
+  };
+  if (seasonChange) {
+    payload.season_length = seasonChange.length;
+    payload.season_starts_at = seasonChange.startsAt.toISOString();
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { error } = await (supabase as any).rpc("update_club_settings", { p_club_id: clubId, p_settings: payload });
+  if (error) throw new Error(error.message);
 }
 
 function mapTeam(r: ClubRow): Team {
@@ -61,6 +180,7 @@ function mapTeam(r: ClubRow): Team {
     defaultSort: r.default_sort ?? "pointsPerSession",
     createdBy: r.created_by,
     createdAt: r.created_at,
+    settings: settingsFromRow(r),
   };
 }
 

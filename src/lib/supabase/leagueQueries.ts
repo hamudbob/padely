@@ -1,5 +1,6 @@
 import { supabase } from "./client";
 import { getProfiles } from "./profileQueries";
+import { SeasonLength, SeasonRule, normaliseRules, seasonsUpTo, pendingRule } from "../league/seasons";
 
 /**
  * The club league board (0019/0021 session_results → aggregated here).
@@ -10,14 +11,15 @@ import { getProfiles } from "./profileQueries";
  * Scoring (decided design §6.2): each QUALIFYING session (turnout ≥ the club's
  * session_floor) awards placement_points (field_size − rank + 1) + a podium
  * bonus (+3/+2/+1). The league metric is those AVERAGED per session. Only
- * CURRENT club members appear (audit #1), and a player needs ≥ the qualification
- * threshold (which scales with the period, audit #11) to be ranked.
+ * CURRENT club members appear on the live table (audit #1), and a player needs
+ * the club's minimum number of nights (0079) to be ranked. Periods are
+ * seasons since Nov 2026 (lib/league/seasons.ts).
  *
  * Club Score is the shrunk average of the opponent-adjusted per-session
  * performance (perf_adj), on a 0–100 scale (audit #9).
  */
 
-export type LeaguePeriod = "monthly" | "2_month" | "3_month" | "6_month" | "yearly";
+export type LeaguePeriod = SeasonLength;
 
 export interface LeagueRow {
   userId: string;
@@ -40,82 +42,31 @@ export interface LeagueBoard {
   belowThreshold: number;
   minSessions: number;
   period: LeaguePeriod;
+  /** "Season 3 · Oct–Dec 2026". */
   periodLabel: string;
   periodStart: string;
+  /** 0 = the season in progress, -1 the one before, … */
+  offset: number;
+  /** How many seasons there are to page back through (including this one). */
+  seasonCount: number;
+  /** A change of length an admin has planned, starting next season. */
+  pendingChange: { length: SeasonLength; startsAt: string } | null;
   /** Empty-state help: how many club sessions this period met / missed the floor. */
   qualifyingSessions: number;
   totalSessions: number;
 }
 
-const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
-
-export function monthsInPeriod(period: LeaguePeriod): number {
-  switch (period) {
-    case "monthly":
-      return 1;
-    case "2_month":
-      return 2;
-    case "3_month":
-      return 3;
-    case "6_month":
-      return 6;
-    case "yearly":
-      return 12;
-    default:
-      return 1;
-  }
-}
-
-/** Start of the league period containing `now`, anchored in UTC (audit #19) so a
- * session buckets the same for every viewer regardless of their timezone. */
-function periodStartFor(period: LeaguePeriod, now: Date): Date {
-  const y = now.getUTCFullYear();
-  const m = now.getUTCMonth();
-  const block = (size: number) => new Date(Date.UTC(y, Math.floor(m / size) * size, 1));
-  switch (period) {
-    case "monthly":
-      return new Date(Date.UTC(y, m, 1));
-    case "2_month":
-      return block(2);
-    case "3_month":
-      return block(3);
-    case "6_month":
-      return block(6);
-    case "yearly":
-      return new Date(Date.UTC(y, 0, 1));
-    default:
-      return new Date(Date.UTC(y, m, 1));
-  }
-}
-
-function periodEndFor(period: LeaguePeriod, start: Date): Date {
-  return new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + monthsInPeriod(period), 1));
-}
-
-function periodLabelFor(period: LeaguePeriod, start: Date): string {
-  const y = start.getUTCFullYear();
-  const m = start.getUTCMonth();
-  switch (period) {
-    case "monthly":
-      return `${MONTHS[m]} ${y}`;
-    case "2_month":
-      return `${MONTHS[m]}–${MONTHS[m + 1]} ${y}`;
-    case "3_month":
-      return `Q${Math.floor(m / 3) + 1} ${y}`;
-    case "6_month":
-      return `${m === 0 ? "H1" : "H2"} ${y}`;
-    case "yearly":
-      return `${y}`;
-    default:
-      return `${y}`;
-  }
-}
-
-/** A reference date inside the period `offset` periods away from the one holding
- * `now` (offset −1 = previous period). Used by the board's period navigation. */
-export function shiftPeriodReference(period: LeaguePeriod, now: Date, offset: number): Date {
-  const start = periodStartFor(period, now);
-  return new Date(Date.UTC(start.getUTCFullYear(), start.getUTCMonth() + offset * monthsInPeriod(period), 1));
+interface ResultRow {
+  user_id: string;
+  session_id: string;
+  session_date: string;
+  rank: number;
+  field_size: number;
+  player_count: number;
+  placement_points: number;
+  podium_bonus: number;
+  wins: number;
+  perf_adj: number | null;
 }
 
 interface Agg {
@@ -129,65 +80,90 @@ interface Agg {
 
 const CLUB_SCORE_K = 3;
 
-export async function getClubLeague(clubId: string, reference: Date = new Date()): Promise<LeagueBoard> {
+/** The club's season rules (0079). Before 0079 is applied: none, and the
+ *  club's league_period stands in for the one rule. */
+export async function getSeasonRules(clubId: string, fallback: SeasonLength): Promise<SeasonRule[]> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any)
+    .from("club_season_rules")
+    .select("starts_at, length")
+    .eq("club_id", clubId)
+    .order("starts_at", { ascending: true });
+  const rows = (error ? [] : data ?? []) as { starts_at: string; length: SeasonLength }[];
+  return normaliseRules(
+    rows.map((r) => ({ startsAt: new Date(r.starts_at), length: r.length })),
+    fallback,
+  );
+}
+
+/** The date of the club's first league night, which is what Season 1 counts from. */
+async function firstLeagueNight(clubId: string): Promise<Date | null> {
+  const { data, error } = await supabase
+    .from("session_results")
+    .select("session_date")
+    .eq("club_id", clubId)
+    .order("session_date", { ascending: true })
+    .limit(1);
+  if (error) throw error;
+  const d = (data ?? [])[0]?.session_date;
+  return d ? new Date(d) : null;
+}
+
+async function clubLeagueBasics(clubId: string) {
   const { data: club, error: clubError } = await supabase
     .from("clubs")
-    .select("session_floor, league_period, league_min_sessions")
+    .select("league_period, league_min_sessions")
     .eq("id", clubId)
     .single();
   if (clubError) throw clubError;
-
-  const period = (club?.league_period ?? "monthly") as LeaguePeriod;
-  // A player now appears on the league table after a SINGLE session — clubs
-  // that play weekly shouldn't wait a month for a table (was league_min_sessions,
-  // typically 3). Kept as a named value so the empty-state copy still reads well.
-  const minSessions = 1;
-  const start = periodStartFor(period, reference);
-  const end = periodEndFor(period, start);
-
-  const [{ data: results, error: resultsError }, { data: memberRows, error: memberError }, { data: countingRows, error: countingError }] =
-    await Promise.all([
-      supabase
-        .from("session_results")
-        .select("user_id, session_id, rank, field_size, player_count, placement_points, podium_bonus, wins, perf_adj")
-        .eq("club_id", clubId)
-        .gte("session_date", start.toISOString())
-        .lt("session_date", end.toISOString()),
-      supabase.from("club_members").select("user_id").eq("club_id", clubId),
-      // Which of this club's sessions count toward the league — the host's
-      // per-session "Count for league" choice (replaces the old N-player floor).
-      //
-      // Through the RPC, NOT a direct read of `sessions`. 0021 dropped the
-      // members' SELECT policy on that table, so a direct read returns zero
-      // rows for anyone who didn't host — silently, because RLS denies by
-      // returning nothing rather than erroring. Every member but the host saw
-      // an empty league table. get_club_sessions is the members' door in, and
-      // 0038 taught it to return counts_for_league.
-      supabase.rpc("get_club_sessions", { p_club_id: clubId }),
-    ]);
-  if (resultsError) throw resultsError;
-  if (memberError) throw memberError;
-  if (countingError) throw countingError;
-
-  const memberSet = new Set((memberRows ?? []).map((m) => m.user_id));
+  const fallback = ((club?.league_period as SeasonLength | undefined) ?? "monthly") as SeasonLength;
+  const [rules, first, counting] = await Promise.all([
+    getSeasonRules(clubId, fallback),
+    firstLeagueNight(clubId),
+    // Which of this club's sessions count toward the league — the host's
+    // per-session "Count for league" choice (replaces the old N-player floor).
+    //
+    // Through the RPC, NOT a direct read of `sessions`. 0021 dropped the
+    // members' SELECT policy on that table, so a direct read returns zero
+    // rows for anyone who didn't host — silently, because RLS denies by
+    // returning nothing rather than erroring. Every member but the host saw
+    // an empty league table. get_club_sessions is the members' door in, and
+    // 0038 taught it to return counts_for_league.
+    supabase.rpc("get_club_sessions", { p_club_id: clubId }),
+  ]);
+  if (counting.error) throw counting.error;
   const countingSet = new Set(
-    ((countingRows ?? []) as { id: string; counts_for_league: boolean | null }[])
+    ((counting.data ?? []) as { id: string; counts_for_league: boolean | null }[])
       .filter((s) => s.counts_for_league !== false)
       .map((s) => s.id),
   );
+  // Since 0079 the club sets this (1 by default, which is what the app used
+  // since Sep 2026: weekly clubs shouldn't wait a month for a table).
+  const minSessions = Math.max(1, Number(club?.league_min_sessions ?? 1) || 1);
+  return { rules, first, countingSet, minSessions };
+}
 
-  // Session-level turnout tallies for the empty-state help.
+/**
+ * The table for one set of results. `members` limits it to current members
+ * (the live table); null keeps everyone who played (a finished season's
+ * podium: a title stays a title when someone later leaves the club).
+ */
+function tableFrom(
+  results: ResultRow[],
+  countingSet: Set<string>,
+  members: Set<string> | null,
+  minSessions: number,
+  profiles: Map<string, { displayName: string; avatarUrl: string | null; rating?: number }>,
+): { rows: LeagueRow[]; belowThreshold: number; qualifying: number; total: number } {
   const qualifyingSessionIds = new Set<string>();
   const allSessionIds = new Set<string>();
-
   const byUser = new Map<string, Agg>();
-  for (const r of results ?? []) {
+  for (const r of results) {
     allSessionIds.add(r.session_id);
     if (countingSet.has(r.session_id)) qualifyingSessionIds.add(r.session_id);
-    // Only sessions the host marked "count for league" award points, and only
-    // CURRENT members are ranked.
+    // Only sessions the host marked "count for league" award points.
     if (!countingSet.has(r.session_id)) continue;
-    if (!memberSet.has(r.user_id)) continue;
+    if (members && !members.has(r.user_id)) continue;
     const a = byUser.get(r.user_id) ?? { sessions: 0, totalPoints: 0, wins: 0, perfSum: 0, firsts: 0, rankSum: 0 };
     a.sessions += 1;
     a.totalPoints += r.placement_points + r.podium_bonus;
@@ -197,8 +173,6 @@ export async function getClubLeague(clubId: string, reference: Date = new Date()
     a.rankSum += r.rank;
     byUser.set(r.user_id, a);
   }
-
-  const profiles = await getProfiles([...byUser.keys()]);
 
   const rows: LeagueRow[] = [];
   let belowThreshold = 0;
@@ -225,23 +199,118 @@ export async function getClubLeague(clubId: string, reference: Date = new Date()
       avgRank: a.rankSum / a.sessions,
     });
   }
-
   // Default order: league trophy metric, with the decided tiebreak chain
   // (most 1st-place finishes → better average rank → more sessions → name).
   // True head-to-head (§0.3 step 1) needs match data that isn't in the league
   // feed, so it's omitted here.
   rows.sort(compareByPointsPerSession);
+  return { rows, belowThreshold, qualifying: qualifyingSessionIds.size, total: allSessionIds.size };
+}
+
+const RESULT_COLUMNS = "user_id, session_id, session_date, rank, field_size, player_count, placement_points, podium_bonus, wins, perf_adj";
+
+/**
+ * The league table for one season. `offset` 0 is the season in progress,
+ * -1 the one before it, and so on; paging past the club's first season
+ * stays on Season 1.
+ */
+export async function getClubLeague(clubId: string, offset = 0, now: Date = new Date()): Promise<LeagueBoard> {
+  const { rules, first, countingSet, minSessions } = await clubLeagueBasics(clubId);
+  const seasons = seasonsUpTo(rules, first, now);
+  const index = Math.max(0, Math.min(seasons.length - 1, seasons.length - 1 + Math.min(0, offset)));
+  const season = seasons[index];
+
+  const [{ data: results, error: resultsError }, { data: memberRows, error: memberError }] = await Promise.all([
+    supabase
+      .from("session_results")
+      .select(RESULT_COLUMNS)
+      .eq("club_id", clubId)
+      .gte("session_date", season.start.toISOString())
+      .lt("session_date", season.end.toISOString()),
+    supabase.from("club_members").select("user_id").eq("club_id", clubId),
+  ]);
+  if (resultsError) throw resultsError;
+  if (memberError) throw memberError;
+
+  const memberSet = new Set((memberRows ?? []).map((m) => m.user_id));
+  const rows = (results ?? []) as ResultRow[];
+  const profiles = await getProfiles([...new Set(rows.map((r) => r.user_id))]);
+  const table = tableFrom(rows, countingSet, memberSet, minSessions, profiles);
+  const pending = pendingRule(rules, now);
 
   return {
-    rows,
-    belowThreshold,
+    rows: table.rows,
+    belowThreshold: table.belowThreshold,
     minSessions,
-    period,
-    periodLabel: periodLabelFor(period, start),
-    periodStart: start.toISOString(),
-    qualifyingSessions: qualifyingSessionIds.size,
-    totalSessions: allSessionIds.size,
+    period: season.length,
+    periodLabel: season.label,
+    periodStart: season.start.toISOString(),
+    offset: index - (seasons.length - 1),
+    seasonCount: seasons.length,
+    pendingChange: pending ? { length: pending.length, startsAt: pending.startsAt.toISOString() } : null,
+    qualifyingSessions: table.qualifying,
+    totalSessions: table.total,
   };
+}
+
+export interface SeasonPodium {
+  label: string;
+  number: number;
+  dates: string;
+  start: string;
+  /** Up to three, champion first. */
+  podium: LeagueRow[];
+  nights: number;
+}
+
+export interface LeagueHistory {
+  /** Finished seasons, newest first. */
+  finished: SeasonPodium[];
+  /** The season in progress, with its leaders so far. */
+  current: SeasonPodium | null;
+  /** League titles per player, most first. */
+  titles: { userId: string; displayName: string; avatarUrl: string | null; titles: number; podiums: number }[];
+}
+
+/** Every season's top three, for the Champions Hall League tab. */
+export async function getClubLeagueHistory(clubId: string, now: Date = new Date()): Promise<LeagueHistory> {
+  const { rules, first, countingSet, minSessions } = await clubLeagueBasics(clubId);
+  const seasons = seasonsUpTo(rules, first, now);
+  const { data, error } = await supabase.from("session_results").select(RESULT_COLUMNS).eq("club_id", clubId);
+  if (error) throw error;
+  const all = (data ?? []) as ResultRow[];
+  const profiles = await getProfiles([...new Set(all.map((r) => r.user_id))]);
+
+  const bySeason = (s: (typeof seasons)[number]) =>
+    all.filter((r) => {
+      const t = Date.parse(r.session_date);
+      return t >= s.start.getTime() && t < s.end.getTime();
+    });
+
+  const podiums: SeasonPodium[] = seasons.map((s) => {
+    const rows = bySeason(s);
+    const table = tableFrom(rows, countingSet, null, minSessions, profiles);
+    return { label: s.label, number: s.number, dates: s.dates, start: s.start.toISOString(), podium: table.rows.slice(0, 3), nights: table.qualifying };
+  });
+
+  const currentSeason = seasons[seasons.length - 1];
+  const finished = podiums.filter((p, i) => seasons[i].end.getTime() <= now.getTime() && p.podium.length > 0).reverse();
+  const current = currentSeason && currentSeason.end.getTime() > now.getTime() ? podiums[podiums.length - 1] : null;
+
+  const tally = new Map<string, { userId: string; displayName: string; avatarUrl: string | null; titles: number; podiums: number }>();
+  for (const p of finished) {
+    p.podium.forEach((r, i) => {
+      const t = tally.get(r.userId) ?? { userId: r.userId, displayName: r.displayName, avatarUrl: r.avatarUrl, titles: 0, podiums: 0 };
+      if (i === 0) t.titles += 1;
+      t.podiums += 1;
+      tally.set(r.userId, t);
+    });
+  }
+  const titles = [...tally.values()]
+    .filter((t) => t.titles > 0)
+    .sort((a, b) => b.titles - a.titles || b.podiums - a.podiums || a.displayName.localeCompare(b.displayName));
+
+  return { finished, current, titles };
 }
 
 function compareByPointsPerSession(x: LeagueRow, y: LeagueRow): number {

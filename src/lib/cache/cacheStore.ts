@@ -48,7 +48,7 @@ import { supabase } from "../supabase/client";
  */
 
 /** Bump to invalidate every cached payload at once after a shape change. */
-const VERSION = "v1";
+const VERSION = "v2"; // v2, Nov 2026: Team gained `settings` (0079)
 const PREFIX = `padelier:cache:${VERSION}:`;
 /** localStorage is ~5MB; staying well under it leaves room for the score queue. */
 const MAX_BYTES = 1_800_000;
@@ -74,6 +74,7 @@ const fullKey = (key: string) => `${PREFIX}${namespace}:${key}`;
  * behaviour, not a broken one.
  */
 export function startCacheNamespace(): void {
+  dropOldVersions();
   supabase.auth.onAuthStateChange((event, session) => {
     const uid = session?.user?.id ?? null;
 
@@ -130,6 +131,21 @@ export function invalidate(key: string): void {
   if (!namespace) return;
   try {
     localStorage.removeItem(fullKey(key));
+  } catch {
+    /* ignore */
+  }
+}
+
+/** After a VERSION bump the old payloads are dead weight in a ~5MB store the
+ *  offline sessions also live in. Removed once, at start-up. */
+function dropOldVersions(): void {
+  try {
+    const doomed: string[] = [];
+    for (let i = 0; i < localStorage.length; i++) {
+      const k = localStorage.key(i);
+      if (k?.startsWith("padelier:cache:") && !k.startsWith(PREFIX)) doomed.push(k);
+    }
+    for (const k of doomed) localStorage.removeItem(k);
   } catch {
     /* ignore */
   }

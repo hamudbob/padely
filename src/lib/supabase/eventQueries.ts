@@ -635,3 +635,15 @@ export async function cancelEvent(eventId: string): Promise<void> {
   const { error } = await supabase.from("club_events").update({ status: "cancelled" }).eq("id", eventId);
   if (error) throw new Error(error.message);
 }
+
+/** The club's Call-up rules (0079): guests per member, and whether a full
+ *  Call-up queues people or just says it's full. Before 0079: as always. */
+export async function getCallupRules(clubId: string): Promise<{ maxGuests: number; waitlist: boolean }> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const { data, error } = await (supabase as any).from("clubs").select("max_guests, waitlist_enabled").eq("id", clubId).maybeSingle();
+  if (error || !data) return { maxGuests: 3, waitlist: true };
+  return {
+    maxGuests: typeof data.max_guests === "number" ? data.max_guests : 3,
+    waitlist: data.waitlist_enabled !== false,
+  };
+}

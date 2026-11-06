@@ -34,6 +34,7 @@ import TeamDetailPage from "./features/teams/TeamDetailPage";
 import LeaguePage from "./features/teams/LeaguePage";
 import ChampionsPage from "./features/teams/ChampionsPage";
 import MembersPage from "./features/teams/MembersPage";
+import ClubSettingsPage from "./features/teams/ClubSettingsPage";
 import EventPage from "./features/teams/EventPage";
 import PublicProfilePage from "./features/public-profile/PublicProfilePage";
 import NotificationsPage from "./features/notifications/NotificationsPage";
@@ -187,6 +188,7 @@ export default function App() {
         <Route path="/teams/:teamId/league" element={<LeaguePage />} />
         <Route path="/teams/:teamId/champions" element={<ChampionsPage />} />
         <Route path="/teams/:teamId/members" element={<MembersPage />} />
+        <Route path="/teams/:teamId/settings" element={<ClubSettingsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/settings" element={<SettingsPage />} />
         {/* The operator's view. RequireAdmin only decides what to RENDER —

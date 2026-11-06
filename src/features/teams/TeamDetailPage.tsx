@@ -3,7 +3,7 @@ import ErrorNote from "../shell/ErrorNote";
 import { withFallback } from "../../lib/errors";
 import { Link, useNavigate, useParams } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
-import { getTeam, getTeamMembers, getTeamSessions, leaveTeam, uploadClubLogo, getClubStats, Team, TeamMember, TeamSession, TeamRole, ClubStats } from "../../lib/supabase/teamQueries";
+import { getTeam, getTeamMembers, getTeamSessions, leaveTeam, uploadClubLogo, getClubStats, Team, TeamMember, TeamSession, TeamRole, ClubStats, CallupDefaults } from "../../lib/supabase/teamQueries";
 import { getClubJoinRequests, respondJoinRequest, inviteByEmail, requestToJoin, JoinRequestItem } from "../../lib/supabase/clubJoinQueries";
 import {
   getClubEvents,
@@ -61,8 +61,18 @@ function toLocalInput(d: Date): string {
  * when padel is played, and a wrong-but-plausible default is still better than
  * an empty field that can silently mean "now".
  */
-function defaultWhen(events: ClubEvent[]): string {
+function defaultWhen(events: ClubEvent[], usual?: CallupDefaults): string {
   const now = new Date();
+
+  // The club's own setting (0079) wins: "Tuesdays at 19:30".
+  if (usual && typeof usual.weekday === "number" && usual.time) {
+    const [h, m] = usual.time.split(":").map(Number);
+    const next = new Date(now);
+    next.setHours(h, m, 0, 0);
+    next.setDate(next.getDate() + ((usual.weekday - now.getDay() + 7) % 7));
+    if (next.getTime() <= now.getTime()) next.setDate(next.getDate() + 7);
+    return toLocalInput(next);
+  }
 
   const latest = events
     .map((e) => new Date(e.scheduledAt))
@@ -372,10 +382,18 @@ export default function TeamDetailPage() {
       </div>
 
       {/* Primary action */}
-      <div className="flex justify-center mt-5">
+      <div className="flex justify-center gap-2 mt-5">
         <button onClick={() => setShowInvite(true)} className="rounded-full bg-graphite text-ivory text-[13.5px] font-semibold px-7 py-2.5 active:scale-[0.98] transition-transform">
           Invite players
         </button>
+        {isAdmin && (
+          <Link
+            to={`/teams/${team.id}/settings`}
+            className="rounded-full border border-line bg-surface text-ink text-[13.5px] font-semibold px-5 py-2.5 active:scale-[0.98] transition-transform"
+          >
+            Settings
+          </Link>
+        )}
       </div>
 
       <ErrorNote error={error} where="TeamDetailPage" className="mt-2" />
@@ -404,7 +422,7 @@ export default function TeamDetailPage() {
       )}
 
       {/* Upcoming */}
-      {teamId && <EventsSection clubId={teamId} isAdmin={isAdmin} />}
+      {teamId && <EventsSection clubId={teamId} isAdmin={isAdmin} defaults={team.settings?.callupDefaults} />}
 
       {/* League + Champions */}
       <Section title="League">
@@ -412,7 +430,7 @@ export default function TeamDetailPage() {
           <span className="w-[38px] h-[38px] rounded-xl bg-gold-soft text-gold-ink flex items-center justify-center text-[18px] shrink-0" aria-hidden>🏆</span>
           <span className="flex-1 min-w-0">
             <b className="block text-[14px] font-semibold text-graphite">League table</b>
-            <span className="block text-[11.5px] text-warm-gray">Points per session · this period</span>
+            <span className="block text-[11.5px] text-warm-gray">Points per night · this season</span>
           </span>
           <span className="text-stone text-[16px]">›</span>
         </Link>
@@ -420,7 +438,7 @@ export default function TeamDetailPage() {
           <span className="w-[38px] h-[38px] rounded-xl bg-gold-soft text-gold-ink flex items-center justify-center text-[18px] shrink-0" aria-hidden>👑</span>
           <span className="flex-1 min-w-0">
             <b className="block text-[14px] font-semibold text-graphite">Champions Hall</b>
-            <span className="block text-[11.5px] text-warm-gray">Session winners &amp; all-time titles</span>
+            <span className="block text-[11.5px] text-warm-gray">Night and season champions</span>
           </span>
           <span className="text-stone text-[16px]">›</span>
         </Link>
@@ -629,7 +647,7 @@ function InviteSheet(props: {
 }
 
 // ---------------------------------------------------------------------------
-function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }) {
+function EventsSection({ clubId, isAdmin, defaults }: { clubId: string; isAdmin: boolean; defaults?: CallupDefaults }) {
   const navigate = useNavigate();
   const [showForm, setShowForm] = useState(false);
   const [title, setTitle] = useState("");
@@ -718,7 +736,17 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
   // so reopening after a cancel offers a fresh suggestion, but typing is never
   // overwritten underneath the person doing it.
   useEffect(() => {
-    if (showForm && !when) setWhen(defaultWhen(events));
+    if (!showForm) return;
+    if (!when) setWhen(defaultWhen(events, defaults));
+    // The club's Call-up defaults (Club settings), only into empty fields.
+    if (defaults) {
+      if (!title && defaults.title) setTitle(defaults.title);
+      if (!location && defaults.location) setLocation(defaults.location);
+      if (!courts && defaults.courts) setCourts(String(defaults.courts));
+      if (!hours && defaults.hours) setHours(String(defaults.hours));
+      if (!maxPlayers && defaults.maxPlayers) setMaxPlayers(String(defaults.maxPlayers));
+      if (!cost && defaults.cost) setCost(defaults.cost);
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [showForm]);
 
@@ -875,33 +903,45 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
               invite. All optional — an event with none of them behaves exactly
               as it did before. inputMode="numeric" so phones show digits. */}
           <div className="grid grid-cols-2 gap-2">
-            <input
-              value={courts}
-              onChange={(e) => setCourts(e.target.value.replace(/\D/g, "").slice(0, 2))}
-              inputMode="numeric"
-              placeholder="Courts"
-              className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
-            />
-            <input
-              value={hours}
-              onChange={(e) => setHours(e.target.value.replace(/[^\d.]/g, "").slice(0, 4))}
-              inputMode="decimal"
-              placeholder="Hours"
-              className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
-            />
-            <input
-              value={maxPlayers}
-              onChange={(e) => setMaxPlayers(e.target.value.replace(/\D/g, "").slice(0, 3))}
-              inputMode="numeric"
-              placeholder="Max players"
-              className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
-            />
-            <input
-              value={cost}
-              onChange={(e) => setCost(e.target.value.slice(0, 40))}
-              placeholder="Cost e.g. 100K"
-              className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
-            />
+            <label className="block">
+              <span className="block text-[10.5px] font-semibold text-warm-gray mb-0.5 px-0.5">Courts</span>
+              <input
+                value={courts}
+                onChange={(e) => setCourts(e.target.value.replace(/\D/g, "").slice(0, 2))}
+                inputMode="numeric"
+                placeholder="Courts"
+                className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+              />
+            </label>
+            <label className="block">
+              <span className="block text-[10.5px] font-semibold text-warm-gray mb-0.5 px-0.5">Hours</span>
+              <input
+                value={hours}
+                onChange={(e) => setHours(e.target.value.replace(/[^\d.]/g, "").slice(0, 4))}
+                inputMode="decimal"
+                placeholder="Hours"
+                className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+              />
+            </label>
+            <label className="block">
+              <span className="block text-[10.5px] font-semibold text-warm-gray mb-0.5 px-0.5">Max players</span>
+              <input
+                value={maxPlayers}
+                onChange={(e) => setMaxPlayers(e.target.value.replace(/\D/g, "").slice(0, 3))}
+                inputMode="numeric"
+                placeholder="Max players"
+                className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+              />
+            </label>
+            <label className="block">
+              <span className="block text-[10.5px] font-semibold text-warm-gray mb-0.5 px-0.5">Cost</span>
+              <input
+                value={cost}
+                onChange={(e) => setCost(e.target.value.slice(0, 40))}
+                placeholder="Cost e.g. 100K"
+                className="w-full rounded-xl border border-line bg-ivory px-3 py-2.5 text-[16px] text-ink focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+              />
+            </label>
           </div>
           {courts && !maxPlayers && (
             <p className="text-[11px] text-warm-gray px-0.5">
@@ -1072,10 +1112,22 @@ function EventsSection({ clubId, isAdmin }: { clubId: string; isAdmin: boolean }
                       className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink"
                     />
                     <div className="grid grid-cols-2 gap-2">
-                      <input value={eCourts} onChange={(e) => setECourts(e.target.value.replace(/\D/g, "").slice(0, 2))} inputMode="numeric" placeholder="Courts" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink" />
-                      <input value={eHours} onChange={(e) => setEHours(e.target.value.replace(/[^\d.]/g, "").slice(0, 4))} inputMode="decimal" placeholder="Hours" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink" />
-                      <input value={eMax} onChange={(e) => setEMax(e.target.value.replace(/\D/g, "").slice(0, 3))} inputMode="numeric" placeholder="Max players" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink" />
-                      <input value={eCost} onChange={(e) => setECost(e.target.value.slice(0, 40))} placeholder="Cost" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink" />
+                      <label className="block">
+                        <span className="block text-[10.5px] font-semibold text-warm-gray mb-0.5 px-0.5">Courts</span>
+                        <input value={eCourts} onChange={(e) => setECourts(e.target.value.replace(/\D/g, "").slice(0, 2))} inputMode="numeric" placeholder="Courts" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink" />
+                      </label>
+                      <label className="block">
+                        <span className="block text-[10.5px] font-semibold text-warm-gray mb-0.5 px-0.5">Hours</span>
+                        <input value={eHours} onChange={(e) => setEHours(e.target.value.replace(/[^\d.]/g, "").slice(0, 4))} inputMode="decimal" placeholder="Hours" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink" />
+                      </label>
+                      <label className="block">
+                        <span className="block text-[10.5px] font-semibold text-warm-gray mb-0.5 px-0.5">Max players</span>
+                        <input value={eMax} onChange={(e) => setEMax(e.target.value.replace(/\D/g, "").slice(0, 3))} inputMode="numeric" placeholder="Max players" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink" />
+                      </label>
+                      <label className="block">
+                        <span className="block text-[10.5px] font-semibold text-warm-gray mb-0.5 px-0.5">Cost</span>
+                        <input value={eCost} onChange={(e) => setECost(e.target.value.slice(0, 40))} placeholder="Cost" className="w-full rounded-xl border border-line bg-ivory px-3 py-2 text-[15px] text-ink" />
+                      </label>
                     </div>
                     {ev.maxPlayers != null && eMax && Number(eMax) < ev.counts.in && (
                       <p className="text-[11px] text-gold-ink">
