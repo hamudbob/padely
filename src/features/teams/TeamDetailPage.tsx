@@ -333,6 +333,13 @@ export default function TeamDetailPage({ tab = "club" }: { tab?: ClubTab }) {
           busyReq={busyReq}
           onNewCallup={() => setShowForm(true)}
           onInvite={() => setShowInvite(true)}
+          userId={user?.id}
+          onLeagueChanged={() => {
+            invalidateQuery(`club:${teamId}:champions`);
+            invalidateQuery(`club:${teamId}:league-history`);
+            seasonQ.refresh();
+            pastQ.refresh();
+          }}
         />
       )}
       {tab === "league" && teamId && (

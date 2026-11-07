@@ -17,6 +17,7 @@ import {
   setRsvp,
 } from "../../../lib/supabase/eventQueries";
 import { shareUrl } from "../../../lib/shareLink";
+import { finalizeMissedClubNights, MissedNight } from "../../../lib/supabase/resultActions";
 import ConfirmSheet, { ConfirmRequest } from "../../shell/ConfirmSheet";
 import { Chevron, CrownIcon, DateTile, SectionHead, card, raisedCard } from "./ui";
 
@@ -63,6 +64,8 @@ export default function ClubHomeTab({
   busyReq,
   onNewCallup,
   onInvite,
+  userId,
+  onLeagueChanged,
 }: {
   team: Team;
   members: TeamMember[];
@@ -77,6 +80,9 @@ export default function ClubHomeTab({
   busyReq: string | null;
   onNewCallup: () => void;
   onInvite: () => void;
+  userId?: string;
+  /** A missed night was just saved to the league. */
+  onLeagueChanged?: () => void;
 }) {
   const navigate = useNavigate();
   const live = events.filter((e) => e.isLive);
@@ -105,6 +111,26 @@ export default function ClubHomeTab({
       alive = false;
     };
   }, [isAdmin, team.id, events.length]);
+
+  // Nights of mine that ended but never reached the league: save them now,
+  // and show only the ones that still fail.
+  const [missed, setMissed] = useState<MissedNight[]>([]);
+  const [retrying, setRetrying] = useState(false);
+  async function catchUp(announce: boolean) {
+    if (!isAdmin || !userId) return;
+    if (announce) setRetrying(true);
+    try {
+      const r = await finalizeMissedClubNights(team.id, userId);
+      setMissed(r.missed);
+      if (r.saved > 0) onLeagueChanged?.();
+    } finally {
+      setRetrying(false);
+    }
+  }
+  useEffect(() => {
+    void catchUp(false);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [isAdmin, userId, team.id]);
 
   // Played nights with money still out (0082): admins collect, players owe.
   const [money, setMoney] = useState<ClubMoney>({ collect: [], owe: [] });
@@ -179,7 +205,7 @@ export default function ClubHomeTab({
   const collect = isAdmin ? money.collect : [];
   const collectIds = new Set(collect.map((c) => c.eventId));
   const todoNow = todo.filter((t) => !collectIds.has(t.eventId));
-  const needsCount = collect.length + todoNow.length + requests.length + thinNights.length;
+  const needsCount = missed.length + collect.length + todoNow.length + requests.length + thinNights.length;
 
   // ── Getting started (admins of a new club) ─────────────────────────────
   const hideKey = `padelier:club:${team.id}:setupHidden`;
@@ -282,6 +308,23 @@ export default function ClubHomeTab({
         <>
           <p className="text-[12px] font-semibold text-loss mt-5 px-0.5">Needs you · {needsCount}</p>
           <div className={`mt-2 ${card} px-3.5`}>
+            {missed.map((m) => (
+              <div key={"x" + m.sessionId} className="flex items-center gap-3 py-3 border-t border-line first:border-t-0">
+                <NeedIcon kind="calendar" />
+                <span className="flex-1 min-w-0 text-[13.5px]">
+                  <b className="font-semibold text-graphite">{m.name}</b>
+                  <span className="text-warm-gray"> isn't in the league yet</span>
+                  <span className="block text-[11.5px] text-loss leading-snug mt-0.5">{m.reason}</span>
+                </span>
+                <button
+                  onClick={() => void catchUp(true)}
+                  disabled={retrying}
+                  className="shrink-0 rounded-full bg-gold-soft text-gold-ink text-[12px] font-bold px-3 py-1.5 disabled:opacity-40"
+                >
+                  {retrying ? "Saving…" : "Try again"}
+                </button>
+              </div>
+            ))}
             {collect.map((c) => (
               <Link key={"c" + c.eventId} to={`${eventPath({ id: c.eventId, slug: c.slug })}?tab=payments`} className="flex items-center gap-3 py-3 border-t border-line first:border-t-0">
                 <NeedIcon kind="money" />

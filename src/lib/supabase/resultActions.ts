@@ -1,6 +1,7 @@
 import { supabase } from "./client";
 import { getSessionStandings } from "./standingsQueries";
 import { newRating, winProbability } from "../rating/glicko2";
+import { applySessionRatings } from "./ratingActions";
 
 /**
  * Records a club session's final per-member standings into session_results
@@ -240,4 +241,52 @@ async function computePerfAdj(sessionId: string, userByPlayer: Map<string, strin
     out.set(pid, Math.max(0, Math.min(1, 0.5 + avgResidual / 2)));
   }
   return out;
+}
+
+/** A night of the club that ended but never reached the league, and why. */
+export interface MissedNight {
+  sessionId: string;
+  name: string;
+  reason: string;
+}
+
+/**
+ * Catch-up for the host (Nov 2026). Saving a night's league results runs from
+ * the host's device when the session ends, and only retried while that
+ * device still held the session locally. "PLER adu keras" ended, its retry
+ * window passed, and the night silently never reached the League or
+ * Champions. So: whenever the host opens the club, every ended club night of
+ * theirs from the last 60 days that isn't in the league yet is saved now.
+ *
+ * Both steps are idempotent on the server, so running this on every visit
+ * cannot double-count. Returns only the nights that still couldn't be saved,
+ * with a reason the host can act on.
+ */
+export async function finalizeMissedClubNights(clubId: string, userId: string): Promise<{ saved: number; missed: MissedNight[] }> {
+  const since = new Date(Date.now() - 60 * 86400000).toISOString();
+  const { data, error } = await supabase
+    .from("sessions")
+    .select("id, name, results_applied")
+    .eq("club_id", clubId)
+    .eq("status", "ended")
+    .eq("created_by", userId)
+    .gte("ended_at", since);
+  if (error || !data) return { saved: 0, missed: [] };
+  const missed: MissedNight[] = [];
+  let saved = 0;
+  for (const s of data as { id: string; name: string; results_applied: boolean | null }[]) {
+    if (s.results_applied) continue;
+    await applySessionRatings(s.id).catch(() => {});
+    try {
+      const report = await applySessionResults(s.id);
+      if (report.skipped === "no players ranked") {
+        missed.push({ sessionId: s.id, name: s.name, reason: "No scores for this night reached the server. Open it on the phone that ran it." });
+      } else if (report.written > 0) {
+        saved += 1;
+      }
+    } catch (e) {
+      missed.push({ sessionId: s.id, name: s.name, reason: e instanceof Error ? e.message : String((e as { message?: string })?.message ?? "It couldn't be saved.") });
+    }
+  }
+  return { saved, missed };
 }
