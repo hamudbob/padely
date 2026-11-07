@@ -693,6 +693,8 @@ export interface CallupMe {
 export interface CallupExtras {
   member: boolean;
   notes: string | null;
+  /** 0081: the night's saved map link. */
+  locationUrl: string | null;
   paymentMode: PaymentMode;
   /** Receipt mode only: 6 hours before the start. */
   deadline: string | null;
@@ -714,6 +716,7 @@ function extrasFromJson(j: Record<string, unknown> | null): CallupExtras | null 
   return {
     member: j.member === true,
     notes: str(j.notes),
+    locationUrl: safeMapsUrl(str(j.location_url)),
     paymentMode: paymentModeOf(j.payment_mode),
     deadline: str(j.deadline),
     frozenAt: str(j.frozen_at),
@@ -837,4 +840,93 @@ export async function setCallupPayment(
     p_reason: reason?.trim() || null,
   });
   if (error) throw new Error(error.message);
+}
+
+/* ── Saved venues (0081) ──────────────────────────────────────────────────
+ * A club's places, saved as Call-ups are posted. No "add venue" screen: the
+ * Where field offers them, and a new name is saved when the Call-up is.
+ */
+export interface ClubVenue {
+  id: string;
+  name: string;
+  mapsUrl: string | null;
+  useCount: number;
+}
+
+const MAPS_HOST = /^https:\/\/(maps\.app\.goo\.gl|goo\.gl\/maps|maps\.google\.[a-z.]+|(www\.)?google\.[a-z.]+\/maps|maps\.apple\.com)(\/|\?|$)/i;
+
+/** The same rule as the server's clean_maps_url: a maps link, or null. Used
+ *  before anything is put in an href, whatever the database says. */
+export function safeMapsUrl(url: string | null | undefined): string | null {
+  const v = (url ?? "").trim();
+  if (!v || v.length > 500 || /[\s<>"']/.test(v)) return null;
+  return MAPS_HOST.test(v) ? v : null;
+}
+
+/** Where "Open map" goes: the saved link, else a Google Maps search for the
+ *  place's name. Null when there's no place at all. */
+export function mapsLinkFor(location: string | null | undefined, savedUrl?: string | null): string | null {
+  const saved = safeMapsUrl(savedUrl);
+  if (saved) return saved;
+  const name = (location ?? "").trim();
+  if (!name) return null;
+  return `https://www.google.com/maps/search/?api=1&query=${encodeURIComponent(name)}`;
+}
+
+export function venueKey(name: string): string {
+  return name.trim().replace(/\s+/g, " ").toLowerCase();
+}
+
+/** Admin: the club's saved places, most used first. Empty before 0081. */
+export async function listClubVenues(clubId: string): Promise<ClubVenue[]> {
+  const { data, error } = await rpcAny("list_club_venues", { p_club_id: clubId });
+  if (error) return [];
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    id: String(r.id),
+    name: String(r.name ?? ""),
+    mapsUrl: safeMapsUrl((r.maps_url as string) ?? null),
+    useCount: Number(r.use_count ?? 0),
+  }));
+}
+
+/** Admin: set a Call-up's place, saving it (and its link) for the club.
+ *  `count` = this is another night there (posting, or moving the night). */
+export async function setCallupVenue(eventId: string, name: string | null, mapsUrl: string | null, count: boolean): Promise<void> {
+  const { error } = await rpcAny("set_callup_venue", {
+    p_event_id: eventId,
+    p_name: name?.trim() || null,
+    p_maps_url: mapsUrl?.trim() || null,
+    p_count: count,
+  });
+  if (error) throw new Error(error.message);
+}
+
+export async function updateClubVenue(venueId: string, name: string, mapsUrl: string | null): Promise<void> {
+  const { error } = await rpcAny("update_club_venue", { p_venue_id: venueId, p_name: name.trim(), p_maps_url: mapsUrl?.trim() || null });
+  if (error) throw new Error(error.message);
+}
+
+export async function deleteClubVenue(venueId: string): Promise<void> {
+  const { error } = await rpcAny("delete_club_venue", { p_venue_id: venueId });
+  if (error) throw new Error(error.message);
+}
+
+/* ── Needs you (0081) ─────────────────────────────────────────────────── */
+export interface AdminTodoItem {
+  eventId: string;
+  title: string;
+  scheduledAt: string;
+  toCheck: number;
+}
+
+/** Admin: upcoming nights with receipts waiting. Empty before 0081. */
+export async function getClubAdminTodo(clubId: string): Promise<AdminTodoItem[]> {
+  const { data, error } = await rpcAny("get_club_admin_todo", { p_club_id: clubId });
+  if (error) return [];
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    eventId: String(r.event_id),
+    title: String(r.title ?? ""),
+    scheduledAt: String(r.scheduled_at ?? ""),
+    toCheck: Number(r.to_check ?? 0),
+  }));
 }

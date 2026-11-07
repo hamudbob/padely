@@ -31,9 +31,6 @@ import PublicLivePage from "./features/public-live/PublicLivePage";
 import FinalSummaryPage from "./features/final-summary/FinalSummaryPage";
 import TeamsPage from "./features/teams/TeamsPage";
 import TeamDetailPage from "./features/teams/TeamDetailPage";
-import LeaguePage from "./features/teams/LeaguePage";
-import ChampionsPage from "./features/teams/ChampionsPage";
-import MembersPage from "./features/teams/MembersPage";
 import ClubSettingsPage from "./features/teams/ClubSettingsPage";
 import EventPage from "./features/teams/EventPage";
 import PublicProfilePage from "./features/public-profile/PublicProfilePage";
@@ -174,7 +171,8 @@ export default function App() {
         <Route path="/profile" element={<ProfilePage />} />
       </Route>
       {/* ── Places you drill into: these KEEP the tab bar ────────────────
-          A club, its league, its champions, its members, your notifications,
+          A club (its League, Champions and Members tabs are the same page,
+          one route each so links and back keep working), your notifications,
           your settings. You're browsing, not doing — leaving costs nothing, so
           being able to jump straight to another tab is a convenience. */}
       <Route
@@ -185,9 +183,9 @@ export default function App() {
         }
       >
         <Route path="/teams/:teamId" element={<TeamDetailPage />} />
-        <Route path="/teams/:teamId/league" element={<LeaguePage />} />
-        <Route path="/teams/:teamId/champions" element={<ChampionsPage />} />
-        <Route path="/teams/:teamId/members" element={<MembersPage />} />
+        <Route path="/teams/:teamId/league" element={<TeamDetailPage tab="league" />} />
+        <Route path="/teams/:teamId/champions" element={<TeamDetailPage tab="champions" />} />
+        <Route path="/teams/:teamId/members" element={<TeamDetailPage tab="members" />} />
         <Route path="/teams/:teamId/settings" element={<ClubSettingsPage />} />
         <Route path="/notifications" element={<NotificationsPage />} />
         <Route path="/settings" element={<SettingsPage />} />

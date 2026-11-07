@@ -41,10 +41,14 @@ export interface LeagueBoard {
   rows: LeagueRow[];
   belowThreshold: number;
   minSessions: number;
+  /** Counting nights per member this season, qualified or not (for "1 more
+   *  night to qualify"). */
+  nights: Record<string, number>;
   period: LeaguePeriod;
   /** "Season 3 · Oct–Dec 2026". */
   periodLabel: string;
   periodStart: string;
+  periodEnd: string;
   /** 0 = the season in progress, -1 the one before, … */
   offset: number;
   /** How many seasons there are to page back through (including this one). */
@@ -154,7 +158,7 @@ function tableFrom(
   members: Set<string> | null,
   minSessions: number,
   profiles: Map<string, { displayName: string; avatarUrl: string | null; rating?: number }>,
-): { rows: LeagueRow[]; belowThreshold: number; qualifying: number; total: number } {
+): { rows: LeagueRow[]; belowThreshold: number; qualifying: number; total: number; nights: Record<string, number> } {
   const qualifyingSessionIds = new Set<string>();
   const allSessionIds = new Set<string>();
   const byUser = new Map<string, Agg>();
@@ -204,7 +208,9 @@ function tableFrom(
   // True head-to-head (§0.3 step 1) needs match data that isn't in the league
   // feed, so it's omitted here.
   rows.sort(compareByPointsPerSession);
-  return { rows, belowThreshold, qualifying: qualifyingSessionIds.size, total: allSessionIds.size };
+  const nights: Record<string, number> = {};
+  for (const [userId, a] of byUser) nights[userId] = a.sessions;
+  return { rows, belowThreshold, qualifying: qualifyingSessionIds.size, total: allSessionIds.size, nights };
 }
 
 const RESULT_COLUMNS = "user_id, session_id, session_date, rank, field_size, player_count, placement_points, podium_bonus, wins, perf_adj";
@@ -242,9 +248,11 @@ export async function getClubLeague(clubId: string, offset = 0, now: Date = new 
     rows: table.rows,
     belowThreshold: table.belowThreshold,
     minSessions,
+    nights: table.nights,
     period: season.length,
     periodLabel: season.label,
     periodStart: season.start.toISOString(),
+    periodEnd: season.end.toISOString(),
     offset: index - (seasons.length - 1),
     seasonCount: seasons.length,
     pendingChange: pending ? { length: pending.length, startsAt: pending.startsAt.toISOString() } : null,

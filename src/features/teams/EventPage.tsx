@@ -1,5 +1,5 @@
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
+import { ReactNode, useEffect, useState } from "react";
+import { Link, useNavigate, useParams, useSearchParams } from "react-router-dom";
 import {
   getPublicEvent,
   setRsvp,
@@ -14,31 +14,44 @@ import {
   removeEventGuest,
   getCallupRules,
   getCallupExtras,
+  getClubAdminTodo,
+  cancelEvent,
+  mapsLinkFor,
   CallupExtras,
+  PaymentMode,
 } from "../../lib/supabase/eventQueries";
-import { AdminPayments, CallupNotes, PlayerPayment } from "./CallupPayment";
+import { AdminPayments, CallupNotes, PaidCount, PlayerPayment } from "./CallupPayment";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
 import { SkeletonScreen, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
 import { shareUrl } from "../../lib/shareLink";
 import ConfirmSheet, { ConfirmRequest } from "../shell/ConfirmSheet";
+import { BottomSheet } from "../shell/Sheet";
+import CallupFormSheet, { PinIcon } from "./club/CallupFormSheet";
+import { Face, Segmented, card } from "./club/ui";
 
-interface DateParts {
-  weekday: string;
-  day: string;
-  month: string;
-  time: string;
-}
-function dateParts(iso: string): DateParts | null {
+/**
+ * The Call-up page (ADR-002). Readable by anyone with the link; members answer
+ * here, admins run the night from the ⋯ menu and the Payments tab.
+ *
+ * Order, top to bottom: what and where (header card), what it means for me
+ * (Your spot), what the admin wrote (Notes), then who's coming.
+ */
+
+function whenLine(iso: string, hours: number | null): { day: string; time: string } | null {
   const d = new Date(iso);
   if (Number.isNaN(d.getTime())) return null;
-  return {
-    weekday: d.toLocaleDateString(undefined, { weekday: "long" }),
-    day: d.toLocaleDateString(undefined, { day: "numeric" }),
-    month: d.toLocaleDateString(undefined, { month: "short" }).toUpperCase(),
-    time: d.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" }),
-  };
+  const day = d.toLocaleDateString(undefined, { weekday: "long", day: "numeric", month: "long" });
+  const t = (x: Date) => x.toLocaleTimeString(undefined, { hour: "2-digit", minute: "2-digit" });
+  const end = hours && hours > 0 ? new Date(d.getTime() + hours * 3600 * 1000) : null;
+  return { day, time: end ? `${t(d)} – ${t(end)}` : t(d) };
 }
+
+const PAY_LABEL: Record<PaymentMode, string | undefined> = {
+  none: undefined,
+  tick: "Pay the admin · they tick you off",
+  receipt: "Pay first · send your receipt",
+};
 
 const RSVP_OPTS: { value: RsvpResponse; label: string }[] = [
   { value: "in", label: "I'm in" },
@@ -46,19 +59,24 @@ const RSVP_OPTS: { value: RsvpResponse; label: string }[] = [
   { value: "out", label: "Can't make it" },
 ];
 
+type ListKey = "going" | "waitlist" | "maybe" | "out";
+
 export default function EventPage() {
   const { eventId } = useParams();
   const back = useBackNav("/");
+  const navigate = useNavigate();
+  const [params, setParams] = useSearchParams();
   const { user } = useHostSession();
   const [ev, setEv] = useState<PublicEvent | null>(null);
   const [loading, setLoading] = useState(true);
   const [notFound, setNotFound] = useState(false);
   const [copied, setCopied] = useState(false);
 
-  // Notes and payments (0080). Separate from the event itself: the public
-  // page is readable signed out, these are for members only.
+  // Notes and payments (0080) and the map link (0081). Separate from the event
+  // itself: the public page is readable signed out, notes are for members.
   const [extras, setExtras] = useState<CallupExtras | null>(null);
   const [payVersion, setPayVersion] = useState(0);
+  const [toCheck, setToCheck] = useState(0);
 
   function load() {
     if (!eventId) return;
@@ -67,10 +85,9 @@ export default function EventPage() {
         if (!e) setNotFound(true);
         else {
           setEv(e);
-          if (e.isMember || e.isAdmin) {
-            getCallupExtras(e.id).then(setExtras);
-            setPayVersion((v) => v + 1);
-          }
+          getCallupExtras(e.id).then(setExtras);
+          if (e.isMember || e.isAdmin) setPayVersion((v) => v + 1);
+          if (e.isAdmin) getClubAdminTodo(e.clubId).then((t) => setToCheck(t.find((x) => x.eventId === e.id)?.toCheck ?? 0));
         }
       })
       .catch(() => setNotFound(true))
@@ -82,6 +99,7 @@ export default function EventPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId]);
 
+  const [rules, setRules] = useState<{ maxGuests: number; waitlist: boolean }>({ maxGuests: 3, waitlist: true });
   const clubIdForRules = ev?.clubId ?? null;
   useEffect(() => {
     if (!clubIdForRules) return;
@@ -95,11 +113,17 @@ export default function EventPage() {
   const [note, setNote] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
   // Bringing someone who isn't on the app (0056).
+  const [guestOpen, setGuestOpen] = useState(false);
   const [guestName, setGuestName] = useState("");
   const [guestGender, setGuestGender] = useState<"M" | "F">("M");
   const [guestBusy, setGuestBusy] = useState(false);
-  const [rules, setRules] = useState<{ maxGuests: number; waitlist: boolean }>({ maxGuests: 3, waitlist: true });
+  const [guestErr, setGuestErr] = useState<string | null>(null);
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const [menuOpen, setMenuOpen] = useState(false);
+  const [editing, setEditing] = useState(false);
+  const [managing, setManaging] = useState<{ p: EventAttendee; list: ListKey } | null>(null);
+  const [list, setList] = useState<ListKey | null>(null);
+  const adminTab: "players" | "payments" = params.get("tab") === "payments" ? "payments" : "players";
 
   // NOTE ON eventId vs ev.id, which is the bug this page shipped with.
   //
@@ -112,6 +136,7 @@ export default function EventPage() {
   //
   // The resolved row already carries the real one. So: `eventId` for reading
   // and for links, `ev.id` for anything that writes.
+
   /**
    * Leaving a spot you hold is the one RSVP move that cannot be undone.
    *
@@ -142,11 +167,12 @@ export default function EventPage() {
     if (leavingSpot) {
       return {
         title: "Give up your spot?",
-        body: waiting > 0
-          ? `You're in for this session. Leaving hands your spot straight to the next person waiting${
-              waiting > 1 ? ` (${waiting} are in the queue)` : ""
-            } — if you change your mind you'd rejoin at the back of the list.`
-          : "You're in for this session. You can answer again later, though if the night fills up in the meantime you'd join the waiting list.",
+        body:
+          waiting > 0
+            ? `You're in for this session. Leaving hands your spot straight to the next person waiting${
+                waiting > 1 ? ` (${waiting} are in the queue)` : ""
+              } — if you change your mind you'd rejoin at the back of the list.`
+            : "You're in for this session. You can answer again later, though if the night fills up in the meantime you'd join the waiting list.",
         confirmLabel: next === "out" ? "Yes, I'm out" : "Change me to maybe",
         tone: "danger" as const,
       };
@@ -163,6 +189,7 @@ export default function EventPage() {
 
   function respond(response: RsvpResponse) {
     if (!eventId || !ev) return;
+    if (response === ev.myResponse || (response === "in" && ev.myResponse === "waitlist")) return;
     const warn = leaveWarning(response);
     if (warn) {
       setConfirm({ ...warn, run: () => doRespond(response) });
@@ -196,18 +223,15 @@ export default function EventPage() {
   async function addGuest() {
     if (!ev || !guestName.trim()) return;
     setGuestBusy(true);
-    setNote(null);
+    setGuestErr(null);
     try {
       const result = await addEventGuest(ev.id, guestName.trim(), guestGender);
       setGuestName("");
-      setNote(
-        result.waitlisted
-          ? `${result.name} is on the waiting list — the session is full.`
-          : `${result.name} is in.`,
-      );
+      setGuestOpen(false);
+      setNote(result.waitlisted ? `${result.name} is on the waiting list — the session is full.` : `${result.name} is in.`);
       load();
     } catch (e) {
-      setNote(e instanceof Error ? e.message : "Couldn't add that guest.");
+      setGuestErr(e instanceof Error ? e.message : "Couldn't add that guest.");
     } finally {
       setGuestBusy(false);
     }
@@ -241,7 +265,7 @@ export default function EventPage() {
   }
 
   /**
-   * Host: promote off the waiting list, or take someone out.
+   * Admin: promote off the waiting list, or take someone out.
    *
    * Promoting is a gift and goes through unchallenged. Taking somebody out is
    * done TO a person who is not holding the phone and cannot object, so it
@@ -257,9 +281,10 @@ export default function EventPage() {
     const waiting = ev.counts.waitlist;
     setConfirm({
       title: `Take ${who} out?`,
-      body: waiting > 0
-        ? `${who} is in for this session. Taking them out gives their spot to the next person on the waiting list — you'd have to ask them to answer again, and the night may be full by then.`
-        : `${who} is in for this session. They'll need to answer again themselves if this was a mistake.`,
+      body:
+        waiting > 0
+          ? `${who} is in for this session. Taking them out gives their spot to the next person on the waiting list — you'd have to ask them to answer again, and the night may be full by then.`
+          : `${who} is in for this session. They'll need to answer again themselves if this was a mistake.`,
       confirmLabel: `Take ${who} out`,
       tone: "danger",
       run: () => doSetFor(userId, response, who),
@@ -283,17 +308,41 @@ export default function EventPage() {
 
   async function share() {
     // window.location.href was `capacitor://localhost/e/...` in the app — a
-    // link that opens nothing for anybody. And a "Share" that only copied
-    // looked broken on a phone, because no sheet ever appeared.
+    // link that opens nothing for anybody. Same path and same message as the
+    // club card — see eventShareText. "Copied" only when it really did copy.
     if (!ev) return;
-    // Same path and same message as the club card — see eventShareText.
     const outcome = await shareUrl(eventPath(ev), ev.title, eventShareText(ev));
-    // "Copied" only when it really did copy. The old version said so on a
-    // path that had already failed.
     if (outcome === "copied") {
       setCopied(true);
       setTimeout(() => setCopied(false), 1600);
     }
+  }
+
+  function callOff() {
+    if (!ev) return;
+    const n = ev.counts.in + ev.counts.waitlist;
+    setConfirm({
+      title: `Call off ${ev.title}?`,
+      body: `${n > 0 ? `${n} ${n === 1 ? "person has" : "people have"} answered. ` : ""}The night is marked cancelled for everyone and answers close. This can't be undone from the app${
+        (extras?.paidSpots ?? 0) > 0 ? `, and ${extras?.paidSpots} paid ${extras?.paidSpots === 1 ? "spot needs" : "spots need"} refunding by you` : ""
+      }.`,
+      confirmLabel: "Call it off",
+      tone: "danger",
+      run: async () => {
+        try {
+          await cancelEvent(ev.id);
+          setNote("This Call-up is called off.");
+        } catch (e) {
+          setNote(e instanceof Error ? e.message : "Couldn't call it off.");
+        }
+        load();
+      },
+    });
+  }
+
+  function startSession() {
+    if (!ev) return;
+    navigate(`/create?club=${ev.clubId}&name=${encodeURIComponent(ev.title)}&event=${ev.id}`);
   }
 
   // Full is a real state, not a styling detail: it changes what the In button
@@ -301,24 +350,42 @@ export default function EventPage() {
   const full = !!ev && ev.maxPlayers != null && ev.counts.in >= ev.maxPlayers;
   // Full with no waiting list (Club settings): the In button can't do anything.
   const closedWhenFull = full && !rules.waitlist;
-  // The night stopped being a plan and became a thing that happened. Once a
-  // session has been started from this event the RSVP list is no longer what
-  // decides who plays — the session roster is — so the form comes down. The
-  // server refuses the write too (0052); this is so nobody taps a control that
-  // was only ever going to fail.
+  // Once a session has been started from this event the RSVP list is no longer
+  // what decides who plays — the session roster is — so the form comes down.
+  // The server refuses the write too (0052).
   const started = !!ev?.session && (ev.session.status === "live" || ev.session.status === "ended");
   const live = ev?.session?.status === "live";
   const myQueuePosition =
     ev && ev.myResponse === "waitlist" ? ev.waitlist.findIndex((p) => p.userId === user?.id) + 1 || null : null;
 
-  const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-6 safe-top safe-bottom anim-fade";
+  const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 pt-5 pb-10 safe-top safe-bottom anim-fade";
+  const roundBtn =
+    "w-9 h-9 rounded-full bg-surface text-ink-2 flex items-center justify-center shadow-[0_1px_2px_rgba(13,13,13,0.06)] active:scale-95 transition-transform";
+  const cancelled = ev?.status === "cancelled";
+  const canRun = !!ev?.isAdmin && !cancelled && !started;
   const bar = (
-    <div className="flex items-center justify-between mb-2">
-      <button onClick={back} aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</button>
+    <div className="flex items-center justify-between mb-1">
+      <button onClick={back} aria-label="Back" className={`${roundBtn} text-[17px]`}>
+        ‹
+      </button>
       <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
         Padelier<span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
       </div>
-      <div className="w-9" />
+      {ev?.isAdmin && !cancelled ? (
+        <button onClick={() => setMenuOpen(true)} aria-label="Call-up options" className={roundBtn}>
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden>
+            <circle cx="5" cy="12" r="1.8" />
+            <circle cx="12" cy="12" r="1.8" />
+            <circle cx="19" cy="12" r="1.8" />
+          </svg>
+        </button>
+      ) : ev && !cancelled ? (
+        <button onClick={share} aria-label={copied ? "Link copied" : "Share this Call-up"} className={roundBtn}>
+          {copied ? <span className="text-[13px] text-win">✓</span> : <ShareIcon />}
+        </button>
+      ) : (
+        <div className="w-9" />
+      )}
     </div>
   );
 
@@ -327,146 +394,174 @@ export default function EventPage() {
       <div className={shell}>
         {bar}
         <SkeletonScreen label="Loading this session">
-          <SkeletonBlock h={286} className="mb-5" />
-          <SkeletonBlock h={64} className="mb-5" />
+          <SkeletonBlock h={250} className="mt-3 mb-4" />
+          <SkeletonBlock h={150} className="mb-5" />
           <SkeletonRows n={4} avatar />
         </SkeletonScreen>
       </div>
     );
-  if (notFound || !ev) return <div className={shell}>{bar}<p className="text-[13px] text-warm-gray mt-16 text-center">This session isn't available.</p></div>;
+  if (notFound || !ev)
+    return (
+      <div className={shell}>
+        {bar}
+        <p className="text-[13px] text-warm-gray mt-16 text-center">This session isn't available.</p>
+      </div>
+    );
 
-  const cancelled = ev.status === "cancelled";
-  const dp = dateParts(ev.scheduledAt);
+  const when = whenLine(ev.scheduledAt, ev.durationHours);
+  const mapHref = mapsLinkFor(ev.location, extras?.locationUrl);
   const loginHref = `/login?next=${encodeURIComponent(`/e/${eventId}`)}`;
+  const payMode = extras?.paymentMode ?? "none";
+  const showPayments = ev.isAdmin && !cancelled && extras && payMode !== "none";
+  const lists: Record<ListKey, EventAttendee[]> = { going: ev.going, waitlist: ev.waitlist, maybe: ev.maybe, out: ev.out };
+  const shown: ListKey = list ?? (ev.going.length === 0 && ev.waitlist.length > 0 ? "waitlist" : "going");
+  const manageable = ev.isAdmin && !cancelled && !started;
+  const canBringGuest = ev.isMember && !cancelled && !ev.session && rules.maxGuests > 0 && !closedWhenFull;
+  const myGuests = [...ev.going, ...ev.waitlist].filter((p) => p.isGuest && p.invitedBy === user?.id).length;
 
   return (
     <div className={shell}>
       {bar}
 
-      {/* Event card */}
-      <div className="mt-3 rounded-3xl bg-surface border border-line overflow-hidden shadow-[0_1px_3px_rgba(13,13,13,0.06)]">
-        {/* Team chip */}
-        <Link to={`/teams/${ev.clubId}`} className="flex items-center justify-center gap-2 px-5 py-3.5 active:bg-surface-2 transition-colors">
-          <span className="w-[24px] h-[24px] rounded-[7px] bg-gold-soft text-gold-ink flex items-center justify-center text-[12px] font-serif font-semibold overflow-hidden">
-            {ev.teamLogo ? <img src={ev.teamLogo} alt="" className="w-full h-full object-cover" /> : ev.teamName.charAt(0).toUpperCase()}
-          </span>
-          <span className="text-[12.5px] font-semibold text-ink-2">{ev.teamName}</span>
-        </Link>
+      {/* ── Header card ─────────────────────────────────────────────── */}
+      <div className={`mt-3 ${card} overflow-hidden`}>
+        <div className="px-5 pt-4 pb-4">
+          <Link to={`/teams/${ev.clubId}`} className="inline-flex items-center gap-2 rounded-full bg-surface-2 pl-1 pr-3 py-1 active:opacity-70">
+            <span className="w-[22px] h-[22px] rounded-full bg-gold-soft text-gold-ink flex items-center justify-center text-[11px] font-serif font-semibold overflow-hidden">
+              {ev.teamLogo ? <img src={ev.teamLogo} alt="" className="w-full h-full object-cover" /> : ev.teamName.charAt(0).toUpperCase()}
+            </span>
+            <span className="text-[12px] font-semibold text-ink-2 truncate max-w-[200px]">{ev.teamName}</span>
+          </Link>
+          <div className="flex items-center gap-2 mt-3">
+            {cancelled ? (
+              <span className="rounded-full bg-loss-soft text-loss text-[10px] font-bold uppercase tracking-[0.1em] px-2.5 py-1">Called off</span>
+            ) : live ? (
+              <span className="inline-flex items-center gap-1.5 rounded-full bg-court-lime/30 text-graphite text-[10px] font-bold uppercase tracking-[0.1em] px-2.5 py-1">
+                <span className="w-1.5 h-1.5 rounded-full bg-win" aria-hidden />
+                Playing now
+              </span>
+            ) : started ? (
+              <span className="rounded-full bg-surface-2 text-warm-gray text-[10px] font-bold uppercase tracking-[0.1em] px-2.5 py-1">Finished</span>
+            ) : (
+              <span className="text-[10px] font-bold uppercase tracking-[0.16em] text-warm-gray">Call-up</span>
+            )}
+            {eventCode(ev) && <span className="font-mono text-[10.5px] font-bold tracking-[0.14em] text-gold-ink">{eventCode(ev)}</span>}
+          </div>
+          <h1 className={`font-serif text-[26px] font-semibold tracking-tight leading-[1.12] mt-1.5 ${cancelled ? "text-warm-gray line-through" : "text-graphite"}`}>
+            {ev.title}
+          </h1>
 
-        <div className="border-t border-line px-5 pt-5 pb-6 text-center">
-          {cancelled ? (
-            <span className="inline-block rounded-full bg-loss-soft text-loss text-[10px] font-bold uppercase tracking-[0.1em] px-2.5 py-1 mb-3">Cancelled</span>
-          ) : (
-            <p className="text-[10px] font-bold uppercase tracking-[0.16em] text-warm-gray mb-1.5">Call-up</p>
-          )}
-          <h1 className={`font-serif text-[25px] font-semibold tracking-tight leading-tight ${cancelled ? "text-warm-gray line-through" : "text-graphite"}`}>{ev.title}</h1>
-          {/* The same shorthand that goes into the share text, so the message
-              in the group chat and the page it opens say the same thing. */}
-          {eventCode(ev) && (
-            <p className="font-mono text-[11px] font-bold tracking-[0.14em] text-gold-ink mt-1.5">{eventCode(ev)}</p>
-          )}
-
-          {/* Date ticket */}
-          {dp && (
-            <div className="mt-4 inline-flex items-stretch rounded-2xl border border-line overflow-hidden text-left">
-              <div className="bg-gold-soft px-3.5 py-2 flex flex-col items-center justify-center">
-                <span className="text-[9.5px] font-bold uppercase tracking-[0.1em] text-gold-ink">{dp.month}</span>
-                <span className="font-serif text-[22px] font-semibold text-graphite leading-none mt-0.5">{dp.day}</span>
-              </div>
-              <div className="px-4 py-2 flex flex-col justify-center">
-                <span className="text-[12.5px] font-semibold text-graphite">{dp.weekday}</span>
-                <span className="font-mono tnum text-[12.5px] text-warm-gray mt-0.5">{dp.time}</span>
-              </div>
-            </div>
-          )}
-
-          {ev.location && (
-            <p className="flex items-center justify-center gap-1 text-[12.5px] text-warm-gray mt-3">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" /><circle cx="12" cy="10" r="3" /></svg>
-              {ev.location}
-              {ev.cost ? <span className="text-gold-ink font-semibold"> · {ev.cost}</span> : null}
-            </p>
-          )}
+          <div className="mt-3.5 space-y-2.5">
+            {when && <InfoRow icon={<ClockIcon />} main={when.day} sub={when.time} />}
+            {ev.location && (
+              <InfoRow
+                icon={<PinIcon size={15} />}
+                main={ev.location}
+                action={
+                  mapHref ? (
+                    <a href={mapHref} target="_blank" rel="noopener noreferrer" className="shrink-0 text-[12.5px] font-semibold text-gold-ink active:opacity-70">
+                      Open map ›
+                    </a>
+                  ) : null
+                }
+              />
+            )}
+            {(ev.cost || payMode !== "none") && <InfoRow icon={<CoinIcon />} main={ev.cost || "Cost to share"} sub={PAY_LABEL[payMode]} />}
+          </div>
         </div>
 
-        {/* The plan, in the three numbers everyone asks for. Only rendered when
-            the host actually filled them in — an empty strip of dashes would
-            be worse than no strip. */}
+        {/* The plan, in the three numbers everyone asks for. Only when the
+            admin filled them in — a strip of dashes is worse than no strip. */}
         {(ev.courtCount || ev.durationHours || ev.maxPlayers) && (
           <div className="border-t border-line flex divide-x divide-line">
             {ev.courtCount != null && <PlanStat n={ev.courtCount} label={ev.courtCount === 1 ? "Court" : "Courts"} />}
-            {ev.durationHours != null && (
-              <PlanStat n={Number(ev.durationHours.toFixed(1))} label={ev.durationHours === 1 ? "Hour" : "Hours"} />
-            )}
+            {ev.durationHours != null && <PlanStat n={Number(ev.durationHours.toFixed(1))} label={ev.durationHours === 1 ? "Hour" : "Hours"} />}
             {ev.maxPlayers != null && <PlanStat n={ev.maxPlayers} label="Players" />}
           </div>
         )}
       </div>
 
-      {/* In play, or played. Either way the plan is over. */}
+      {/* ── In play, or played. Either way the plan is over. ─────────── */}
       {started && (
-        <div className="mt-6">
+        <div className="mt-3.5">
           {live && ev.session?.publicToken ? (
             <Link
               to={`/live/${ev.session.publicToken}${ev.session.joinCode ? `?j=${ev.session.joinCode}` : ""}`}
-              className="block rounded-2xl bg-graphite px-4 py-4 text-center active:scale-[0.99] transition-transform"
+              className="flex items-center gap-3 rounded-[22px] bg-court-lime/25 px-4 py-4 active:scale-[0.99] transition-transform"
             >
-              <span className="inline-flex items-center gap-1.5 rounded-full bg-court-lime/25 px-2.5 py-1">
-                <span className="w-1.5 h-1.5 rounded-full bg-court-lime" aria-hidden />
-                <span className="text-[9.5px] font-bold tracking-[0.12em] text-ivory">LIVE NOW</span>
+              <span className="w-2.5 h-2.5 rounded-full bg-win shrink-0 animate-pulse" aria-hidden />
+              <span className="flex-1 min-w-0">
+                <span className="block text-[14.5px] font-semibold text-graphite">This night is being played</span>
+                <span className="block text-[12px] text-ink-2 mt-0.5">See the live scoreboard</span>
               </span>
-              <span className="block text-[14px] font-semibold text-ivory mt-2">This session is being played</span>
-              <span className="block text-[12px] text-ivory/70 mt-0.5">Tap for the live scoreboard</span>
+              <span className="text-[18px] text-ink-2" aria-hidden>›</span>
             </Link>
           ) : (
-            <div className="rounded-2xl border border-line bg-surface-2 px-4 py-4 text-center">
-              <p className="text-[13.5px] font-semibold text-graphite">
-                {live ? "This session is being played" : "This session has finished"}
-              </p>
-              <p className="text-[12px] text-warm-gray mt-1 leading-snug">
-                Answers are closed — who played is on the session itself now.
-              </p>
+            <div className={`${card} px-4 py-4`}>
+              <p className="text-[14px] font-semibold text-graphite">{live ? "This night is being played" : "This night has finished"}</p>
+              <p className="text-[12px] text-warm-gray mt-1 leading-snug">Answers are closed — who played is on the session itself now.</p>
+              {!live && ev.session && (
+                <Link to={`/session/${ev.session.id}/final`} className="inline-block mt-2.5 text-[13px] font-semibold text-gold-ink active:opacity-70">
+                  See the results ›
+                </Link>
+              )}
             </div>
           )}
         </div>
       )}
 
-      {/* Notes (bank details…), members only. */}
-      {!cancelled && extras?.member && extras.notes && <CallupNotes notes={extras.notes} />}
+      {cancelled && (
+        <div className="mt-3.5 rounded-[22px] bg-loss-soft px-4 py-4">
+          <p className="text-[14px] font-semibold text-loss">This night is called off</p>
+          <p className="text-[12px] text-ink-2 mt-1 leading-snug">Nobody needs to come. If you'd paid, sort the refund with the club's admins.</p>
+        </div>
+      )}
 
-      {/* The answer to the Call-up */}
+      {/* ── Your spot ───────────────────────────────────────────────── */}
       {!started && !cancelled && ev.isMember && (
-        <div className="mt-6">
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray text-center mb-2">Your answer</p>
-          <div className="flex rounded-full bg-surface border border-line p-1">
-            {RSVP_OPTS.map((o) => (
-              <button
-                key={o.value}
-                onClick={() => respond(o.value)}
-                className={`flex-1 rounded-full py-2.5 text-[13px] font-semibold transition-colors ${
-                  ev.myResponse === o.value || (o.value === "in" && ev.myResponse === "waitlist")
-                    ? o.value === "out"
-                      ? "bg-warm-gray text-ivory"
-                      : ev.myResponse === "waitlist"
-                        ? "bg-gold-soft text-gold-ink"
-                        : "bg-graphite text-ivory"
-                    : "text-warm-gray"
-                }`}
-              >
-                {/* "In" becomes "Join waitlist" when the night is full and you
-                    aren't already in it — the label has to tell the truth
-                    BEFORE the tap, not after. */}
-                {o.value === "in" && full && ev.myResponse !== "in" ? (rules.waitlist ? "Join waitlist" : "Full") : o.label}
-              </button>
-            ))}
+        <div className={`mt-3.5 ${card} px-4 pt-4 pb-4`}>
+          <div className="flex items-start justify-between gap-3">
+            <span className="min-w-0">
+              <span className="block text-[11px] font-semibold text-warm-gray">Your spot</span>
+              <SpotStatus response={ev.myResponse} position={myQueuePosition} full={full} />
+            </span>
+            <span className="text-right shrink-0">
+              <span className="block font-mono tnum text-[22px] font-semibold text-graphite leading-none">
+                {ev.counts.in}
+                {ev.maxPlayers != null && <span className="text-[13px] text-warm-gray">/{ev.maxPlayers}</span>}
+              </span>
+              <span className="block text-[10.5px] text-warm-gray mt-1">
+                {ev.counts.waitlist > 0 ? `in · ${ev.counts.waitlist} waiting` : ev.counts.maybe > 0 ? `in · ${ev.counts.maybe} maybe` : "in"}
+              </span>
+            </span>
           </div>
-          {ev.myResponse === "waitlist" && (
-            <p className="text-[12px] text-gold-ink text-center mt-2">
-              You're on the waiting list{myQueuePosition ? ` — number ${myQueuePosition}` : ""}. We'll move you up if
-              someone drops out.
+
+          <div className="mt-3.5">
+            <Segmented
+              label="Your answer"
+              value={(ev.myResponse === "waitlist" ? "in" : ev.myResponse ?? "") as RsvpResponse}
+              onChange={respond}
+              options={RSVP_OPTS.map((o) => ({
+                value: o.value,
+                // "In" becomes "Join waitlist" when the night is full and you
+                // aren't already in it — the label tells the truth BEFORE the tap.
+                label:
+                  o.value === "in" && ev.myResponse === "waitlist"
+                    ? "Waiting"
+                    : o.value === "in" && full && ev.myResponse !== "in"
+                      ? rules.waitlist
+                        ? "Join waitlist"
+                        : "Full"
+                      : o.label,
+              }))}
+            />
+          </div>
+          {full && ev.myResponse !== "in" && ev.myResponse !== "waitlist" && (
+            <p className="text-[11.5px] text-gold-ink mt-2 px-1">
+              {rules.waitlist ? "It's full — answering In puts you on the waiting list." : "It's full, and this club doesn't keep a waiting list."}
             </p>
           )}
-          {note && <p className="text-[12px] text-ink-2 text-center mt-2 leading-snug">{note}</p>}
+          {note && <p className="text-[12px] text-ink-2 mt-2.5 px-1 leading-snug">{note}</p>}
           {extras?.member && user && (
             <PlayerPayment
               eventId={ev.id}
@@ -478,69 +573,300 @@ export default function EventPage() {
           )}
         </div>
       )}
+
       {!started && !cancelled && !ev.isMember && (
-        <div className="mt-6 rounded-2xl border border-dashed border-line bg-surface px-4 py-5 text-center">
-          <p className="text-[13px] text-graphite font-semibold">Members-only Call-up</p>
-          {user ? (
-            <>
-              <p className="text-[12px] text-warm-gray mt-1 leading-snug">Join {ev.teamName} to reserve your spot.</p>
-              <Link to={`/teams/${ev.clubId}`} className="inline-block mt-3 rounded-full bg-graphite text-ivory text-[13px] font-semibold px-6 py-2.5 active:scale-[0.98] transition-transform">
-                View {ev.teamName}
-              </Link>
-            </>
-          ) : (
-            <>
-              <p className="text-[12px] text-warm-gray mt-1 leading-snug">Sign in and join {ev.teamName} to answer this Call-up.</p>
-              <Link to={loginHref} className="inline-block mt-3 rounded-full bg-graphite text-ivory text-[13px] font-semibold px-6 py-2.5 active:scale-[0.98] transition-transform">
-                Sign in
-              </Link>
-            </>
-          )}
+        <div className="mt-3.5 rounded-[22px] border-[1.5px] border-dashed border-stone px-4 py-5 text-center">
+          <p className="text-[13.5px] text-graphite font-semibold">Members-only Call-up</p>
+          <p className="text-[12px] text-warm-gray mt-1 leading-snug">
+            {ev.counts.in} in{ev.maxPlayers != null ? ` of ${ev.maxPlayers}` : ""}.{" "}
+            {user ? `Join ${ev.teamName} to reserve your spot.` : `Sign in and join ${ev.teamName} to answer.`}
+          </p>
+          <Link
+            to={user ? `/teams/${ev.clubId}` : loginHref}
+            className="inline-block mt-3 rounded-full bg-graphite text-ivory text-[13px] font-semibold px-6 py-2.5 active:scale-[0.98] transition-transform"
+          >
+            {user ? `View ${ev.teamName}` : "Sign in"}
+          </Link>
         </div>
       )}
 
-      {/* Turnout summary */}
-      <div className="mt-6 rounded-2xl bg-surface border border-line px-4 py-3.5 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-        <div className="flex items-center gap-4">
-          <TurnoutStat n={ev.counts.in} of={ev.maxPlayers} label="In" tone="win" />
-          <div className="w-px h-7 bg-line" />
-          <TurnoutStat n={ev.counts.maybe} label="Maybe" tone="gold" />
-          <div className="w-px h-7 bg-line" />
-          {ev.counts.waitlist > 0 ? (
-            <TurnoutStat n={ev.counts.waitlist} label="Waiting" tone="gold" />
-          ) : (
-            <TurnoutStat n={ev.counts.out} label="Out" tone="muted" />
-          )}
-        </div>
-        {full && (
-          <p className="text-[11px] text-gold-ink text-center mt-2.5">
-            Full. Anyone joining now goes on the waiting list.
-          </p>
-        )}
-      </div>
+      {/* Notes (bank details…), members only. */}
+      {!cancelled && extras?.member && extras.notes && <CallupNotes notes={extras.notes} />}
 
-      {/* Who has paid: the owner and admins only. */}
-      {ev.isAdmin && !cancelled && extras && extras.paymentMode !== "none" && (
+      {/* Bringing someone who isn't on the app. Any member can — "we bring
+          friends" is a thing members do. Who brought whom is recorded, and
+          they're the one who can take them out again. */}
+      {canBringGuest && (
+        <button
+          onClick={() => {
+            setGuestErr(null);
+            setGuestOpen(true);
+          }}
+          className={`w-full mt-3.5 ${card} px-4 py-3.5 flex items-center gap-3 text-left active:bg-surface-2`}
+        >
+          <span className="w-9 h-9 rounded-full bg-gold-soft text-gold-ink flex items-center justify-center text-[18px] shrink-0" aria-hidden>
+            +
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-[14px] font-semibold text-graphite">Bring a guest</span>
+            <span className="block text-[11.5px] text-warm-gray">
+              {myGuests > 0
+                ? `You're bringing ${myGuests} · up to ${rules.maxGuests}`
+                : `A friend who isn't on Padelier · ${rules.maxGuests === 1 ? "one" : `up to ${rules.maxGuests}`} each`}
+            </span>
+          </span>
+          <span className="text-[18px] text-stone" aria-hidden>›</span>
+        </button>
+      )}
+
+      {/* ── Admin: Players | Payments ───────────────────────────────── */}
+      {showPayments && (
+        <div className="mt-6">
+          <Segmented
+            label="Manage"
+            value={adminTab}
+            onChange={(t) => {
+              const p = new URLSearchParams(params);
+              if (t === "payments") p.set("tab", "payments");
+              else p.delete("tab");
+              setParams(p, { replace: true });
+            }}
+            options={[
+              { value: "players", label: "Players" },
+              {
+                value: "payments",
+                label: (
+                  <span className="inline-flex items-center gap-1.5">
+                    Payments
+                    {toCheck > 0 && (
+                      <span className="min-w-[18px] h-[18px] px-1 rounded-full bg-loss text-ivory text-[10px] font-bold inline-flex items-center justify-center">{toCheck}</span>
+                    )}
+                  </span>
+                ),
+              },
+            ]}
+          />
+        </div>
+      )}
+
+      {showPayments && adminTab === "payments" ? (
         <AdminPayments
           eventId={ev.id}
-          mode={extras.paymentMode}
+          mode={payMode}
           version={payVersion}
-          onChanged={() => getCallupExtras(ev.id).then(setExtras)}
+          deadline={extras?.deadline ?? null}
+          onChanged={() => {
+            getCallupExtras(ev.id).then(setExtras);
+            getClubAdminTodo(ev.clubId).then((t) => setToCheck(t.find((x) => x.eventId === ev.id)?.toCheck ?? 0));
+          }}
         />
+      ) : (
+        <>
+          {/* ── Who's coming ─────────────────────────────────────────── */}
+          <div className={`flex items-baseline justify-between ${showPayments ? "mt-4" : "mt-6"} px-0.5`}>
+            <h2 className="font-serif text-[18px] font-semibold text-graphite">Players</h2>
+            <PaidCount extras={extras} />
+          </div>
+          <div className="flex gap-1.5 mt-2.5 overflow-x-auto no-scrollbar -mx-5 px-5">
+            {(
+              [
+                ["going", "Going"],
+                ["waitlist", "Waiting"],
+                ["maybe", "Maybe"],
+                ["out", "Out"],
+              ] as [ListKey, string][]
+            )
+              .filter(([k]) => k === "going" || lists[k].length > 0)
+              .map(([k, label]) => {
+                const on = shown === k;
+                return (
+                  <button
+                    key={k}
+                    onClick={() => setList(k)}
+                    aria-pressed={on}
+                    className={`shrink-0 h-8 px-3.5 rounded-full text-[12.5px] font-semibold transition-colors ${
+                      on ? "bg-graphite text-ivory" : "bg-surface text-ink-2 shadow-[0_1px_2px_rgba(13,13,13,0.05)]"
+                    }`}
+                  >
+                    {label} <span className={`font-mono tnum ${on ? "text-ivory/70" : "text-warm-gray"}`}>{lists[k].length}</span>
+                  </button>
+                );
+              })}
+          </div>
+          {shown === "going" && full && !cancelled && !started && (
+            <p className="text-[11.5px] text-gold-ink mt-2 px-1">Full. Anyone joining now goes on the waiting list.</p>
+          )}
+          {lists[shown].length === 0 ? (
+            <p className="text-[12.5px] text-warm-gray text-center mt-6">{shown === "going" ? "Nobody's in yet." : "No one here."}</p>
+          ) : (
+            <div className={`mt-2.5 ${card} overflow-hidden`}>
+              {/* Going is alphabetical because it's a roster you scan for a
+                  name; the waiting list is in the order people asked, because
+                  there the order IS the information. */}
+              {lists[shown].map((p, i) => {
+                const mine = p.isGuest && !!user && p.invitedBy === user.id;
+                const rowBody = (
+                  <>
+                    {shown === "waitlist" && <span className="font-mono tnum text-[12px] font-semibold text-warm-gray w-4 shrink-0">{i + 1}</span>}
+                    <Face name={p.displayName} url={p.avatarUrl} size={34} />
+                    <span className="flex-1 min-w-0">
+                      <span className="block text-[14px] font-semibold text-graphite truncate">
+                        {p.displayName}
+                        {p.userId === user?.id && <span className="font-normal text-warm-gray"> · you</span>}
+                      </span>
+                      {p.isGuest && <span className="block text-[11px] text-warm-gray">{mine ? "Your guest" : "Guest"}</span>}
+                    </span>
+                  </>
+                );
+                const rowCls = "flex items-center gap-3 px-3.5 py-2.5 border-t border-line first:border-t-0";
+                // Admin rows open the Manage sheet; the controls live there,
+                // away from the profile tap — a mis-tap that removes someone
+                // from Monday's session is not one you take back quietly.
+                if (manageable && (p.isGuest || shown !== "out")) {
+                  return (
+                    <button key={p.userId} onClick={() => setManaging({ p, list: shown })} disabled={busy} className={`${rowCls} w-full text-left active:bg-surface-2`}>
+                      {rowBody}
+                      <span className="text-[11.5px] font-semibold text-warm-gray shrink-0">Manage</span>
+                    </button>
+                  );
+                }
+                if (p.isGuest) {
+                  return (
+                    <div key={p.userId} className={rowCls}>
+                      {rowBody}
+                      {mine && !cancelled && !started && (
+                        <button
+                          onClick={() => dropGuest(p.guestId!, p.displayName)}
+                          disabled={busy}
+                          className="shrink-0 text-[11.5px] font-semibold text-warm-gray bg-surface-2 rounded-full px-3 py-1.5 active:opacity-70 disabled:opacity-40"
+                        >
+                          Remove
+                        </button>
+                      )}
+                    </div>
+                  );
+                }
+                return (
+                  <Link key={p.userId} to={`/u/${p.userId}`} className={`${rowCls} active:bg-surface-2`}>
+                    {rowBody}
+                    <span className="text-stone text-[16px]" aria-hidden>›</span>
+                  </Link>
+                );
+              })}
+            </div>
+          )}
+          {ev.isAdmin && note && (!ev.isMember || started || cancelled) && <p className="text-[12px] text-ink-2 mt-3 px-1">{note}</p>}
+        </>
       )}
 
-      {/* Bringing someone who isn't on the app.
-          Any member can, not just the host — "we bring friends" is a thing
-          members do, and routing it through an admin would mean a WhatsApp
-          message every time. Who brought whom is recorded, and they're the one
-          who can take them out again. */}
-      {ev.isMember && !cancelled && !ev.session && rules.maxGuests > 0 && !closedWhenFull && (
-        <div className="mt-5 rounded-2xl border border-line bg-surface px-4 py-3.5">
-          <p className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray">Bringing someone?</p>
-          <p className="text-[11.5px] text-warm-gray mt-1 leading-snug">
-            Add a friend who isn't on Padelier ({rules.maxGuests === 1 ? "one guest" : `up to ${rules.maxGuests} guests`} each). They take a place like anyone else{full ? " — it's full, so they'll join the waiting list." : "."}
-          </p>
-          <div className="flex gap-2 mt-2.5">
+      {/* ── Sheets. Portalled out of this tree by Sheet — see the note in
+          Sheet.tsx about anim-fade creating a stacking context. ───────── */}
+      {menuOpen && (
+        <BottomSheet onClose={() => setMenuOpen(false)} title={ev.title} variant="card">
+          <div className="rounded-[16px] bg-surface-2 overflow-hidden">
+            {canRun && (
+              <MenuItem
+                onClick={() => {
+                  setMenuOpen(false);
+                  startSession();
+                }}
+                strong
+              >
+                Start the session
+                {ev.counts.in > 0 && <span className="block text-[11.5px] font-normal text-warm-gray">The {ev.counts.in} who are in are added for you</span>}
+              </MenuItem>
+            )}
+            {canRun && (
+              <MenuItem
+                onClick={() => {
+                  setMenuOpen(false);
+                  setEditing(true);
+                }}
+              >
+                Edit details &amp; payment
+              </MenuItem>
+            )}
+            <MenuItem
+              onClick={() => {
+                setMenuOpen(false);
+                void share();
+              }}
+            >
+              Share the link
+            </MenuItem>
+            {canRun && (
+              <MenuItem
+                danger
+                onClick={() => {
+                  setMenuOpen(false);
+                  callOff();
+                }}
+              >
+                Call off this night
+              </MenuItem>
+            )}
+          </div>
+          <button onClick={() => setMenuOpen(false)} className="w-full text-[14px] font-semibold text-warm-gray py-3 mt-1.5">
+            Cancel
+          </button>
+        </BottomSheet>
+      )}
+
+      {managing && (
+        <BottomSheet onClose={() => setManaging(null)} title={managing.p.displayName} subtitle={manageSubtitle(managing.list, managing.p)} variant="card">
+          <div className="rounded-[16px] bg-surface-2 overflow-hidden">
+            {!managing.p.isGuest && (
+              <Link to={`/u/${managing.p.userId}`} className="block px-4 py-3.5 text-[14px] text-graphite">
+                View profile
+              </Link>
+            )}
+            {!managing.p.isGuest && (managing.list === "waitlist" || managing.list === "maybe") && (
+              <MenuItem
+                strong
+                onClick={() => {
+                  const p = managing.p;
+                  setManaging(null);
+                  setFor(p.userId, "in", p.displayName);
+                }}
+              >
+                Move in
+              </MenuItem>
+            )}
+            {!managing.p.isGuest && managing.list === "going" && (
+              <MenuItem
+                danger
+                onClick={() => {
+                  const p = managing.p;
+                  setManaging(null);
+                  setFor(p.userId, "out", p.displayName);
+                }}
+              >
+                Take out
+              </MenuItem>
+            )}
+            {managing.p.isGuest && managing.p.guestId && (
+              <MenuItem
+                danger
+                first
+                onClick={() => {
+                  const p = managing.p;
+                  setManaging(null);
+                  dropGuest(p.guestId!, p.displayName);
+                }}
+              >
+                Remove guest
+              </MenuItem>
+            )}
+          </div>
+          <button onClick={() => setManaging(null)} className="w-full text-[14px] font-semibold text-warm-gray py-3 mt-1.5">
+            Cancel
+          </button>
+        </BottomSheet>
+      )}
+
+      {guestOpen && (
+        <BottomSheet onClose={() => setGuestOpen(false)} title="Bring a guest" subtitle="Someone who isn't on Padelier. They take a place like anyone else.">
+          <div className="flex gap-2">
             <input
               value={guestName}
               onChange={(e) => setGuestName(e.target.value)}
@@ -549,75 +875,126 @@ export default function EventPage() {
               }}
               placeholder="Their name"
               maxLength={40}
-              className="flex-1 min-w-0 rounded-full border border-line bg-surface-2 px-3.5 py-2 text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55"
+              autoFocus
+              className="flex-1 min-w-0 h-12 rounded-full bg-surface-2 px-4 text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/40"
             />
             {/* Gender, because the Mix formats can't draw a round without it —
                 and asking here is the only moment anyone knows the answer. */}
-            <button
-              type="button"
-              onClick={() => setGuestGender((g) => (g === "M" ? "F" : "M"))}
-              aria-label={`Guest is ${guestGender === "M" ? "male" : "female"} — tap to change`}
-              className={`shrink-0 w-11 rounded-full border text-[13px] font-bold ${
-                guestGender === "M" ? "border-graphite bg-graphite text-ivory" : "border-gold bg-gold-soft text-gold-ink"
-              }`}
-            >
-              {guestGender}
-            </button>
-            <button
-              type="button"
-              onClick={() => void addGuest()}
-              disabled={guestBusy || guestName.trim().length === 0}
-              className="shrink-0 rounded-full bg-graphite text-ivory text-[13px] font-semibold px-4 active:scale-[0.99] transition-transform disabled:opacity-40"
-            >
-              {guestBusy ? "Adding…" : "Add"}
-            </button>
+            <div className="w-[104px] shrink-0">
+              <Segmented
+                label="Guest's gender"
+                value={guestGender}
+                onChange={setGuestGender}
+                options={[
+                  { value: "M", label: "M" },
+                  { value: "F", label: "F" },
+                ]}
+              />
+            </div>
           </div>
-        </div>
+          <p className="text-[11.5px] text-warm-gray mt-2.5 px-1 leading-snug">
+            {rules.maxGuests === 1 ? "One guest each." : `Up to ${rules.maxGuests} guests each.`}
+            {full ? " It's full, so they'll join the waiting list." : ""} You can take them out again from the list.
+          </p>
+          {guestErr && <p className="text-[12px] text-loss mt-2 px-1">{guestErr}</p>}
+          <button
+            onClick={() => void addGuest()}
+            disabled={guestBusy || guestName.trim().length === 0}
+            className="w-full h-12 mt-4 rounded-full bg-graphite text-ivory text-[14px] font-semibold active:scale-[0.99] transition-transform disabled:opacity-40"
+          >
+            {guestBusy ? "Adding…" : full ? "Add to the waiting list" : "Add guest"}
+          </button>
+        </BottomSheet>
       )}
 
-      {/* Who's coming — tappable profiles. Going is alphabetical because it's a
-          roster you scan for a name; the waiting list is in the order people
-          asked, because there the order IS the information. */}
-      <AttendeeList
-        title="Going"
-        people={ev.going}
-        accent="win"
-        admin={ev.isAdmin && !cancelled}
-        busy={busy}
-        myUserId={user?.id ?? null}
-        onRemove={(p) => setFor(p.userId, "out", p.displayName)}
-        onRemoveGuest={cancelled ? undefined : (p) => dropGuest(p.guestId!, p.displayName)}
-      />
-      <AttendeeList
-        title="Waiting list"
-        people={ev.waitlist}
-        accent="gold"
-        numbered
-        admin={ev.isAdmin && !cancelled}
-        busy={busy}
-        myUserId={user?.id ?? null}
-        onPromote={(p) => setFor(p.userId, "in", p.displayName)}
-        onRemoveGuest={cancelled ? undefined : (p) => dropGuest(p.guestId!, p.displayName)}
-      />
-      <AttendeeList
-        title="Maybe"
-        people={ev.maybe}
-        accent="gold"
-        admin={ev.isAdmin && !cancelled}
-        busy={busy}
-        onPromote={(p) => setFor(p.userId, "in", p.displayName)}
-      />
-      <AttendeeList title="Can't make it" people={ev.out} accent="muted" />
+      {editing && (
+        <CallupFormSheet
+          clubId={ev.clubId}
+          events={[]}
+          editing={{
+            id: ev.id,
+            title: ev.title,
+            scheduledAt: ev.scheduledAt,
+            location: ev.location,
+            locationUrl: extras?.locationUrl ?? null,
+            courtCount: ev.courtCount,
+            durationHours: ev.durationHours,
+            maxPlayers: ev.maxPlayers,
+            cost: ev.cost,
+            paymentMode: payMode,
+            notes: extras?.notes ?? null,
+            inCount: ev.counts.in,
+          }}
+          onClose={() => setEditing(false)}
+          onSaved={(_id, warning) => {
+            setEditing(false);
+            setNote(warning ?? "Saved.");
+            load();
+          }}
+        />
+      )}
 
-      <button onClick={share} className="w-full mt-6 rounded-full border border-line bg-surface text-ink-2 text-[12.5px] font-semibold py-2.5 active:bg-surface-2 transition-colors">
-        {copied ? "Link copied ✓" : "Share this session"}
-      </button>
-
-      {/* Rendered last and portalled out of this tree by Sheet — see the note
-          in Sheet.tsx about anim-fade creating a stacking context that would
-          otherwise put the tab bar on top of it. */}
       {confirm && <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />}
     </div>
+  );
+}
+
+function manageSubtitle(list: ListKey, p: EventAttendee): string {
+  const where = list === "going" ? "In" : list === "waitlist" ? "On the waiting list" : list === "maybe" ? "Maybe" : "Out";
+  return p.isGuest ? `${where} · guest` : where;
+}
+
+function SpotStatus({ response, position, full }: { response: RsvpResponse | null; position: number | null; full: boolean }) {
+  const [text, cls] =
+    response === "in"
+      ? ["You're in", "text-win"]
+      : response === "waitlist"
+        ? [position ? `Waiting · number ${position}` : "On the waiting list", "text-gold-ink"]
+        : response === "maybe"
+          ? ["Maybe", "text-gold-ink"]
+          : response === "out"
+            ? ["You're out", "text-warm-gray"]
+            : [full ? "Not answered · it's full" : "Not answered yet", "text-graphite"];
+  return <span className={`block font-serif text-[20px] font-semibold leading-tight mt-0.5 ${cls}`}>{text}</span>;
+}
+
+function InfoRow({ icon, main, sub, action }: { icon: ReactNode; main: string; sub?: string; action?: ReactNode }) {
+  return (
+    <div className="flex items-start gap-3">
+      <span className="w-8 h-8 rounded-full bg-surface-2 text-ink-2 flex items-center justify-center shrink-0" aria-hidden>
+        {icon}
+      </span>
+      <span className="flex-1 min-w-0 pt-[1px]">
+        <span className="block text-[14px] font-semibold text-graphite leading-snug break-words">{main}</span>
+        {sub && <span className="block font-mono tnum text-[12px] text-warm-gray mt-0.5">{sub}</span>}
+      </span>
+      {action && <span className="pt-1.5">{action}</span>}
+    </div>
+  );
+}
+
+function MenuItem({
+  children,
+  onClick,
+  danger,
+  strong,
+  first,
+}: {
+  children: ReactNode;
+  onClick: () => void;
+  danger?: boolean;
+  strong?: boolean;
+  first?: boolean;
+}) {
+  return (
+    <button
+      onClick={onClick}
+      className={`w-full text-left px-4 py-3.5 text-[14px] ${first ? "" : "border-t border-line first:border-t-0"} ${
+        danger ? "text-loss" : strong ? "font-semibold text-graphite" : "text-graphite"
+      } active:bg-line/40`}
+    >
+      {children}
+    </button>
   );
 }
 
@@ -631,134 +1008,28 @@ function PlanStat({ n, label }: { n: number; label: string }) {
   );
 }
 
-function TurnoutStat({
-  n,
-  of,
-  label,
-  tone,
-}: {
-  n: number;
-  /** The cap, when there is one — "8/12" answers a question "8" doesn't. */
-  of?: number | null;
-  label: string;
-  tone: "win" | "gold" | "muted";
-}) {
-  const color = tone === "win" ? "text-win" : tone === "gold" ? "text-gold-ink" : "text-warm-gray";
+function ShareIcon() {
   return (
-    <div className="flex-1 text-center">
-      <p className={`font-mono tnum text-[22px] font-semibold leading-none ${n > 0 ? color : "text-stone"}`}>
-        {n}
-        {of != null && <span className="text-[13px] text-warm-gray">/{of}</span>}
-      </p>
-      <p className="text-[10px] font-bold uppercase tracking-[0.1em] text-warm-gray mt-1">{label}</p>
-    </div>
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
+      <polyline points="16 6 12 2 8 6" />
+      <line x1="12" y1="2" x2="12" y2="15" />
+    </svg>
   );
 }
-
-function AttendeeList({
-  title,
-  people,
-  accent,
-  numbered,
-  admin,
-  busy,
-  onPromote,
-  onRemove,
-  onRemoveGuest,
-  myUserId,
-}: {
-  title: string;
-  people: EventAttendee[];
-  accent: "win" | "gold" | "muted";
-  /** Show 1, 2, 3 — only the waiting list, where position is the point. */
-  numbered?: boolean;
-  admin?: boolean;
-  busy?: boolean;
-  onPromote?: (p: EventAttendee) => void;
-  onRemove?: (p: EventAttendee) => void;
-  /** Taking a guest out is a different call from changing a member's answer —
-   *  a guest has no RSVP row and no account to set one on. */
-  onRemoveGuest?: (p: EventAttendee) => void;
-  /** So the person who brought a guest can take them out again without being
-   *  a club admin. */
-  myUserId?: string | null;
-}) {
-  if (people.length === 0) return null;
-  const dot = accent === "win" ? "bg-win" : accent === "gold" ? "bg-gold" : "bg-stone";
+function ClockIcon() {
   return (
-    <div className="mt-6">
-      <div className="flex items-center gap-2 mb-2 px-0.5">
-        <span className={`w-1.5 h-1.5 rounded-full ${dot}`} aria-hidden />
-        <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray">{title}</h3>
-        <span className="font-mono tnum text-[11px] text-warm-gray">{people.length}</span>
-      </div>
-      <div className="rounded-2xl bg-surface border border-line overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-        {people.map((p, i) => (
-          <div key={p.userId} className="flex items-center gap-3 px-4 py-2.5 border-t border-line first:border-t-0">
-            {numbered && (
-              <span className="font-mono tnum text-[12px] font-semibold text-warm-gray w-4 shrink-0">{i + 1}</span>
-            )}
-            {/* A guest has no profile to open, so their row isn't a link. The
-                chip is the whole explanation: a name with no account behind it
-                would otherwise look like a bug. */}
-            {p.isGuest ? (
-              <div className="flex items-center gap-3 flex-1 min-w-0">
-                <span className="w-[32px] h-[32px] rounded-full bg-stone/50 text-ink-2 flex items-center justify-center text-[12px] font-semibold shrink-0">
-                  {p.displayName.charAt(0).toUpperCase()}
-                </span>
-                <span className="flex-1 min-w-0 text-[14px] font-semibold text-graphite truncate">
-                  {p.displayName}
-                  <span className="ml-1.5 text-[9.5px] font-bold uppercase tracking-[0.1em] rounded-full px-1.5 py-0.5 bg-surface-2 text-warm-gray border border-line align-middle">
-                    Guest
-                  </span>
-                </span>
-              </div>
-            ) : (
-              <Link to={`/u/${p.userId}`} className="flex items-center gap-3 flex-1 min-w-0 active:opacity-70">
-                <span className="w-[32px] h-[32px] rounded-full bg-graphite text-ivory flex items-center justify-center text-[12px] font-semibold overflow-hidden shrink-0">
-                  {p.avatarUrl ? <img src={p.avatarUrl} alt="" className="w-full h-full object-cover" /> : p.displayName.charAt(0).toUpperCase()}
-                </span>
-                <span className="flex-1 min-w-0 text-[14px] font-semibold text-graphite truncate">{p.displayName}</span>
-              </Link>
-            )}
-            {/* Host controls sit OUTSIDE the profile link — a mis-tap that
-                removes someone from Monday's session is not a mis-tap you get
-                to take back quietly. */}
-            {p.isGuest && onRemoveGuest && (admin || (myUserId && p.invitedBy === myUserId)) && (
-              <button
-                onClick={() => onRemoveGuest(p)}
-                disabled={busy}
-                className="shrink-0 text-[11.5px] font-semibold text-warm-gray border border-line rounded-full px-2.5 py-1 active:opacity-70 disabled:opacity-40"
-              >
-                Remove
-              </button>
-            )}
-            {!p.isGuest && admin && onPromote && (
-              <button
-                onClick={() => onPromote(p)}
-                disabled={busy}
-                className="shrink-0 text-[11.5px] font-semibold text-gold-ink border border-gold/40 bg-gold-soft rounded-full px-2.5 py-1 active:opacity-70 disabled:opacity-40"
-              >
-                Move in
-              </button>
-            )}
-            {!p.isGuest && admin && onRemove && (
-              <button
-                onClick={() => onRemove(p)}
-                disabled={busy}
-                className="shrink-0 text-[11.5px] font-semibold text-warm-gray border border-line rounded-full px-2.5 py-1 active:opacity-70 disabled:opacity-40"
-              >
-                Remove
-              </button>
-            )}
-            {!admin && !p.isGuest && (
-              <span className="text-stone text-[16px]" aria-hidden>
-                ›
-              </span>
-            )}
-          </div>
-        ))}
-      </div>
-    </div>
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <circle cx="12" cy="12" r="9" />
+      <polyline points="12 7 12 12 15.5 14" />
+    </svg>
+  );
+}
+function CoinIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+      <rect x="2.5" y="6" width="19" height="12" rx="2.5" />
+      <circle cx="12" cy="12" r="2.6" />
+    </svg>
   );
 }

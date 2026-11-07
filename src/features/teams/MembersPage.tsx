@@ -1,106 +1,247 @@
-import { useEffect, useMemo, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { getTeam, getTeamMembers, Team, TeamMember } from "../../lib/supabase/teamQueries";
-import { useHostSession } from "../../lib/supabase/useHostSession";
-import { useBackNav } from "../../lib/useBackNav";
-import { SkeletonScreen, SkeletonRows } from "../shell/Skeleton";
-import { useCachedQuery } from "../../lib/cache/useCachedQuery";
-import OfflineNote from "../shell/OfflineNote";
+import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
+import { kickMember, setMemberRole, Team, TeamMember } from "../../lib/supabase/teamQueries";
+import type { JoinRequestItem } from "../../lib/supabase/clubJoinQueries";
+import { BottomSheet } from "../shell/Sheet";
+import ConfirmSheet, { ConfirmRequest } from "../shell/ConfirmSheet";
+import { Face, card } from "./club/ui";
 
-export default function MembersPage() {
-  const { teamId } = useParams();
-  const back = useBackNav(teamId ? `/teams/${teamId}` : "/teams");
-  const { user } = useHostSession();
+/**
+ * The Members tab of the club page (ADR-002): the code and Invite, people
+ * asking to join, admins, members, and the way out. Was its own page until
+ * Nov 2026; /teams/:id/members now opens this tab.
+ */
+
+function joined(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : `Joined ${d.toLocaleDateString(undefined, { month: "short", year: "numeric" })}`;
+}
+function ago(iso: string | undefined): string {
+  if (!iso) return "";
+  const m = Math.round((Date.now() - new Date(iso).getTime()) / 60000);
+  if (!(m >= 0)) return "";
+  if (m < 60) return `Asked ${Math.max(1, m)} min ago`;
+  const h = Math.round(m / 60);
+  if (h < 48) return `Asked ${h} ${h === 1 ? "hour" : "hours"} ago`;
+  return `Asked ${Math.round(h / 24)} days ago`;
+}
+
+export function MembersTab({
+  team,
+  members,
+  isAdmin,
+  isOwner,
+  userId,
+  requests,
+  onDecide,
+  busyReq,
+  onInvite,
+  onLeave,
+  onMembersChanged,
+}: {
+  team: Team;
+  members: TeamMember[];
+  isAdmin: boolean;
+  isOwner: boolean;
+  userId: string | undefined;
+  requests: JoinRequestItem[];
+  onDecide: (requestId: string, accept: boolean) => void;
+  busyReq: string | null;
+  onInvite: () => void;
+  onLeave: () => void;
+  onMembersChanged: () => void;
+}) {
   const [query, setQuery] = useState("");
-
-  // The SAME keys the club page uses, deliberately. Arriving here from a club
-  // you were just looking at means both are already warm, so this screen has
-  // no loading state at all in the ordinary case — and a member list that
-  // changes while you walk between two screens is not a thing that happens.
-  const teamQ = useCachedQuery(teamId ? `club:${teamId}` : null, () => getTeam(teamId!));
-  const membersQ = useCachedQuery(teamId ? `club:${teamId}:members` : null, () => getTeamMembers(teamId!));
-  const team = teamQ.data;
-  const members = membersQ.data ?? [];
-  const loading = teamQ.loading || membersQ.loading;
+  const [copied, setCopied] = useState(false);
+  const [person, setPerson] = useState<TeamMember | null>(null);
+  const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
+  const [note, setNote] = useState<string | null>(null);
 
   const q = query.trim().toLowerCase();
   const filtered = useMemo(() => (q ? members.filter((m) => m.displayName.toLowerCase().includes(q)) : members), [members, q]);
   const admins = filtered.filter((m) => m.role === "owner" || m.role === "admin");
   const regular = filtered.filter((m) => m.role === "member");
 
-  const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-6 safe-top safe-bottom anim-fade";
-  const backBar = (
-    <div className="flex items-center justify-between mb-2">
-      <button onClick={back} aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</button>
-      <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
-        Padelier<span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
-      </div>
-      <div className="w-9" />
-    </div>
-  );
+  /** What I may do to someone: the same rules the server enforces. */
+  function can(m: TeamMember) {
+    const self = m.userId === userId;
+    return {
+      promote: isAdmin && !self && m.role === "member",
+      demote: isOwner && !self && m.role === "admin",
+      remove: !self && m.role !== "owner" && (m.role === "member" ? isAdmin : isOwner),
+    };
+  }
 
-  if (loading)
+  async function run(fn: () => Promise<void>, done: string) {
+    setNote(null);
+    try {
+      await fn();
+      setNote(done);
+      onMembersChanged();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "That didn't work.");
+    }
+  }
+
+  async function copyCode() {
+    try {
+      await navigator.clipboard.writeText(team.code);
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1600);
+    } catch {
+      /* ignore */
+    }
+  }
+
+  const row = (m: TeamMember) => {
+    const c = can(m);
+    const any = c.promote || c.demote || c.remove;
     return (
-      <div className={shell}>
-        {backBar}
-      <OfflineNote show={teamQ.stale || membersQ.stale} at={membersQ.cachedAt} onRetry={() => { teamQ.refresh(); membersQ.refresh(); }} className="mb-2" />
-        <SkeletonScreen label="Loading the members">
-          <SkeletonRows n={7} avatar />
-        </SkeletonScreen>
+      <div key={m.userId} className="flex items-center gap-3 px-3.5 py-3 border-t border-line first:border-t-0">
+        <Link to={`/u/${m.userId}`} className="flex items-center gap-3 flex-1 min-w-0 active:opacity-70">
+          <Face name={m.displayName} url={m.avatarUrl} size={40} ring={m.role === "owner"} />
+          <span className="flex-1 min-w-0">
+            <b className="block text-[14.5px] font-semibold text-graphite truncate">
+              {m.displayName}
+              {m.userId === userId && <span className="font-normal text-warm-gray"> · you</span>}
+            </b>
+            <span className="block text-[11.5px] text-warm-gray">{joined(m.joinedAt)}</span>
+          </span>
+        </Link>
+        {m.role !== "member" && (
+          <span className={`text-[11px] font-semibold shrink-0 ${m.role === "owner" ? "text-gold-ink" : "text-warm-gray"}`}>{m.role === "owner" ? "Owner" : "Admin"}</span>
+        )}
+        {any && (
+          <button
+            onClick={() => setPerson(m)}
+            aria-label={`Options for ${m.displayName}`}
+            className="w-[30px] h-[30px] rounded-full text-warm-gray flex items-center justify-center shrink-0 active:bg-surface-2"
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill="currentColor" aria-hidden><circle cx="5" cy="12" r="1.8" /><circle cx="12" cy="12" r="1.8" /><circle cx="19" cy="12" r="1.8" /></svg>
+          </button>
+        )}
       </div>
     );
+  };
 
   return (
-    <div className={shell}>
-      {backBar}
-      <div className="pt-2">
-        <h1 className="font-serif text-[28px] font-semibold text-graphite tracking-tight">Members</h1>
-        <p className="text-[12.5px] text-warm-gray mt-0.5">{team?.name ?? "Team"} · {members.length} {members.length === 1 ? "player" : "players"}</p>
+    <div className="px-5">
+      {/* Invite lives here */}
+      <div className={`mt-5 ${card} px-4 py-3.5 flex items-center gap-3`}>
+        <button onClick={copyCode} className="flex-1 min-w-0 text-left active:opacity-70" aria-label="Copy the club code">
+          <span className="block text-[11px] font-semibold text-warm-gray">{copied ? "Copied ✓" : "Club code · tap to copy"}</span>
+          <span className="block font-mono text-[21px] font-semibold tracking-[0.12em] text-graphite mt-0.5">{team.code}</span>
+        </button>
+        <button onClick={onInvite} className="h-10 px-[18px] rounded-full bg-graphite text-ivory text-[13px] font-semibold shrink-0 active:scale-[0.98] transition-transform">
+          Invite players
+        </button>
       </div>
 
-      <div className="flex items-center gap-2 rounded-xl border border-line bg-surface px-3.5 py-2.5 mt-4">
-        <span className="text-warm-gray text-[15px]">⌕</span>
-        <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder="Search members" className="flex-1 bg-transparent text-[16px] text-ink placeholder:text-warm-gray focus:outline-none focus-visible:ring-2 focus-visible:ring-graphite/55 rounded-lg px-1" />
-      </div>
+      {members.length > 6 && (
+        <label className="flex items-center gap-2.5 h-11 mt-3 px-4 rounded-full bg-[#EFEBE4]">
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6B6A66" strokeWidth="2" strokeLinecap="round" aria-hidden><circle cx="11" cy="11" r="7" /><line x1="21" y1="21" x2="16.5" y2="16.5" /></svg>
+          <input value={query} onChange={(e) => setQuery(e.target.value)} placeholder={`Search ${members.length} members`} className="flex-1 min-w-0 bg-transparent text-[16px] text-ink placeholder:text-warm-gray focus:outline-none" />
+        </label>
+      )}
+
+      {note && <p className="text-[12px] text-ink-2 mt-3 px-1">{note}</p>}
+
+      {isAdmin && requests.length > 0 && (
+        <>
+          <p className="text-[12px] font-semibold text-loss mt-5 px-0.5">Wants to join · {requests.length}</p>
+          <div className={`mt-2 ${card} overflow-hidden`}>
+            {requests.map((r) => (
+              <div key={r.id} className="flex items-center gap-3 px-3.5 py-3 border-t border-line first:border-t-0">
+                <Face name={r.displayName} url={r.avatarUrl} size={38} />
+                <span className="flex-1 min-w-0">
+                  <b className="block text-[14.5px] font-semibold text-graphite truncate">{r.displayName}</b>
+                  <span className="block text-[11.5px] text-warm-gray">{ago((r as { createdAt?: string }).createdAt)}</span>
+                </span>
+                <button onClick={() => onDecide(r.id, true)} disabled={busyReq === r.id} className="h-[34px] px-3.5 rounded-full bg-win-soft text-win text-[12.5px] font-bold disabled:opacity-40">
+                  Accept
+                </button>
+                <button onClick={() => onDecide(r.id, false)} disabled={busyReq === r.id} aria-label={`Decline ${r.displayName}`} className="w-[34px] h-[34px] rounded-full bg-surface-2 text-warm-gray text-[14px] disabled:opacity-40">
+                  ✕
+                </button>
+              </div>
+            ))}
+          </div>
+        </>
+      )}
 
       {admins.length > 0 && (
         <>
-          <p className="text-[12px] font-semibold text-warm-gray mt-6 mb-2 px-0.5">Admins</p>
-          <MemberList members={admins} meId={user?.id} />
+          <p className="text-[12px] font-semibold text-warm-gray mt-5 px-0.5">Admins</p>
+          <div className={`mt-2 ${card} overflow-hidden`}>{admins.map(row)}</div>
         </>
       )}
       {regular.length > 0 && (
         <>
-          <p className="text-[12px] font-semibold text-warm-gray mt-6 mb-2 px-0.5">Members</p>
-          <MemberList members={regular} meId={user?.id} />
+          <p className="text-[12px] font-semibold text-warm-gray mt-5 px-0.5">Members</p>
+          <div className={`mt-2 ${card} overflow-hidden`}>{regular.map(row)}</div>
         </>
       )}
-      {filtered.length === 0 && <p className="text-[13px] text-warm-gray text-center mt-10">No one matches “{query}”.</p>}
+      {filtered.length === 0 && <p className="text-[13px] text-warm-gray text-center mt-8">No one matches “{query}”.</p>}
 
-      <p className="text-[11px] text-warm-gray text-center mt-6 leading-snug">Tap a member to open their profile. Admins can promote or remove from there.</p>
-    </div>
-  );
-}
+      <button onClick={onLeave} className="block mx-auto mt-6 text-[12.5px] font-semibold text-loss px-3 py-2.5 active:opacity-70">
+        Leave club
+      </button>
 
-function MemberList({ members, meId }: { members: TeamMember[]; meId: string | undefined }) {
-  const ROLE_LABEL: Record<string, string> = { owner: "Owner", admin: "Admin", member: "Member" };
-  return (
-    <div className="rounded-2xl bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-      {members.map((m) => (
-        <Link key={m.userId} to={`/u/${m.userId}`} className="flex items-center gap-3 px-4 py-3 border-t border-line first:border-t-0 active:bg-surface-2 transition-colors">
-          <div className="w-[36px] h-[36px] rounded-full bg-graphite text-ivory flex items-center justify-center text-[13px] font-semibold overflow-hidden shrink-0">
-            {m.avatarUrl ? <img src={m.avatarUrl} alt="" className="w-full h-full object-cover" /> : m.displayName.charAt(0).toUpperCase()}
+      {person && (
+        <BottomSheet onClose={() => setPerson(null)} title={person.displayName} variant="card">
+          <div className="rounded-[16px] bg-surface-2 overflow-hidden">
+            <Link to={`/u/${person.userId}`} className="block px-4 py-3.5 text-[14px] text-graphite">
+              View profile
+            </Link>
+            {can(person).promote && (
+              <button
+                onClick={() => {
+                  const p = person;
+                  setPerson(null);
+                  void run(() => setMemberRole(team.id, p.userId, "admin"), `${p.displayName} is now an admin.`);
+                }}
+                className="w-full text-left px-4 py-3.5 border-t border-line text-[14px] font-semibold text-gold-ink"
+              >
+                Make admin
+              </button>
+            )}
+            {can(person).demote && (
+              <button
+                onClick={() => {
+                  const p = person;
+                  setPerson(null);
+                  void run(() => setMemberRole(team.id, p.userId, "member"), `${p.displayName} is a member again.`);
+                }}
+                className="w-full text-left px-4 py-3.5 border-t border-line text-[14px] text-graphite"
+              >
+                Make a member again
+              </button>
+            )}
+            {can(person).remove && (
+              <button
+                onClick={() => {
+                  const p = person;
+                  setPerson(null);
+                  setConfirm({
+                    title: `Remove ${p.displayName}?`,
+                    body: `${p.displayName} leaves ${team.name}. Their results stay in the history; they'd need the code to come back.`,
+                    confirmLabel: `Remove ${p.displayName}`,
+                    tone: "danger",
+                    run: () => run(() => kickMember(team.id, p.userId), `${p.displayName} was removed.`),
+                  });
+                }}
+                className="w-full text-left px-4 py-3.5 border-t border-line text-[14px] text-loss"
+              >
+                Remove from the club
+              </button>
+            )}
           </div>
-          <span className="flex-1 min-w-0">
-            <b className="block text-[14.5px] font-semibold text-graphite truncate">{m.displayName}{m.userId === meId && <span className="text-warm-gray font-normal"> · you</span>}</b>
-          </span>
-          {m.role !== "member" ? (
-            <span className={`text-[11px] ${m.role === "owner" ? "text-gold-ink font-semibold" : "text-warm-gray"}`}>{ROLE_LABEL[m.role]}</span>
-          ) : (
-            <span className="text-stone text-[16px]">›</span>
-          )}
-        </Link>
-      ))}
+          <button onClick={() => setPerson(null)} className="w-full text-[14px] font-semibold text-warm-gray py-3 mt-1.5">
+            Cancel
+          </button>
+        </BottomSheet>
+      )}
+      {confirm && <ConfirmSheet request={confirm} onClose={() => setConfirm(null)} />}
     </div>
   );
 }

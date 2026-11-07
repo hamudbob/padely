@@ -1,303 +1,253 @@
-import { useEffect, useState } from "react";
-import { Link, useParams } from "react-router-dom";
-import { getClubChampions, ClubChampions } from "../../lib/supabase/championsQueries";
+import { useState } from "react";
+import { Link } from "react-router-dom";
+import { getClubChampions } from "../../lib/supabase/championsQueries";
 import { getClubLeagueHistory, SeasonPodium } from "../../lib/supabase/leagueQueries";
-import { getTeam } from "../../lib/supabase/teamQueries";
-import { useBackNav } from "../../lib/useBackNav";
 import { SkeletonScreen, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
 import { useCachedQuery } from "../../lib/cache/useCachedQuery";
-import OfflineNote from "../shell/OfflineNote";
+import { Face, Podium, Segmented, card } from "./club/ui";
 
-function shortDate(iso: string): string {
-  const d = new Date(iso);
-  if (Number.isNaN(d.getTime())) return "";
-  return d.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" });
-}
+/**
+ * The Champions tab of the club page (ADR-002). Built from the same parts as
+ * the League tab: a title row with one switch, a podium card, then rows.
+ * Was its own page until Nov 2026; /teams/:id/champions opens this tab.
+ */
+
 function firstNameOf(name: string): string {
   return name.trim().split(/\s+/)[0] || name;
 }
-function initialsOf(name: string): string {
-  const parts = name.trim().split(/[\s&]+/).filter(Boolean);
-  if (parts.length === 0) return "?";
-  if (parts.length === 1) return parts[0].slice(0, 2).toUpperCase();
-  return (parts[0][0] + parts[parts.length - 1][0]).toUpperCase();
+function monthDay(iso: string): { m: string; d: string } {
+  const t = new Date(iso);
+  if (Number.isNaN(t.getTime())) return { m: "", d: "–" };
+  return { m: t.toLocaleDateString(undefined, { month: "short" }).toUpperCase(), d: String(t.getDate()) };
 }
-const MEDAL = ["🥇", "🥈", "🥉"];
 
-export default function ChampionsPage() {
-  const { teamId } = useParams();
-  const back = useBackNav(teamId ? `/teams/${teamId}` : "/teams");
-  const championsQ = useCachedQuery(teamId ? `club:${teamId}:champions` : null, () => getClubChampions(teamId!));
-  const teamQ = useCachedQuery(teamId ? `club:${teamId}` : null, () => getTeam(teamId!));
-  // Two halls (Nov 2026): each night's podium, and each season's league podium.
-  const [tab, setTab] = useState<"nights" | "league">("nights");
-  const historyQ = useCachedQuery(teamId && tab === "league" ? `club:${teamId}:league-history` : null, () => getClubLeagueHistory(teamId!));
-
+export function ChampionsTab({ teamId, userId }: { teamId: string; userId: string | undefined }) {
+  const [view, setView] = useState<"nights" | "seasons">("nights");
+  const championsQ = useCachedQuery(`club:${teamId}:champions`, () => getClubChampions(teamId));
+  const historyQ = useCachedQuery(view === "seasons" ? `club:${teamId}:league-history` : null, () => getClubLeagueHistory(teamId));
   const data = championsQ.data;
-  const teamName = teamQ.data?.name ?? "";
-  const loading = championsQ.loading;
-  // Only a real refusal counts. This used to catch EVERY failure into
-  // "not allowed", so losing signal told a member they had no permission to
-  // see their own club's champions — an accusation, from a dropped request.
-  const notAllowed = Boolean(championsQ.error) && !championsQ.stale;
-
-  const shell = "mx-auto max-w-sm min-h-screen bg-ivory px-5 py-6 safe-top safe-bottom anim-fade";
-  const topBar = (
-    <div className="flex items-center justify-between mb-2">
-      <button onClick={back} aria-label="Back" className="w-9 h-9 rounded-full border border-line bg-surface text-ink-2 flex items-center justify-center text-[17px] active:scale-95 transition-transform">‹</button>
-      <div className="font-wordmark text-[16px] font-semibold text-graphite flex items-baseline leading-none">
-        Padelier<span className="ml-[3px] w-[5px] h-[5px] rounded-full bg-gold inline-block" aria-hidden />
-      </div>
-      <div className="w-9" />
-    </div>
-  );
-
-  if (loading)
-    return (
-      <div className={shell}>
-        {topBar}
-      <OfflineNote show={championsQ.stale || teamQ.stale} at={championsQ.cachedAt} onRetry={() => { championsQ.refresh(); teamQ.refresh(); }} className="mb-2" />
-        <SkeletonScreen label="Loading the champions">
-          <SkeletonBlock h={184} className="mb-6" />
-          <SkeletonRows n={5} avatar />
-        </SkeletonScreen>
-      </div>
-    );
-  if (notAllowed || !data) return <div className={shell}>{topBar}<p className="text-[13px] text-warm-gray mt-16 text-center">This hall isn't available.</p></div>;
-
-  const { titles, recent } = data;
-  const empty = titles.length === 0 && recent.length === 0;
   const history = historyQ.data;
 
+  const crowned = data?.recent.length ?? 0;
+  const winners = new Set(data?.recent.map((r) => r.champion.userId) ?? []).size;
+  const myTitles = data?.titles.find((t) => t.userId === userId)?.titles ?? 0;
+
   return (
-    <div className={shell}>
-      {topBar}
-
-      {/* Identity */}
-      <div className="text-center pt-4">
-        <div className="w-[64px] h-[64px] rounded-2xl bg-gold-soft flex items-center justify-center mx-auto text-[30px]" aria-hidden>👑</div>
-        <h1 className="font-serif text-[27px] font-semibold text-graphite tracking-tight mt-3">Champions Hall</h1>
-        {teamName && <p className="text-[12.5px] text-warm-gray mt-1">{teamName}</p>}
-      </div>
-
-      <div className="flex rounded-full bg-surface border border-line p-1 mt-6" role="tablist">
-        {(["nights", "league"] as const).map((k) => (
-          <button
-            key={k}
-            role="tab"
-            aria-selected={tab === k}
-            onClick={() => setTab(k)}
-            className={`flex-1 rounded-full py-2 text-[13px] font-semibold transition-colors ${tab === k ? "bg-graphite text-ivory" : "text-warm-gray"}`}
-          >
-            {k === "nights" ? "Nights" : "League"}
-          </button>
-        ))}
-      </div>
-
-      {tab === "league" ? (
-        <LeagueHall history={history ?? null} loading={historyQ.loading} failed={Boolean(historyQ.error) && !history} teamId={teamId ?? ""} />
-      ) : empty ? (
-        <div className="mt-8 rounded-2xl border border-dashed border-line bg-surface px-4 py-8 text-center">
-          <p className="text-[13px] font-semibold text-ink-2">No champions yet</p>
-          <p className="text-[12px] text-warm-gray mt-1.5 leading-relaxed">Finish a club session and its winner is crowned here.</p>
+    <div className="px-5">
+      <div className="flex items-center justify-between gap-3 mt-5">
+        <span className="min-w-0">
+          <span className="block font-serif text-[18px] font-semibold text-graphite">{view === "nights" ? "Night champions" : "Season champions"}</span>
+          <span className="block text-[11.5px] text-warm-gray mt-0.5 truncate">
+            {view === "nights"
+              ? data
+                ? `${crowned} ${crowned === 1 ? "night" : "nights"} · ${winners} ${winners === 1 ? "winner" : "winners"}`
+                : " "
+              : history
+                ? `${history.finished.length} ${history.finished.length === 1 ? "season" : "seasons"} finished`
+                : " "}
+          </span>
+        </span>
+        <div className="w-[150px] shrink-0">
+          <Segmented
+            small
+            label="Champions"
+            value={view}
+            onChange={setView}
+            options={[
+              { value: "nights", label: "Nights" },
+              { value: "seasons", label: "Seasons" },
+            ]}
+          />
         </div>
-      ) : (
-        <>
-          {/* Titles board */}
-          {titles.length > 0 && (
-            <>
-              <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-8 mb-2 px-0.5">Most titles</h3>
-              <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-                {titles.map((t, i) => (
-                  <Link
-                    key={t.userId}
-                    to={`/u/${t.userId}`}
-                    className={`flex items-center gap-3 px-4 py-3 border-t border-line first:border-t-0 active:bg-surface-2 transition-colors ${i === 0 ? "bg-gold-soft/50" : ""}`}
-                  >
-                    <span className={`w-5 text-center font-mono tnum text-[13px] font-bold ${i === 0 ? "text-gold-ink" : "text-warm-gray"}`}>{i + 1}</span>
-                    <span className="w-[34px] h-[34px] rounded-full bg-graphite text-ivory flex items-center justify-center text-[13px] font-semibold overflow-hidden shrink-0">
-                      {t.avatarUrl ? <img src={t.avatarUrl} alt="" className="w-full h-full object-cover" /> : initialsOf(t.name)}
-                    </span>
-                    <span className="flex-1 min-w-0">
-                      <b className="block text-[14px] font-semibold text-graphite truncate">{t.name}</b>
-                      <span className="block text-[11px] text-warm-gray">{t.podiums} podium{t.podiums === 1 ? "" : "s"} · {t.sessions} played</span>
-                    </span>
-                    <span className="text-right shrink-0">
-                      <span className="font-mono tnum text-[17px] font-semibold text-gold-ink">{t.titles}</span>
-                      <span className="block text-[9px] font-bold uppercase tracking-[0.1em] text-warm-gray -mt-0.5">{t.titles === 1 ? "title" : "titles"}</span>
-                    </span>
+      </div>
+
+      {view === "nights" ? (
+        !data ? (
+          championsQ.error ? (
+            <p className="text-[13px] text-warm-gray mt-10 text-center">Couldn't load the champions just now.</p>
+          ) : (
+            <SkeletonScreen label="Loading the champions">
+              <SkeletonBlock h={170} className="mt-4 mb-4" />
+              <SkeletonRows n={4} avatar />
+            </SkeletonScreen>
+          )
+        ) : data.titles.length === 0 && data.recent.length === 0 ? (
+          <Empty title="No champions yet" body="Finish a club session and its winner is crowned here." />
+        ) : (
+          <>
+            {data.titles.length > 0 && (
+              <div className={`mt-3.5 ${card} px-4 pt-[18px] pb-3.5`}>
+                <Podium
+                  entries={data.titles.slice(0, 3).map((t) => ({
+                    key: t.userId,
+                    name: t.name,
+                    avatarUrl: t.avatarUrl,
+                    value: String(t.titles),
+                    unit: `${t.titles === 1 ? "title" : "titles"} · ${t.podiums} ${t.podiums === 1 ? "podium" : "podiums"}`,
+                    href: `/u/${t.userId}`,
+                  }))}
+                />
+                <p className="text-[11.5px] text-warm-gray text-center mt-3">
+                  Most titles{myTitles > 0 && !data.titles.slice(0, 3).some((t) => t.userId === userId) ? ` · you have ${myTitles}` : ""}
+                </p>
+              </div>
+            )}
+            {data.titles.length > 3 && (
+              <div className={`mt-2 ${card} px-4 py-2.5 flex flex-wrap gap-x-4 gap-y-1`}>
+                {data.titles.slice(3, 9).map((t) => (
+                  <Link key={t.userId} to={`/u/${t.userId}`} className="text-[12.5px] text-graphite">
+                    {t.name} <span className="text-warm-gray">· {t.titles}</span>
                   </Link>
                 ))}
               </div>
-            </>
-          )}
+            )}
 
-          {/* Recent champions */}
-          {recent.length > 0 && (
-            <>
-              <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-8 mb-2 px-0.5">Recent champions</h3>
-              <div className="flex flex-col gap-2.5">
-                {recent.map((s) => (
-                  <div key={s.sessionId} className="rounded-2xl border border-line bg-surface px-4 py-3.5 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-                    {/* The session name is a door. /session/<id>/final is public
-                        for any non-draft session, so a member can open the
-                        podium and full standings of a night they played — which
-                        is what someone reading a champions list is actually
-                        curious about. */}
-                    <Link to={`/session/${s.sessionId}/final`} className="flex items-baseline justify-between gap-2 active:opacity-70">
-                      <b className="text-[13.5px] font-semibold text-graphite truncate">
-                        {s.sessionName}
-                        <span className="text-stone font-normal"> ›</span>
-                      </b>
-                      <span className="text-[11px] text-warm-gray shrink-0">{shortDate(s.sessionDate)}</span>
-                    </Link>
-                    <Link to={`/u/${s.champion.userId}`} className="flex items-center gap-2.5 mt-2.5 active:opacity-70">
-                      <span className="w-[36px] h-[36px] rounded-full bg-gold-soft text-gold-ink border border-gold/30 flex items-center justify-center text-[14px] font-semibold overflow-hidden shrink-0">
-                        {s.champion.avatarUrl ? <img src={s.champion.avatarUrl} alt="" className="w-full h-full object-cover" /> : initialsOf(s.champion.name)}
-                      </span>
-                      <span className="flex-1 min-w-0">
-                        <span className="flex items-center gap-1.5">
-                          <span aria-hidden>🥇</span>
-                          <b className="text-[14px] font-semibold text-graphite truncate">{s.champion.name}</b>
+            {data.recent.length > 0 && (
+              <>
+                <h2 className="font-serif text-[18px] font-semibold text-graphite mt-6 px-0.5">Recent nights</h2>
+                <div className={`mt-2.5 ${card} overflow-hidden`}>
+                  {data.recent.map((s) => {
+                    const md = monthDay(s.sessionDate);
+                    const me = s.champion.userId === userId;
+                    const others = s.podium.filter((p) => p.rank > 1).slice(0, 2);
+                    return (
+                      <Link
+                        key={s.sessionId}
+                        to={`/session/${s.sessionId}/final`}
+                        className={`flex items-center gap-3 px-3.5 py-3 border-t border-line first:border-t-0 active:bg-surface-2 ${me ? "bg-gold-soft" : ""}`}
+                      >
+                        <span className="w-[30px] text-center shrink-0" aria-hidden>
+                          <span className="block text-[8.5px] font-bold tracking-[0.1em] text-gold-ink">{md.m}</span>
+                          <span className="block font-serif text-[15px] font-semibold text-graphite leading-tight">{md.d}</span>
                         </span>
-                        <span className="block text-[11px] text-warm-gray">Champion · {s.champion.points} pts · {s.fieldSize} players</span>
-                      </span>
-                    </Link>
-                    {s.podium.length > 1 && (
-                      <p className="text-[11.5px] text-warm-gray mt-2.5 pt-2.5 border-t border-line flex flex-wrap gap-x-3 gap-y-1">
-                        {s.podium.map((p) => (
-                          <span key={p.rank}>
-                            <span aria-hidden>{MEDAL[p.rank - 1] ?? "•"}</span> {firstNameOf(p.name)}
+                        <Face name={s.champion.name} url={s.champion.avatarUrl} gold={!s.champion.avatarUrl && !me} />
+                        <span className="flex-1 min-w-0">
+                          <b className="block text-[14.5px] font-semibold text-graphite truncate">
+                            {s.champion.name}
+                            {me && <span className="font-normal text-warm-gray"> · you</span>}
+                          </b>
+                          <span className="block text-[11px] text-warm-gray truncate">
+                            {[s.sessionName, ...others.map((p) => `${p.rank === 2 ? "2nd" : "3rd"} ${firstNameOf(p.name)}`)].join(" · ")}
                           </span>
-                        ))}
-                      </p>
-                    )}
-                  </div>
-                ))}
-              </div>
-            </>
-          )}
-        </>
+                        </span>
+                        <span className="text-right shrink-0">
+                          <span className="font-mono tnum text-[18px] font-semibold text-graphite leading-none">{s.champion.points}</span>
+                          <span className="block text-[9px] font-semibold text-warm-gray mt-0.5">pts</span>
+                        </span>
+                      </Link>
+                    );
+                  })}
+                </div>
+              </>
+            )}
+          </>
+        )
+      ) : (
+        <SeasonsView history={history ?? null} loading={historyQ.loading} failed={Boolean(historyQ.error) && !history} userId={userId} />
       )}
     </div>
   );
 }
 
-/** The League tab: every finished season's top three, and the season in progress. */
-function LeagueHall({
+function Empty({ title, body }: { title: string; body: string }) {
+  return (
+    <div className="mt-5 rounded-[22px] border-[1.5px] border-dashed border-stone px-5 py-7 text-center">
+      <p className="text-[13.5px] font-semibold text-ink-2">{title}</p>
+      <p className="text-[12px] text-warm-gray mt-1.5 leading-relaxed">{body}</p>
+    </div>
+  );
+}
+
+function SeasonsView({
   history,
   loading,
   failed,
-  teamId,
+  userId,
 }: {
   history: import("../../lib/supabase/leagueQueries").LeagueHistory | null;
   loading: boolean;
   failed: boolean;
-  teamId: string;
+  userId: string | undefined;
 }) {
   if (loading && !history) {
     return (
-      <SkeletonScreen label="Loading the league champions">
-        <SkeletonBlock h={120} className="mt-6 mb-3" />
+      <SkeletonScreen label="Loading the season champions">
+        <SkeletonBlock h={160} className="mt-4 mb-3" />
         <SkeletonRows n={3} avatar />
       </SkeletonScreen>
     );
   }
-  if (failed || !history) {
-    return <p className="text-[13px] text-warm-gray mt-10 text-center">Couldn't load the league champions just now.</p>;
-  }
+  if (failed || !history) return <p className="text-[13px] text-warm-gray mt-10 text-center">Couldn't load the season champions just now.</p>;
   const { finished, current, titles } = history;
   if (finished.length === 0 && (!current || current.podium.length === 0)) {
-    return (
-      <div className="mt-8 rounded-2xl border border-dashed border-line bg-surface px-4 py-8 text-center">
-        <p className="text-[13px] font-semibold text-ink-2">No league champions yet</p>
-        <p className="text-[12px] text-warm-gray mt-1.5 leading-relaxed">When a season ends, its top three are kept here for good.</p>
-      </div>
-    );
+    return <Empty title="No season champions yet" body="When a season ends, its top three are kept here for good." />;
   }
   return (
     <>
       {titles.length > 0 && (
-        <>
-          <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-8 mb-2 px-0.5">Most seasons won</h3>
-          <div className="rounded-2xl border border-line bg-surface overflow-hidden shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-            {titles.map((t, i) => (
-              <Link key={t.userId} to={`/u/${t.userId}`} className={`flex items-center gap-3 px-4 py-3 border-t border-line first:border-t-0 active:bg-surface-2 ${i === 0 ? "bg-gold-soft/50" : ""}`}>
-                <span className={`w-5 text-center font-mono tnum text-[13px] font-bold ${i === 0 ? "text-gold-ink" : "text-warm-gray"}`}>{i + 1}</span>
-                <span className="w-[34px] h-[34px] rounded-full bg-graphite text-ivory flex items-center justify-center text-[13px] font-semibold overflow-hidden shrink-0">
-                  {t.avatarUrl ? <img src={t.avatarUrl} alt="" className="w-full h-full object-cover" /> : initialsOf(t.displayName)}
-                </span>
-                <span className="flex-1 min-w-0">
-                  <b className="block text-[14px] font-semibold text-graphite truncate">{t.displayName}</b>
-                  <span className="block text-[11px] text-warm-gray">{t.podiums} season podium{t.podiums === 1 ? "" : "s"}</span>
-                </span>
-                <span className="text-right shrink-0">
-                  <span className="font-mono tnum text-[17px] font-semibold text-gold-ink">{t.titles}</span>
-                  <span className="block text-[9px] font-bold uppercase tracking-[0.1em] text-warm-gray -mt-0.5">{t.titles === 1 ? "season" : "seasons"}</span>
-                </span>
-              </Link>
-            ))}
-          </div>
-        </>
+        <div className={`mt-3.5 ${card} px-4 pt-[18px] pb-3.5`}>
+          <Podium
+            entries={titles.slice(0, 3).map((t) => ({
+              key: t.userId,
+              name: t.displayName,
+              avatarUrl: t.avatarUrl,
+              value: String(t.titles),
+              unit: `${t.titles === 1 ? "season" : "seasons"} · ${t.podiums} ${t.podiums === 1 ? "podium" : "podiums"}`,
+              href: `/u/${t.userId}`,
+            }))}
+          />
+          <p className="text-[11.5px] text-warm-gray text-center mt-3">Most seasons won</p>
+        </div>
       )}
-
       {current && current.podium.length > 0 && (
         <>
-          <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-8 mb-2 px-0.5">This season so far</h3>
-          <SeasonCard s={current} inProgress teamId={teamId} />
+          <h2 className="font-serif text-[18px] font-semibold text-graphite mt-6 px-0.5">This season so far</h2>
+          <SeasonRows seasons={[current]} inProgress userId={userId} />
         </>
       )}
-
       {finished.length > 0 && (
         <>
-          <h3 className="text-[11px] font-bold uppercase tracking-[0.14em] text-warm-gray mt-8 mb-2 px-0.5">Past seasons</h3>
-          <div className="flex flex-col gap-2.5">
-            {finished.map((s) => (
-              <SeasonCard key={s.start} s={s} teamId={teamId} />
-            ))}
-          </div>
+          <h2 className="font-serif text-[18px] font-semibold text-graphite mt-6 px-0.5">Past seasons</h2>
+          <SeasonRows seasons={finished} userId={userId} />
         </>
       )}
     </>
   );
 }
 
-function SeasonCard({ s, inProgress = false, teamId }: { s: SeasonPodium; inProgress?: boolean; teamId: string }) {
-  const [champ, ...rest] = s.podium;
+function SeasonRows({ seasons, inProgress = false, userId }: { seasons: SeasonPodium[]; inProgress?: boolean; userId: string | undefined }) {
   return (
-    <div className="rounded-2xl border border-line bg-surface px-4 py-3.5 shadow-[0_1px_2px_rgba(13,13,13,0.04)]">
-      <Link to={`/teams/${teamId}/league`} className="flex items-baseline justify-between gap-2 active:opacity-70">
-        <b className="text-[13.5px] font-semibold text-graphite truncate">
-          {s.label}
-          <span className="text-stone font-normal"> ›</span>
-        </b>
-        <span className="text-[11px] text-warm-gray shrink-0">{inProgress ? "in progress" : `${s.nights} night${s.nights === 1 ? "" : "s"}`}</span>
-      </Link>
-      {champ && (
-        <Link to={`/u/${champ.userId}`} className="flex items-center gap-2.5 mt-2.5 active:opacity-70">
-          <span className="w-[36px] h-[36px] rounded-full bg-gold-soft text-gold-ink border border-gold/30 flex items-center justify-center text-[14px] font-semibold overflow-hidden shrink-0">
-            {champ.avatarUrl ? <img src={champ.avatarUrl} alt="" className="w-full h-full object-cover" /> : initialsOf(champ.displayName)}
-          </span>
-          <span className="flex-1 min-w-0">
-            <span className="flex items-center gap-1.5">
-              <span aria-hidden>🥇</span>
-              <b className="text-[14px] font-semibold text-graphite truncate">{champ.displayName}</b>
+    <div className={`mt-2.5 ${card} overflow-hidden`}>
+      {seasons.map((s) => {
+        const [champ, ...rest] = s.podium;
+        if (!champ) return null;
+        const me = champ.userId === userId;
+        return (
+          <Link
+            key={s.start}
+            to={`/u/${champ.userId}`}
+            className={`flex items-center gap-3 px-3.5 py-3 border-t border-line first:border-t-0 active:bg-surface-2 ${me ? "bg-gold-soft" : ""}`}
+          >
+            <span className="w-[30px] text-center shrink-0 font-mono text-[12px] font-semibold text-gold-ink" aria-hidden>
+              S{s.number}
             </span>
-            <span className="block text-[11px] text-warm-gray">
-              {inProgress ? "Leading" : "Champion"} · {champ.pointsPerSession.toFixed(1)} pts / night · {champ.sessions} night{champ.sessions === 1 ? "" : "s"}
+            <Face name={champ.displayName} url={champ.avatarUrl} gold={!champ.avatarUrl && !me} />
+            <span className="flex-1 min-w-0">
+              <b className="block text-[14.5px] font-semibold text-graphite truncate">
+                {champ.displayName}
+                {me && <span className="font-normal text-warm-gray"> · you</span>}
+              </b>
+              <span className="block text-[11px] text-warm-gray truncate">
+                {[inProgress ? `Leading ${s.dates}` : s.dates, ...rest.map((p, i) => `${i === 0 ? "2nd" : "3rd"} ${firstNameOf(p.displayName)}`)].join(" · ")}
+              </span>
             </span>
-          </span>
-        </Link>
-      )}
-      {rest.length > 0 && (
-        <p className="text-[11.5px] text-warm-gray mt-2.5 pt-2.5 border-t border-line flex flex-wrap gap-x-3 gap-y-1">
-          {rest.map((p, i) => (
-            <span key={p.userId}>
-              <span aria-hidden>{MEDAL[i + 1]}</span> {firstNameOf(p.displayName)}
+            <span className="text-right shrink-0">
+              <span className="font-mono tnum text-[18px] font-semibold text-graphite leading-none">{champ.pointsPerSession.toFixed(1)}</span>
+              <span className="block text-[9px] font-semibold text-warm-gray mt-0.5">/ night</span>
             </span>
-          ))}
-        </p>
-      )}
+          </Link>
+        );
+      })}
     </div>
   );
 }
