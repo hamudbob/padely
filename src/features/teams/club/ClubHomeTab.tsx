@@ -5,6 +5,8 @@ import type { JoinRequestItem } from "../../../lib/supabase/clubJoinQueries";
 import {
   AdminTodoItem,
   CallupExtras,
+  ClubMoney,
+  getClubMoney,
   ClubEvent,
   RsvpResponse,
   eventCode,
@@ -104,6 +106,16 @@ export default function ClubHomeTab({
     };
   }, [isAdmin, team.id, events.length]);
 
+  // Played nights with money still out (0082): admins collect, players owe.
+  const [money, setMoney] = useState<ClubMoney>({ collect: [], owe: [] });
+  useEffect(() => {
+    let alive = true;
+    getClubMoney(team.id).then((m) => alive && setMoney(m));
+    return () => {
+      alive = false;
+    };
+  }, [team.id, events.length, live.length]);
+
   const [confirm, setConfirm] = useState<ConfirmRequest | null>(null);
 
   function answer(ev: ClubEvent, response: RsvpResponse) {
@@ -164,7 +176,10 @@ export default function ClubHomeTab({
         return e.maxPlayers != null && e.maxPlayers > 0 && ms > 0 && ms < 3 * 86400000 && e.counts.in < e.maxPlayers / 2;
       })
     : [];
-  const needsCount = todo.length + requests.length + thinNights.length;
+  const collect = isAdmin ? money.collect : [];
+  const collectIds = new Set(collect.map((c) => c.eventId));
+  const todoNow = todo.filter((t) => !collectIds.has(t.eventId));
+  const needsCount = collect.length + todoNow.length + requests.length + thinNights.length;
 
   // ── Getting started (admins of a new club) ─────────────────────────────
   const hideKey = `padelier:club:${team.id}:setupHidden`;
@@ -239,12 +254,48 @@ export default function ClubHomeTab({
         </div>
       ))}
 
+      {/* What I still owe for nights already played */}
+      {money.owe.map((o) => (
+        <Link
+          key={"o" + o.eventId}
+          to={eventPath({ id: o.eventId, slug: o.slug })}
+          className={`mt-5 flex items-center gap-3 rounded-[22px] px-4 py-3.5 active:opacity-80 ${o.hasReceipt ? "bg-surface shadow-[0_1px_2px_rgba(13,13,13,0.04)]" : "bg-gold-soft"}`}
+        >
+          <NeedIcon kind="money" />
+          <span className="flex-1 min-w-0">
+            <span className="block text-[14px] font-semibold text-graphite truncate">
+              {o.hasReceipt ? "Receipt sent" : "You still owe"} · {o.title}
+            </span>
+            <span className="block text-[11.5px] text-ink-2 truncate">
+              {dayLabel(o.scheduledAt)}
+              {o.cost ? ` · ${o.cost}` : ""}
+              {o.spots > 1 ? ` · ${o.spots} spots` : ""}
+              {o.hasReceipt ? " · waiting for an admin" : o.paymentMode === "receipt" ? " · upload your receipt" : " · pay as the notes say"}
+            </span>
+          </span>
+          <Chevron />
+        </Link>
+      ))}
+
       {/* Needs you */}
       {isAdmin && needsCount > 0 && (
         <>
           <p className="text-[12px] font-semibold text-loss mt-5 px-0.5">Needs you · {needsCount}</p>
           <div className={`mt-2 ${card} px-3.5`}>
-            {todo.map((t) => (
+            {collect.map((c) => (
+              <Link key={"c" + c.eventId} to={`${eventPath({ id: c.eventId, slug: c.slug })}?tab=payments`} className="flex items-center gap-3 py-3 border-t border-line first:border-t-0">
+                <NeedIcon kind="money" />
+                <span className="flex-1 min-w-0 text-[13.5px]">
+                  <b className="font-semibold text-graphite">Still to collect</b>
+                  <span className="text-warm-gray">
+                    {" "}
+                    · {dayLabel(c.scheduledAt)} · {c.paidSpots} of {c.inSpots} paid{c.toCheck > 0 ? ` · ${c.toCheck} to check` : ""}
+                  </span>
+                </span>
+                <Chevron />
+              </Link>
+            ))}
+            {todoNow.map((t) => (
               <Link key={t.eventId} to={`/e/${t.eventId}?tab=payments`} className="flex items-center gap-3 py-3 border-t border-line first:border-t-0">
                 <NeedIcon kind="money" />
                 <span className="flex-1 min-w-0 text-[13.5px]">

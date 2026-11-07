@@ -704,6 +704,11 @@ export interface CallupExtras {
   paidSpots: number;
   isAdmin: boolean;
   me: CallupMe | null;
+  /** 0082: the session started and its roster is on the server, so who owes
+   *  is who played. */
+  played: boolean;
+  /** 0082: an admin tapped Done collecting. */
+  collectingClosed: boolean;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -723,6 +728,8 @@ function extrasFromJson(j: Record<string, unknown> | null): CallupExtras | null 
     inSpots: Number(j.in_spots ?? 0),
     paidSpots: Number(j.paid_spots ?? 0),
     isAdmin: j.is_admin === true,
+    played: j.played === true,
+    collectingClosed: j.collecting_closed === true,
     me: me
       ? {
           spots: Number(me.spots ?? 0),
@@ -929,4 +936,86 @@ export async function getClubAdminTodo(clubId: string): Promise<AdminTodoItem[]>
     scheduledAt: String(r.scheduled_at ?? ""),
     toCheck: Number(r.to_check ?? 0),
   }));
+}
+
+/* ── Paying after the night (0082) ────────────────────────────────────── */
+
+/** Someone on a played night's roster with no account, whom no member brought. */
+export interface WalkinRow {
+  nameKey: string;
+  displayName: string;
+  paidAt: string | null;
+}
+
+/** Admin: a played night's walk-ins. Empty before 0082. */
+export async function getCallupWalkins(eventId: string): Promise<WalkinRow[]> {
+  const { data, error } = await rpcAny("get_callup_walkins", { p_event_id: eventId });
+  if (error) return [];
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    nameKey: String(r.name_key ?? ""),
+    displayName: String(r.display_name ?? ""),
+    paidAt: typeof r.paid_at === "string" ? r.paid_at : null,
+  }));
+}
+
+export async function setCallupWalkinPayment(eventId: string, nameKey: string, paid: boolean): Promise<void> {
+  const { error } = await rpcAny("set_callup_walkin_payment", { p_event_id: eventId, p_name_key: nameKey, p_paid: paid });
+  if (error) throw new Error(error.message);
+}
+
+/** Admin: Done collecting (true), or reopen (false). */
+export async function setCallupCollecting(eventId: string, done: boolean): Promise<void> {
+  const { error } = await rpcAny("set_callup_collecting", { p_event_id: eventId, p_done: done });
+  if (error) throw new Error(error.message);
+}
+
+export interface MoneyNight {
+  eventId: string;
+  slug: string | null;
+  title: string;
+  scheduledAt: string;
+}
+export interface CollectNight extends MoneyNight {
+  inSpots: number;
+  paidSpots: number;
+  toCheck: number;
+}
+export interface OweNight extends MoneyNight {
+  cost: string | null;
+  paymentMode: PaymentMode;
+  spots: number;
+  hasReceipt: boolean;
+}
+export interface ClubMoney {
+  collect: CollectNight[];
+  owe: OweNight[];
+}
+
+/** Played nights with money still out: admins' "collect", everyone's own
+ *  "owe". Empty before 0082 or on any error. */
+export async function getClubMoney(clubId: string): Promise<ClubMoney> {
+  const { data, error } = await rpcAny("get_club_money", { p_club_id: clubId });
+  if (error || !data) return { collect: [], owe: [] };
+  const j = data as { collect?: Record<string, unknown>[]; owe?: Record<string, unknown>[] };
+  const base = (r: Record<string, unknown>): MoneyNight => ({
+    eventId: String(r.event_id ?? ""),
+    slug: typeof r.slug === "string" && r.slug ? r.slug : null,
+    title: String(r.title ?? ""),
+    scheduledAt: String(r.scheduled_at ?? ""),
+  });
+  return {
+    collect: (j.collect ?? []).map((r) => ({
+      ...base(r),
+      inSpots: Number(r.in_spots ?? 0),
+      paidSpots: Number(r.paid_spots ?? 0),
+      toCheck: Number(r.to_check ?? 0),
+    })),
+    owe: (j.owe ?? []).map((r) => ({
+      ...base(r),
+      cost: typeof r.cost === "string" && r.cost ? r.cost : null,
+      paymentMode: paymentModeOf(r.payment_mode),
+      spots: Number(r.spots ?? 1),
+      hasReceipt: r.has_receipt === true,
+    })),
+  };
 }

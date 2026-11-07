@@ -3,6 +3,10 @@ import {
   CallupExtras,
   CallupPaymentRow,
   PaymentMode,
+  WalkinRow,
+  getCallupWalkins,
+  setCallupCollecting,
+  setCallupWalkinPayment,
   PAYMENT_MODES,
   getCallupPayments,
   getCallupReceipt,
@@ -275,6 +279,8 @@ export function AdminPayments({
   mode,
   version,
   deadline,
+  played = false,
+  closed = false,
   onChanged,
 }: {
   eventId: string;
@@ -282,9 +288,14 @@ export function AdminPayments({
   /** Bumped by the page whenever the RSVPs change, so the list follows. */
   version: number;
   deadline: string | null;
+  /** 0082: the night was played, so the list is who played, walk-ins too. */
+  played?: boolean;
+  /** 0082: Done collecting was tapped. */
+  closed?: boolean;
   onChanged: () => void;
 }) {
   const [rows, setRows] = useState<CallupPaymentRow[] | null>(null);
+  const [walkins, setWalkins] = useState<WalkinRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const [rejecting, setRejecting] = useState<string | null>(null);
@@ -300,11 +311,40 @@ export function AdminPayments({
         setErr(null);
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Couldn't load payments."));
+    if (played) getCallupWalkins(eventId).then(setWalkins);
+    else setWalkins([]);
   }
   useEffect(() => {
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [eventId, version, mode]);
+  }, [eventId, version, mode, played]);
+
+  async function tickWalkin(w: WalkinRow, paidNow: boolean) {
+    setBusy("w:" + w.nameKey);
+    setErr(null);
+    try {
+      await setCallupWalkinPayment(eventId, w.nameKey, paidNow);
+      load();
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "That didn't work.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function collecting(done: boolean) {
+    setBusy("close");
+    setErr(null);
+    try {
+      await setCallupCollecting(eventId, done);
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "That didn't work.");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   // Thumbnails for the receipts waiting to be checked (only those).
   const toCheckIds = (rows ?? []).filter((r) => !r.paidAt && r.hasReceipt).map((r) => r.userId).join(",");
@@ -367,21 +407,55 @@ export function AdminPayments({
   const toCheck = rows.filter((r) => !r.paidAt && r.hasReceipt);
   const unpaid = rows.filter((r) => !r.paidAt && !r.hasReceipt);
   const guestsLabel = (r: CallupPaymentRow) => (r.guestsIn > 0 ? ` +${r.guestsIn} guest${r.guestsIn === 1 ? "" : "s"}` : "");
+  const walkPaid = walkins.filter((w) => w.paidAt);
+  const walkUnpaid = walkins.filter((w) => !w.paidAt);
+  const everyonePaid = unpaid.length + toCheck.length + walkUnpaid.length === 0;
+  const walkRow = (w: WalkinRow) => (
+    <div key={"w:" + w.nameKey} className="flex items-center gap-3 px-3.5 py-3 border-t border-line first:border-t-0">
+      <Face name={w.displayName} url={null} size={34} />
+      <span className="flex-1 min-w-0">
+        <b className="block text-[14px] font-semibold text-graphite truncate">{w.displayName}</b>
+        <span className="block text-[11.5px] text-warm-gray">Walk-in · no account</span>
+      </span>
+      {w.paidAt ? (
+        <>
+          <span className="text-[11px] font-bold rounded-full px-2.5 py-1 bg-win-soft text-win">Paid</span>
+          <button onClick={() => tickWalkin(w, false)} disabled={busy === "w:" + w.nameKey} className="text-[11.5px] font-semibold text-warm-gray px-1 disabled:opacity-40">
+            Undo
+          </button>
+        </>
+      ) : (
+        <button onClick={() => tickWalkin(w, true)} disabled={busy === "w:" + w.nameKey} className="h-8 px-3 rounded-full border border-win/40 text-win text-[12px] font-semibold disabled:opacity-40">
+          Mark paid
+        </button>
+      )}
+    </div>
+  );
 
   return (
     <div>
+      {played && (
+        <div className={`mt-4 rounded-[18px] px-4 py-3 ${closed ? "bg-surface-2" : "bg-gold-soft"}`}>
+          <p className="text-[13px] font-semibold text-graphite">{closed ? "Done collecting" : "Paying after the night"}</p>
+          <p className="text-[11.5px] text-ink-2 mt-0.5 leading-snug">
+            {closed
+              ? "This night is off the club page. Reopen it if someone still owes."
+              : "This list is who played. It stays on the club page until everyone is ticked, or you tap Done collecting."}
+          </p>
+        </div>
+      )}
       <div className="grid grid-cols-3 gap-2 mt-4">
-        <Tile n={paid.length} label="Paid" tone="win" />
+        <Tile n={paid.length + walkPaid.length} label="Paid" tone="win" />
         <Tile n={toCheck.length} label="To check" tone="gold" />
-        <Tile n={unpaid.length} label="Not paid" tone="plain" />
+        <Tile n={unpaid.length + walkUnpaid.length} label="Not paid" tone="plain" />
       </div>
-      {mode === "receipt" && deadline && (
+      {mode === "receipt" && deadline && !played && (
         <p className="text-[11.5px] text-warm-gray mt-2 px-0.5">
           Deadline {dayAndTime(deadline)}. Anyone in without a receipt then moves to the waiting list.
         </p>
       )}
       {err && <p className="text-[11.5px] text-loss mt-2 px-0.5">{err}</p>}
-      {rows.length === 0 && <p className="text-[12.5px] text-warm-gray mt-4 text-center">Nobody is in yet.</p>}
+      {rows.length === 0 && walkins.length === 0 && <p className="text-[12.5px] text-warm-gray mt-4 text-center">{played ? "Nobody on the roster yet." : "Nobody is in yet."}</p>}
 
       {toCheck.length > 0 && (
         <>
@@ -446,7 +520,7 @@ export function AdminPayments({
         </>
       )}
 
-      {unpaid.length > 0 && (
+      {unpaid.length + walkUnpaid.length > 0 && (
         <>
           <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-warm-gray mt-5 mb-2 px-0.5">Not paid</p>
           <div className={`${card} overflow-hidden`}>
@@ -470,13 +544,14 @@ export function AdminPayments({
                 </div>
               );
             })}
+            {walkUnpaid.map(walkRow)}
           </div>
         </>
       )}
 
-      {paid.length > 0 && (
+      {paid.length + walkPaid.length > 0 && (
         <>
-          <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-win mt-5 mb-2 px-0.5">Paid · {paid.length}</p>
+          <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-win mt-5 mb-2 px-0.5">Paid · {paid.length + walkPaid.length}</p>
           <div className={`${card} overflow-hidden`}>
             {paid.map((r) => (
               <div key={r.userId} className="flex items-center gap-3 px-3.5 py-3 border-t border-line first:border-t-0">
@@ -486,7 +561,7 @@ export function AdminPayments({
                     {r.displayName}
                     <span className="font-normal text-warm-gray text-[12px]">{guestsLabel(r)}</span>
                   </b>
-                  {!r.ownIn && r.guestsIn === 0 && <span className="block text-[11px] text-warm-gray">Paid, no longer in</span>}
+                  {!r.ownIn && r.guestsIn === 0 && <span className="block text-[11px] text-warm-gray">{played ? "Paid, didn't play" : "Paid, no longer in"}</span>}
                 </span>
                 <span className="text-[11px] font-bold rounded-full px-2.5 py-1 bg-win-soft text-win">{r.hasReceipt ? "Paid · receipt" : "Paid"}</span>
                 <button onClick={() => act(r, "unpaid")} disabled={busy === r.userId} className="text-[11.5px] font-semibold text-warm-gray px-1 disabled:opacity-40">
@@ -494,8 +569,22 @@ export function AdminPayments({
                 </button>
               </div>
             ))}
+            {walkPaid.map(walkRow)}
           </div>
         </>
+      )}
+
+      {played && (
+        <button
+          onClick={() => collecting(!closed)}
+          disabled={busy === "close"}
+          className={`w-full h-11 mt-5 rounded-full text-[13.5px] font-semibold disabled:opacity-40 ${closed ? "bg-surface-2 text-ink-2" : everyonePaid ? "bg-win text-surface" : "bg-surface text-graphite shadow-[0_1px_2px_rgba(13,13,13,0.06)]"}`}
+        >
+          {closed ? "Reopen collecting" : everyonePaid ? "Everyone's paid · Done" : "Done collecting"}
+        </button>
+      )}
+      {played && !closed && !everyonePaid && (
+        <p className="text-[11px] text-warm-gray mt-2 px-1 text-center leading-snug">Done collecting takes the night off the club page, even if someone hasn't paid.</p>
       )}
 
       {mode === "receipt" && (

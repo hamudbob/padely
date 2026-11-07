@@ -510,6 +510,18 @@ export default function EventPage() {
         </div>
       )}
 
+      {/* Paying after the night (0082): what I still owe, on a night that's
+          been played. Before the night this lives inside Your spot. */}
+      {started && !cancelled && extras?.member && user && payMode !== "none" && ((extras.me?.spots ?? 0) > 0 || extras.me?.paid) && (
+        <div className={`mt-3.5 ${card} px-4 pt-4 pb-4`}>
+          <span className="block text-[11px] font-semibold text-warm-gray">Your payment</span>
+          <span className={`block font-serif text-[20px] font-semibold leading-tight mt-0.5 ${extras.me?.paid ? "text-win" : "text-graphite"}`}>
+            {extras.me?.paid ? "All settled" : ev.cost ? `${ev.cost} to pay` : "Still to pay"}
+          </span>
+          <PlayerPayment eventId={ev.id} myUserId={user.id} extras={extras} amIn onChanged={(x) => (x ? setExtras(x) : load())} />
+        </div>
+      )}
+
       {cancelled && (
         <div className="mt-3.5 rounded-[22px] bg-loss-soft px-4 py-4">
           <p className="text-[14px] font-semibold text-loss">This night is called off</p>
@@ -655,6 +667,8 @@ export default function EventPage() {
           mode={payMode}
           version={payVersion}
           deadline={extras?.deadline ?? null}
+          played={extras?.played ?? false}
+          closed={extras?.collectingClosed ?? false}
           onChanged={() => {
             getCallupExtras(ev.id).then(setExtras);
             getClubAdminTodo(ev.clubId).then((t) => setToCheck(t.find((x) => x.eventId === ev.id)?.toCheck ?? 0));
