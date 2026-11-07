@@ -4,7 +4,7 @@ import { kickMember, setMemberRole, Team, TeamMember } from "../../lib/supabase/
 import type { JoinRequestItem } from "../../lib/supabase/clubJoinQueries";
 import { BottomSheet } from "../shell/Sheet";
 import ConfirmSheet, { ConfirmRequest } from "../shell/ConfirmSheet";
-import { Face, card } from "./club/ui";
+import { Face, GearIcon, card } from "./club/ui";
 
 /**
  * The Members tab of the club page (ADR-002): the code and Invite, people
@@ -182,6 +182,19 @@ export function MembersTab({
         </>
       )}
       {filtered.length === 0 && <p className="text-[13px] text-warm-gray text-center mt-8">No one matches “{query}”.</p>}
+
+      {isAdmin && (
+        <Link to={`/teams/${team.id}/settings`} className={`mt-5 ${card} px-4 py-3.5 flex items-center gap-3 active:bg-surface-2`}>
+          <span className="w-9 h-9 rounded-full bg-surface-2 text-ink-2 flex items-center justify-center shrink-0" aria-hidden>
+            <GearIcon size={17} />
+          </span>
+          <span className="flex-1 min-w-0">
+            <span className="block text-[14px] font-semibold text-graphite">Club settings</span>
+            <span className="block text-[11.5px] text-warm-gray">League, joining, Call-up defaults, saved venues</span>
+          </span>
+          <span className="text-[18px] text-stone" aria-hidden>›</span>
+        </Link>
+      )}
 
       <button onClick={onLeave} className="block mx-auto mt-6 text-[12.5px] font-semibold text-loss px-3 py-2.5 active:opacity-70">
         Leave club

@@ -219,7 +219,7 @@ export default function ClubSettingsPage() {
   return (
     <form onSubmit={save} className={shell}>
       {backBar}
-      <div className="px-5 pb-28">
+      <div className="px-5 pb-24">
         {/* League */}
         <Section title="League">
           <Line label="Season length">
@@ -449,7 +449,7 @@ export default function ClubSettingsPage() {
 
       {/* The save bar: only once something changed, and briefly after. */}
       {(changes > 0 || saving || saved) && (
-        <div className="fixed inset-x-0 bottom-0 z-30 pointer-events-none" style={{ paddingBottom: "max(0.9rem, env(safe-area-inset-bottom))" }}>
+        <div className="fixed inset-x-0 z-50 pointer-events-none" style={{ bottom: "calc(4.25rem + env(safe-area-inset-bottom) + 0.6rem)" }}>
           <div className="mx-auto max-w-sm px-4 pointer-events-auto">
             <div className="flex items-center gap-3 rounded-full bg-surface/90 backdrop-blur-md shadow-[0_6px_24px_rgba(13,13,13,0.14)] pl-5 pr-1.5 py-1.5 anim-pop">
               <span className="flex-1 min-w-0 text-[12.5px] text-ink-2 truncate">
