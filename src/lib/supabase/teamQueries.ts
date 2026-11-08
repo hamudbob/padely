@@ -39,7 +39,7 @@ export interface CallupDefaults {
   cost?: string | null;
   /** 0080: how the night is paid for, and the notes shown to members (bank
    *  details, QRIS…). */
-  paymentMode?: "none" | "tick" | "receipt" | null;
+  paymentMode?: "none" | "tick" | "receipt" | "prepay" | null;
   notes?: string | null;
 }
 
@@ -110,7 +110,7 @@ function callupFromJson(j: Record<string, unknown> | null | undefined): CallupDe
     hours: num(o.hours),
     maxPlayers: num(o.max_players),
     cost: str(o.cost),
-    paymentMode: o.payment_mode === "tick" || o.payment_mode === "receipt" || o.payment_mode === "none" ? o.payment_mode : null,
+    paymentMode: o.payment_mode === "tick" || o.payment_mode === "receipt" || o.payment_mode === "prepay" || o.payment_mode === "none" ? o.payment_mode : null,
     notes: str(o.notes),
   };
 }

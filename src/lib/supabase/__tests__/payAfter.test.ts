@@ -62,3 +62,23 @@ describe("writing", () => {
     await expect(setCallupWalkinPayment("e1", "joko", true)).rejects.toThrow(/owner/);
   });
 });
+
+describe("Pay to get in (0084)", () => {
+  it("reads the mode and the queue fields", async () => {
+    const { paymentModeOf } = await import("../eventQueries");
+    expect(paymentModeOf("prepay")).toBe("prepay");
+    rpc.mockResolvedValue({
+      data: { member: true, payment_mode: "prepay", pending_spots: 3, upload_open: false, check_position: 2, me: { spots: 1, has_receipt: true, receipt_at: "2026-11-08T12:02:31.482Z" } },
+      error: null,
+    });
+    const x = await getCallupExtras("e1");
+    expect(x).toMatchObject({ paymentMode: "prepay", pendingSpots: 3, uploadOpen: false, checkPosition: 2 });
+    expect(x?.me?.receiptAt).toBe("2026-11-08T12:02:31.482Z");
+  });
+
+  it("before 0084: no queue, upload closed", async () => {
+    rpc.mockResolvedValue({ data: { member: true, payment_mode: "tick", me: null }, error: null });
+    const x = await getCallupExtras("e1");
+    expect(x).toMatchObject({ pendingSpots: 0, uploadOpen: false, checkPosition: null });
+  });
+});

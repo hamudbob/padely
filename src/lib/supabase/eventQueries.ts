@@ -547,6 +547,8 @@ export interface RsvpResult {
   position: number | null;
   in_count: number;
   promoted_user_id: string | null;
+  /** 0084: Pay to get in: answering "in" means the waiting list. */
+  prepay?: boolean;
 }
 
 /**
@@ -661,7 +663,7 @@ export async function getCallupRules(clubId: string): Promise<{ maxGuests: numbe
  *            6 h before the start, anyone in without a receipt moves to the
  *            back of the waiting list; whoever moves up gets an hour.
  */
-export type PaymentMode = "none" | "tick" | "receipt";
+export type PaymentMode = "none" | "tick" | "receipt" | "prepay";
 
 export const PAYMENT_MODES: { value: PaymentMode; label: string; hint: string }[] = [
   { value: "none", label: "No payment", hint: "Nothing to pay in the app." },
@@ -671,10 +673,15 @@ export const PAYMENT_MODES: { value: PaymentMode; label: string; hint: string }[
     label: "Receipt needed",
     hint: "Players upload their transfer receipt. 6 hours before, anyone in without one moves to the waiting list.",
   },
+  {
+    value: "prepay",
+    label: "Pay to get in",
+    hint: "Everyone joins the waiting list. Upload the receipt to ask for a spot; you accept receipts in the order they arrived, and that moves them in. Uploads close once every spot is taken or being checked.",
+  },
 ];
 
 export function paymentModeOf(v: unknown): PaymentMode {
-  return v === "tick" || v === "receipt" ? v : "none";
+  return v === "tick" || v === "receipt" || v === "prepay" ? v : "none";
 }
 
 export interface CallupMe {
@@ -709,6 +716,12 @@ export interface CallupExtras {
   played: boolean;
   /** 0082: an admin tapped Done collecting. */
   collectingClosed: boolean;
+  /** 0084 Pay to get in: spots held by receipts waiting to be checked. */
+  pendingSpots: number;
+  /** 0084 Pay to get in: may I upload a receipt right now? */
+  uploadOpen: boolean;
+  /** 0084 Pay to get in: my receipt's place among those waiting, 1-based. */
+  checkPosition: number | null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -730,6 +743,9 @@ function extrasFromJson(j: Record<string, unknown> | null): CallupExtras | null 
     isAdmin: j.is_admin === true,
     played: j.played === true,
     collectingClosed: j.collecting_closed === true,
+    pendingSpots: Number(j.pending_spots ?? 0),
+    uploadOpen: j.upload_open === true,
+    checkPosition: typeof j.check_position === "number" ? j.check_position : null,
     me: me
       ? {
           spots: Number(me.spots ?? 0),

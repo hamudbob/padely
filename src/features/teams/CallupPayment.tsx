@@ -29,6 +29,12 @@ function hhmm(iso: string): string {
   return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit" });
 }
 
+/** 19:02:31: Pay to get in queues by upload time, to the second. */
+function hhmmss(iso: string): string {
+  const d = new Date(iso);
+  return Number.isNaN(d.getTime()) ? "" : d.toLocaleTimeString([], { hour: "2-digit", minute: "2-digit", second: "2-digit" });
+}
+
 function dayAndTime(iso: string): string {
   const d = new Date(iso);
   const today = new Date();
@@ -63,7 +69,7 @@ export function PaymentModePicker({ value, onChange }: { value: PaymentMode; onC
   const hint = PAYMENT_MODES.find((m) => m.value === value)?.hint;
   return (
     <div>
-      <div className="flex p-[3px] rounded-full bg-[#EFEBE4]" role="radiogroup" aria-label="Payment">
+      <div className="grid grid-cols-2 gap-[3px] p-[3px] rounded-[18px] bg-[#EFEBE4]" role="radiogroup" aria-label="Payment">
         {PAYMENT_MODES.map((m) => (
           <button
             key={m.value}
@@ -71,7 +77,7 @@ export function PaymentModePicker({ value, onChange }: { value: PaymentMode; onC
             role="radio"
             aria-checked={value === m.value}
             onClick={() => onChange(m.value)}
-            className={`flex-1 rounded-full py-2 text-[12px] font-semibold transition-colors ${
+            className={`rounded-[15px] py-2 text-[12px] font-semibold transition-colors ${
               value === m.value ? "bg-surface text-graphite shadow-[0_1px_3px_rgba(13,13,13,0.12)]" : "text-warm-gray"
             }`}
           >
@@ -119,6 +125,7 @@ export function PlayerPayment({
   myUserId,
   extras,
   amIn,
+  waiting = false,
   onChanged,
 }: {
   eventId: string;
@@ -126,6 +133,8 @@ export function PlayerPayment({
   extras: CallupExtras;
   /** Holding a place right now (in, not waiting). */
   amIn: boolean;
+  /** 0084: on the waiting list (Pay to get in: where everyone starts). */
+  waiting?: boolean;
   onChanged: (next: CallupExtras | null) => void;
 }) {
   const now = useNow();
@@ -148,7 +157,7 @@ export function PlayerPayment({
       </Inset>
     );
   }
-  if (!amIn) return null;
+  if (!amIn && !(mode === "prepay" && waiting)) return null;
 
   const guests = Math.max(0, (me?.spots ?? 1) - 1);
   const covers = guests > 0 ? ` Covers you and ${guests === 1 ? "your guest" : `your ${guests} guests`}.` : "";
@@ -196,7 +205,59 @@ export function PlayerPayment({
     );
   }
 
-  if (mode === "tick") {
+  // 0084: Pay to get in. From the waiting list, a receipt asks for a spot;
+  // an admin accepting it is what moves you in.
+  if (mode === "prepay" && !amIn) {
+    const pos = extras.checkPosition;
+    return (
+      <Inset tone={me?.rejectedReason && !me.hasReceipt ? "loss" : "gold"}>
+        <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pick} />
+        {me?.hasReceipt ? (
+          <>
+            <div className="flex items-center justify-between gap-2">
+              <Chip tone="gold-on">Receipt sent</Chip>
+              {pos && <span className="font-mono tnum text-[13px] font-semibold text-gold-ink">#{pos} to check</span>}
+            </div>
+            <p className="text-[13px] text-ink-2 mt-2 leading-snug">
+              Sent at <b className="font-mono tnum text-graphite font-semibold">{me.receiptAt ? hhmmss(me.receiptAt) : ""}</b>. An admin checks receipts in the order they came in; accepting yours moves you in.{covers}
+            </p>
+            <div className="flex gap-2 mt-3">
+              <button onClick={viewMine} className="h-[38px] px-4 rounded-full bg-surface text-ink-2 text-[12.5px] font-semibold">
+                View
+              </button>
+              <button onClick={() => fileRef.current?.click()} disabled={busy} className="flex-1 h-[38px] rounded-full bg-surface text-ink-2 text-[12.5px] font-semibold disabled:opacity-40">
+                {busy ? "Uploading…" : "Replace (keeps your place)"}
+              </button>
+            </div>
+          </>
+        ) : (
+          <>
+            {me?.rejectedReason ? <Chip tone="loss">Receipt not accepted</Chip> : <Chip tone="gold-on">Pay to get in</Chip>}
+            {me?.rejectedReason && <p className="text-[13.5px] text-graphite mt-2">“{me.rejectedReason}”</p>}
+            <p className="text-[13px] text-ink-2 mt-2 leading-snug">
+              {extras.uploadOpen
+                ? `Pay${guests > 0 ? " for you and your guest" + (guests > 1 ? "s" : "") : ""} as the notes say, then upload the receipt to ask for a spot. First uploaded, first checked.`
+                : "Every spot is taken or being checked right now. If one frees up, you'll be told and the upload opens again."}
+            </p>
+            {extras.uploadOpen && (
+              <button
+                onClick={() => fileRef.current?.click()}
+                disabled={busy}
+                className="w-full h-12 mt-3.5 rounded-full bg-gold text-graphite text-[14px] font-bold flex items-center justify-center gap-2 shadow-[0_6px_14px_-8px_rgba(131,101,41,0.6)] active:scale-[0.99] transition-transform disabled:opacity-50"
+              >
+                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round" aria-hidden><path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" /><polyline points="17 8 12 3 7 8" /><line x1="12" y1="3" x2="12" y2="15" /></svg>
+                {busy ? "Uploading…" : me?.rejectedReason ? "Upload a new receipt" : "Upload transfer receipt"}
+              </button>
+            )}
+          </>
+        )}
+        {err && <p className="text-[11.5px] text-loss mt-2">{err}</p>}
+        {preview && <AvatarLightbox src={preview} alt="Your receipt" onClose={() => setPreview(null)} />}
+      </Inset>
+    );
+  }
+
+  if (mode === "tick" || mode === "prepay") {
     return (
       <Inset tone="plain">
         <div className="flex items-center gap-2.5 flex-wrap">
@@ -406,6 +467,8 @@ export function AdminPayments({
   const paid = rows.filter((r) => r.paidAt);
   const toCheck = rows.filter((r) => !r.paidAt && r.hasReceipt);
   const unpaid = rows.filter((r) => !r.paidAt && !r.hasReceipt);
+  // Waiting to get in (Pay to get in): the receipt is for them plus their guests.
+  const spotsOf = (r: CallupPaymentRow) => (r.ownIn || (mode === "prepay" && r.hasReceipt && !r.paidAt) ? 1 + r.guestsIn : r.guestsIn);
   const guestsLabel = (r: CallupPaymentRow) => (r.guestsIn > 0 ? ` +${r.guestsIn} guest${r.guestsIn === 1 ? "" : "s"}` : "");
   const walkPaid = walkins.filter((w) => w.paidAt);
   const walkUnpaid = walkins.filter((w) => !w.paidAt);
@@ -449,6 +512,11 @@ export function AdminPayments({
         <Tile n={toCheck.length} label="To check" tone="gold" />
         <Tile n={unpaid.length + walkUnpaid.length} label="Not paid" tone="plain" />
       </div>
+      {mode === "prepay" && !played && (
+        <p className="text-[11.5px] text-warm-gray mt-2 px-0.5">
+          Pay to get in: receipts are listed in the order they were sent, to the second. Accepting one moves that player (and their guests) in.
+        </p>
+      )}
       {mode === "receipt" && deadline && !played && (
         <p className="text-[11.5px] text-warm-gray mt-2 px-0.5">
           Deadline {dayAndTime(deadline)}. Anyone in without a receipt then moves to the waiting list.
@@ -461,7 +529,7 @@ export function AdminPayments({
         <>
           <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-gold-ink mt-5 mb-2 px-0.5">To check</p>
           <div className="flex flex-col gap-2">
-            {toCheck.map((r) => (
+            {toCheck.map((r, i) => (
               <div key={r.userId} className={`${card} p-3`}>
                 <div className="flex items-center gap-3">
                   <button onClick={() => view(r)} className="w-[54px] h-[72px] rounded-[10px] bg-surface-2 border border-line overflow-hidden shrink-0" aria-label={`View ${r.displayName}'s receipt`}>
@@ -469,12 +537,13 @@ export function AdminPayments({
                   </button>
                   <span className="flex-1 min-w-0">
                     <b className="block text-[14.5px] font-semibold text-graphite truncate">
+                      {mode === "prepay" && <span className="font-mono tnum text-gold-ink mr-1.5">#{i + 1}</span>}
                       {r.displayName}
                       <span className="font-normal text-warm-gray text-[12.5px]">{guestsLabel(r)}</span>
                     </b>
                     <span className="block text-[11.5px] text-warm-gray mt-0.5">
-                      {r.ownIn ? 1 + r.guestsIn : r.guestsIn} {(r.ownIn ? 1 + r.guestsIn : r.guestsIn) === 1 ? "spot" : "spots"}
-                      {r.receiptAt && hhmm(r.receiptAt) ? ` · sent ${hhmm(r.receiptAt)}` : ""}
+                      {spotsOf(r)} {spotsOf(r) === 1 ? "spot" : "spots"}
+                      {r.receiptAt && hhmm(r.receiptAt) ? ` · sent ${mode === "prepay" ? hhmmss(r.receiptAt) : hhmm(r.receiptAt)}` : ""}
                     </span>
                     <button onClick={() => view(r)} className="text-[11.5px] font-semibold text-gold-ink mt-1.5">
                       View full size
@@ -500,7 +569,7 @@ export function AdminPayments({
                 ) : (
                   <div className="flex gap-2 mt-3">
                     <button onClick={() => act(r, "paid")} disabled={busy === r.userId} className="flex-1 h-10 rounded-full bg-win text-surface text-[13px] font-semibold disabled:opacity-40">
-                      Accept
+                      {mode === "prepay" && !r.ownIn ? "Accept · let in" : "Accept"}
                     </button>
                     <button
                       onClick={() => {
@@ -587,7 +656,7 @@ export function AdminPayments({
         <p className="text-[11px] text-warm-gray mt-2 px-1 text-center leading-snug">Done collecting takes the night off the club page, even if someone hasn't paid.</p>
       )}
 
-      {mode === "receipt" && (
+      {(mode === "receipt" || mode === "prepay") && (
         <p className="text-[11px] text-warm-gray mt-3 px-1 leading-snug text-center">
           Receipts are visible only to admins and the person who sent them, and are deleted 3 days after the night.
         </p>

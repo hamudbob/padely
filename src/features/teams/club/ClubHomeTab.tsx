@@ -475,7 +475,19 @@ export default function ClubHomeTab({
             <div role="radiogroup" aria-label="Your answer" className="flex p-[3px] rounded-full bg-[#EFEBE4] mt-3.5">
               {ANSWERS.map((o) => {
                 const on = next.myResponse === o.value || (o.value === "in" && next.myResponse === "waitlist");
-                const label = o.value === "in" && full(next) && next.myResponse !== "in" ? (next.myResponse === "waitlist" ? "Waiting" : waitlistOn ? "Join waitlist" : "Full") : o.label;
+                const prepayNext = next.paymentMode === "prepay";
+                const label =
+                  o.value === "in" && prepayNext && next.myResponse !== "in"
+                    ? next.myResponse === "waitlist"
+                      ? "On the list"
+                      : "Join the list"
+                    : o.value === "in" && full(next) && next.myResponse !== "in"
+                      ? next.myResponse === "waitlist"
+                        ? "Waiting"
+                        : waitlistOn
+                          ? "Join waitlist"
+                          : "Full"
+                      : o.label;
                 return (
                   <button
                     key={o.value}
@@ -609,6 +621,26 @@ function PayStrip({ ev, extras, isAdmin, todo }: { ev: ClubEvent; extras: Callup
   }
   const me = extras.me;
   const iAmIn = ev.myResponse === "in" || (me?.spots ?? 0) > 0;
+  // 0084: Pay to get in, still on the list.
+  if (extras.paymentMode === "prepay" && !iAmIn && ev.myResponse === "waitlist") {
+    return (
+      <Link to={eventPath(ev)} className={`${box} ${me?.rejectedReason && !me.hasReceipt ? "bg-loss-soft" : "bg-gold-soft"}`}>
+        <MoneyIcon />
+        <span className="flex-1 min-w-0 text-[12.5px] text-ink-2">
+          {me?.hasReceipt ? (
+            <>Receipt sent{extras.checkPosition ? ` · #${extras.checkPosition} to check` : ""} · you're in once it's accepted</>
+          ) : me?.rejectedReason ? (
+            <>Receipt not accepted · upload a new one</>
+          ) : extras.uploadOpen ? (
+            <>On the list · upload your receipt to get a spot</>
+          ) : (
+            <>On the list · every spot is taken or being checked</>
+          )}
+        </span>
+        {!me?.hasReceipt && extras.uploadOpen && <span className="shrink-0 rounded-full bg-gold text-graphite text-[12px] font-bold px-3 py-1.5">Pay</span>}
+      </Link>
+    );
+  }
   if (!me || !iAmIn) return null;
   if (me.paid) {
     return (
@@ -618,7 +650,7 @@ function PayStrip({ ev, extras, isAdmin, todo }: { ev: ClubEvent; extras: Callup
       </div>
     );
   }
-  if (extras.paymentMode !== "receipt") return null;
+  if (extras.paymentMode !== "receipt" && extras.paymentMode !== "prepay") return null;
   const due = me.payBy ?? extras.deadline;
   const left = due ? timeLeft(due) : null;
   return (

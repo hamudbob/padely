@@ -341,7 +341,7 @@ export default function CallupFormSheet({
 
         {/* Payment */}
         <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-warm-gray mt-4 mb-1.5 px-0.5">Payment</p>
-        <div className="rounded-[18px] bg-surface border border-line p-1.5">
+        <div className="rounded-[20px] bg-surface border border-line p-1.5">
           <PaymentModePicker value={payMode} onChange={setPayMode} />
         </div>
         {editing && payMode !== editing.paymentMode && payMode === "receipt" && lateForReceipts(when) && (
@@ -349,6 +349,11 @@ export default function CallupFormSheet({
         )}
         {editing && payMode !== editing.paymentMode && editing.paymentMode === "receipt" && (
           <p className="text-[11px] text-warm-gray mt-1.5 px-0.5">Nobody will be moved for not paying.</p>
+        )}
+        {editing && payMode === "prepay" && editing.paymentMode !== "prepay" && editing.inCount > 0 && (
+          <p className="text-[11px] text-gold-ink mt-1.5 px-0.5 leading-snug">
+            The {editing.inCount} already in keep their spots. From now on, new answers join the list and get in by receipt.
+          </p>
         )}
 
         {/* Notes */}

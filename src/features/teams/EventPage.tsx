@@ -51,6 +51,7 @@ const PAY_LABEL: Record<PaymentMode, string | undefined> = {
   none: undefined,
   tick: "Pay the admin · they tick you off",
   receipt: "Pay first · send your receipt",
+  prepay: "Pay to get in · your receipt gets you a spot",
 };
 
 const RSVP_OPTS: { value: RsvpResponse; label: string }[] = [
@@ -177,6 +178,14 @@ export default function EventPage() {
         tone: "danger" as const,
       };
     }
+    if (prepay && extras?.me?.hasReceipt) {
+      return {
+        title: "Withdraw your receipt?",
+        body: "Your receipt is waiting to be checked. Leaving withdraws it and frees the spot it was holding; if you come back, you'd upload again and go to the back of the line.",
+        confirmLabel: "Leave and withdraw it",
+        tone: "danger" as const,
+      };
+    }
     return {
       title: "Leave the waiting list?",
       body: myQueuePosition
@@ -207,7 +216,9 @@ export default function EventPage() {
       // waitlist place, and the person needs telling — silently showing them
       // as waitlisted would read as a bug.
       const result = await setRsvp(ev.id, response);
-      if (result.waitlisted) {
+      if (result.prepay && result.response === "waitlist") {
+        setNote("You're on the list. Pay, then upload your receipt below to ask for a spot.");
+      } else if (result.waitlisted) {
         setNote(
           result.position
             ? `That session is full — you're number ${result.position} on the waiting list. We'll move you up if someone drops out.`
@@ -348,6 +359,8 @@ export default function EventPage() {
   // Full is a real state, not a styling detail: it changes what the In button
   // says, what a tap does, and whether the counts read 8/12 or just 8.
   const full = !!ev && ev.maxPlayers != null && ev.counts.in >= ev.maxPlayers;
+  // 0084: Pay to get in. Everyone starts on the waiting list.
+  const prepay = extras?.paymentMode === "prepay";
   // Full with no waiting list (Club settings): the In button can't do anything.
   const closedWhenFull = full && !rules.waitlist;
   // Once a session has been started from this event the RSVP list is no longer
@@ -535,7 +548,7 @@ export default function EventPage() {
           <div className="flex items-start justify-between gap-3">
             <span className="min-w-0">
               <span className="block text-[11px] font-semibold text-warm-gray">Your spot</span>
-              <SpotStatus response={ev.myResponse} position={myQueuePosition} full={full} />
+              <SpotStatus response={ev.myResponse} position={myQueuePosition} full={full} prepay={prepay} hasReceipt={Boolean(extras?.me?.hasReceipt)} />
             </span>
             <span className="text-right shrink-0">
               <span className="block font-mono tnum text-[22px] font-semibold text-graphite leading-none">
@@ -560,6 +573,8 @@ export default function EventPage() {
                 label:
                   o.value === "in" && ev.myResponse === "waitlist"
                     ? "Waiting"
+                    : o.value === "in" && prepay && ev.myResponse !== "in"
+                      ? "Join the list"
                     : o.value === "in" && full && ev.myResponse !== "in"
                       ? rules.waitlist
                         ? "Join waitlist"
@@ -568,7 +583,10 @@ export default function EventPage() {
               }))}
             />
           </div>
-          {full && ev.myResponse !== "in" && ev.myResponse !== "waitlist" && (
+          {prepay && ev.myResponse !== "in" && ev.myResponse !== "waitlist" && (
+            <p className="text-[11.5px] text-gold-ink mt-2 px-1">Pay to get in: join the list, then upload your receipt. Spots go in the order receipts arrive.</p>
+          )}
+          {!prepay && full && ev.myResponse !== "in" && ev.myResponse !== "waitlist" && (
             <p className="text-[11.5px] text-gold-ink mt-2 px-1">
               {rules.waitlist ? "It's full — answering In puts you on the waiting list." : "It's full, and this club doesn't keep a waiting list."}
             </p>
@@ -580,6 +598,7 @@ export default function EventPage() {
               myUserId={user.id}
               extras={extras}
               amIn={ev.myResponse === "in" || (extras.me?.spots ?? 0) > 0}
+              waiting={ev.myResponse === "waitlist"}
               onChanged={(x) => (x ? setExtras(x) : load())}
             />
           )}
@@ -908,7 +927,7 @@ export default function EventPage() {
           </div>
           <p className="text-[11.5px] text-warm-gray mt-2.5 px-1 leading-snug">
             {rules.maxGuests === 1 ? "One guest each." : `Up to ${rules.maxGuests} guests each.`}
-            {full ? " It's full, so they'll join the waiting list." : ""} You can take them out again from the list.
+            {prepay ? " They wait on the list and come in with you when your receipt is accepted." : full ? " It's full, so they'll join the waiting list." : ""} You can take them out again from the list.
           </p>
           {guestErr && <p className="text-[12px] text-loss mt-2 px-1">{guestErr}</p>}
           <button
@@ -916,7 +935,7 @@ export default function EventPage() {
             disabled={guestBusy || guestName.trim().length === 0}
             className="w-full h-12 mt-4 rounded-full bg-graphite text-ivory text-[14px] font-semibold active:scale-[0.99] transition-transform disabled:opacity-40"
           >
-            {guestBusy ? "Adding…" : full ? "Add to the waiting list" : "Add guest"}
+            {guestBusy ? "Adding…" : full || prepay ? "Add to the waiting list" : "Add guest"}
           </button>
         </BottomSheet>
       )}
@@ -958,10 +977,24 @@ function manageSubtitle(list: ListKey, p: EventAttendee): string {
   return p.isGuest ? `${where} · guest` : where;
 }
 
-function SpotStatus({ response, position, full }: { response: RsvpResponse | null; position: number | null; full: boolean }) {
+function SpotStatus({
+  response,
+  position,
+  full,
+  prepay = false,
+  hasReceipt = false,
+}: {
+  response: RsvpResponse | null;
+  position: number | null;
+  full: boolean;
+  prepay?: boolean;
+  hasReceipt?: boolean;
+}) {
   const [text, cls] =
     response === "in"
       ? ["You're in", "text-win"]
+      : response === "waitlist" && prepay
+        ? [hasReceipt ? "Receipt being checked" : "On the list · pay to get in", "text-gold-ink"]
       : response === "waitlist"
         ? [position ? `Waiting · number ${position}` : "On the waiting list", "text-gold-ink"]
         : response === "maybe"
