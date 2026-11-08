@@ -68,17 +68,22 @@ select expect('Budi can upload', $$ (get_callup_extras('e1000000-0000-0000-0000-
 
 \echo ''
 \echo '=== Receipts, in the order they arrive ==='
-select t('Budi uploads (covers him and Rina)', $$ select upload_callup_receipt('e1000000-0000-0000-0000-000000000001', 'aGVsbG8=', 'image/png') $$);
-select expect('2 spots now being checked', $$ callup_pending_spots('e1000000-0000-0000-0000-000000000001', null) = 2 $$);
+select t('Budi uploads his own receipt', $$ select upload_callup_receipt('e1000000-0000-0000-0000-000000000001', 'aGVsbG8=', 'image/png') $$);
+select expect('1 spot being checked (Rina isn''t covered by it)', $$ callup_pending_spots('e1000000-0000-0000-0000-000000000001', null) = 1 $$);
 select expect('Budi is first to be checked', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') ->> 'check_position')::int = 1 $$);
+select expect('Rina shows under Budi''s guests, no receipt yet', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') -> 'my_guests' -> 0 ->> 'has_receipt')::boolean = false $$);
+select pg_sleep(0.05);
+select t('Budi uploads Rina''s receipt', $$ select upload_guest_receipt((select id from club_event_guests where display_name = 'Rina'), 'aGVsbG8=', 'image/png') $$);
+select expect('Rina is second in line', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') -> 'my_guests' -> 0 ->> 'check_position')::int = 2 $$);
 select pg_sleep(0.05);
 select as_user('c0000000-0000-0000-0000-00000000000c');
 select t('Citra cannot upload before answering', $$ select upload_callup_receipt('e1000000-0000-0000-0000-000000000001', 'aGVsbG8=', 'image/png') $$, true);
+select t('Citra cannot upload for Budi''s guest', $$ select upload_guest_receipt((select id from club_event_guests where display_name = 'Rina'), 'aGVsbG8=', 'image/png') $$, true);
 select t('Citra answers and uploads', $$ select set_event_rsvp('e1000000-0000-0000-0000-000000000001', 'in'), upload_callup_receipt('e1000000-0000-0000-0000-000000000001', 'aGVsbG8=', 'image/png') $$);
 select pg_sleep(0.05);
 select as_user('d0000000-0000-0000-0000-00000000000d');
 select t('Dewi answers and uploads: 4 of 4 spots now asked for', $$ select set_event_rsvp('e1000000-0000-0000-0000-000000000001', 'in'), upload_callup_receipt('e1000000-0000-0000-0000-000000000001', 'aGVsbG8=', 'image/png') $$);
-select expect('Dewi is third in line', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') ->> 'check_position')::int = 3 $$);
+select expect('Dewi is fourth in line', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') ->> 'check_position')::int = 4 $$);
 select expect('upload times keep fractions of a second', $$ rat('d0000000-0000-0000-0000-00000000000d') > rat('c0000000-0000-0000-0000-00000000000c') and rat('c0000000-0000-0000-0000-00000000000c') > rat('b0000000-0000-0000-0000-00000000000b') $$);
 select as_user('e0000000-0000-0000-0000-00000000000e');
 select t('Eko answers I''m in', $$ select set_event_rsvp('e1000000-0000-0000-0000-000000000001', 'in') $$);
@@ -86,16 +91,20 @@ select expect('Eko''s upload button is gone (every spot asked for)', $$ not (get
 select t('...and the server refuses it too', $$ select upload_callup_receipt('e1000000-0000-0000-0000-000000000001', 'aGVsbG8=', 'image/png') $$, true);
 select as_user('d0000000-0000-0000-0000-00000000000d');
 select t('Dewi replaces her receipt', $$ select upload_callup_receipt('e1000000-0000-0000-0000-000000000001', 'd29ybGQ=', 'image/png') $$);
-select expect('...and keeps her place (same time)', $$ rat('d0000000-0000-0000-0000-00000000000d') > rat('c0000000-0000-0000-0000-00000000000c') and (get_callup_extras('e1000000-0000-0000-0000-000000000001') ->> 'check_position')::int = 3 $$);
+select expect('...and keeps her place (same time)', $$ rat('d0000000-0000-0000-0000-00000000000d') > rat('c0000000-0000-0000-0000-00000000000c') and (get_callup_extras('e1000000-0000-0000-0000-000000000001') ->> 'check_position')::int = 4 $$);
 
 \echo ''
 \echo '=== The admin checks, first come first ==='
 select as_user('a0000000-0000-0000-0000-00000000000a');
-select expect('the admin list is in upload order', $$ (select array_agg(display_name) from get_callup_payments('e1000000-0000-0000-0000-000000000001')) = array['Budi','Citra','Dewi'] $$);
-select expect('Budi''s row covers Rina', $$ (select guests_in from get_callup_payments('e1000000-0000-0000-0000-000000000001') where display_name = 'Budi') = 1 $$);
+select expect('members to check, in upload order', $$ (select array_agg(display_name) from get_callup_payments('e1000000-0000-0000-0000-000000000001')) = array['Budi','Citra','Dewi'] $$);
+select expect('Rina has her own row, as Budi''s guest', $$ exists (select 1 from get_callup_guest_payments('e1000000-0000-0000-0000-000000000001')
+   where display_name = 'Rina' and invited_by_name = 'Budi' and has_receipt and response = 'waitlist') $$);
+select expect('the admin can see Rina''s receipt', $$ get_guest_receipt((select id from club_event_guests where display_name = 'Rina')) ->> 'mime' = 'image/png' $$);
 select t('accept Budi', $$ select set_callup_payment('e1000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-00000000000b', 'paid') $$);
-select expect('Budi and Rina are in', $$ resp('b0000000-0000-0000-0000-00000000000b') = 'in' and (select response from club_event_guests where display_name = 'Rina') = 'in' $$);
-select expect('Budi was told', $$ notes_for('b0000000-0000-0000-0000-00000000000b', 'event_promoted') = 1 $$);
+select expect('Budi is in; Rina still waits for her own receipt', $$ resp('b0000000-0000-0000-0000-00000000000b') = 'in' and (select response from club_event_guests where display_name = 'Rina') = 'waitlist' $$);
+select t('accept Rina', $$ select set_guest_payment((select id from club_event_guests where display_name = 'Rina'), 'paid') $$);
+select expect('Rina is in', $$ (select response from club_event_guests where display_name = 'Rina') = 'in' $$);
+select expect('Budi was told twice (himself, then Rina)', $$ notes_for('b0000000-0000-0000-0000-00000000000b', 'event_promoted') = 2 $$);
 select t('reject Citra', $$ select set_callup_payment('e1000000-0000-0000-0000-000000000001', 'c0000000-0000-0000-0000-00000000000c', 'reject', 'Wrong amount') $$);
 select expect('Citra still waits', $$ resp('c0000000-0000-0000-0000-00000000000c') = 'waitlist' $$);
 select as_user('e0000000-0000-0000-0000-00000000000e');
@@ -104,7 +113,7 @@ select t('Eko uploads', $$ select upload_callup_receipt('e1000000-0000-0000-0000
 select as_user('a0000000-0000-0000-0000-00000000000a');
 select t('accept Dewi and Eko', $$ select set_callup_payment('e1000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-00000000000d', 'paid'), set_callup_payment('e1000000-0000-0000-0000-000000000001', 'e0000000-0000-0000-0000-00000000000e', 'paid') $$);
 select expect('full: 4 of 4 in', $$ event_in_count('e1000000-0000-0000-0000-000000000001') = 4 $$);
-select expect('4 of 4 paid', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') ->> 'paid_spots')::int = 4 $$);
+select expect('4 of 4 paid, Rina counted on her own', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') ->> 'paid_spots')::int = 4 $$);
 
 \echo ''
 \echo '=== Leaving ==='

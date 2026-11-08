@@ -20,7 +20,7 @@ import {
   CallupExtras,
   PaymentMode,
 } from "../../lib/supabase/eventQueries";
-import { AdminPayments, CallupNotes, PaidCount, PlayerPayment } from "./CallupPayment";
+import { AdminPayments, CallupNotes, MyGuestsPayment, PaidCount, PlayerPayment } from "./CallupPayment";
 import { useHostSession } from "../../lib/supabase/useHostSession";
 import { useBackNav } from "../../lib/useBackNav";
 import { SkeletonScreen, SkeletonBlock, SkeletonRows } from "../shell/Skeleton";
@@ -361,6 +361,11 @@ export default function EventPage() {
   const full = !!ev && ev.maxPlayers != null && ev.counts.in >= ev.maxPlayers;
   // 0084: Pay to get in. Everyone starts on the waiting list.
   const prepay = extras?.paymentMode === "prepay";
+  // After the night: my own spot (if I played) and every guest of mine who played.
+  const settled =
+    !!extras &&
+    (!((extras.me?.spots ?? 0) > 0) || !!extras.me?.paid) &&
+    extras.myGuests.filter((g) => g.played).every((g) => g.paid);
   // Full with no waiting list (Club settings): the In button can't do anything.
   const closedWhenFull = full && !rules.waitlist;
   // Once a session has been started from this event the RSVP list is no longer
@@ -525,13 +530,16 @@ export default function EventPage() {
 
       {/* Paying after the night (0082): what I still owe, on a night that's
           been played. Before the night this lives inside Your spot. */}
-      {started && !cancelled && extras?.member && user && payMode !== "none" && ((extras.me?.spots ?? 0) > 0 || extras.me?.paid) && (
+      {started && !cancelled && extras?.member && user && payMode !== "none" && ((extras.me?.spots ?? 0) > 0 || extras.me?.paid || extras.myGuests.some((g) => g.played)) && (
         <div className={`mt-3.5 ${card} px-4 pt-4 pb-4`}>
           <span className="block text-[11px] font-semibold text-warm-gray">Your payment</span>
-          <span className={`block font-serif text-[20px] font-semibold leading-tight mt-0.5 ${extras.me?.paid ? "text-win" : "text-graphite"}`}>
-            {extras.me?.paid ? "All settled" : ev.cost ? `${ev.cost} to pay` : "Still to pay"}
+          <span className={`block font-serif text-[20px] font-semibold leading-tight mt-0.5 ${settled ? "text-win" : "text-graphite"}`}>
+            {settled ? "All settled" : ev.cost ? `${ev.cost} a spot to pay` : "Still to pay"}
           </span>
-          <PlayerPayment eventId={ev.id} myUserId={user.id} extras={extras} amIn onChanged={(x) => (x ? setExtras(x) : load())} />
+          {((extras.me?.spots ?? 0) > 0 || extras.me?.paid) && (
+            <PlayerPayment eventId={ev.id} myUserId={user.id} extras={extras} amIn onChanged={(x) => (x ? setExtras(x) : load())} />
+          )}
+          <MyGuestsPayment extras={extras} afterNight onChanged={(x) => (x ? setExtras(x) : load())} />
         </div>
       )}
 
@@ -602,6 +610,7 @@ export default function EventPage() {
               onChanged={(x) => (x ? setExtras(x) : load())}
             />
           )}
+          {extras?.member && <MyGuestsPayment extras={extras} onChanged={(x) => (x ? setExtras(x) : load())} />}
         </div>
       )}
 

@@ -722,6 +722,25 @@ export interface CallupExtras {
   uploadOpen: boolean;
   /** 0084 Pay to get in: my receipt's place among those waiting, 1-based. */
   checkPosition: number | null;
+  /** 0085: the guests I brought, each paid for on their own. */
+  myGuests: MyGuestPay[];
+}
+
+/** 0085: one guest I brought, and where their payment stands. */
+export interface MyGuestPay {
+  id: string;
+  name: string;
+  response: string;
+  paid: boolean;
+  paidAt: string | null;
+  hasReceipt: boolean;
+  receiptAt: string | null;
+  rejectedReason: string | null;
+  payBy: string | null;
+  movedUnpaid: boolean;
+  /** After the night: they played, so they owe. */
+  played: boolean;
+  checkPosition: number | null;
 }
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -746,6 +765,22 @@ function extrasFromJson(j: Record<string, unknown> | null): CallupExtras | null 
     pendingSpots: Number(j.pending_spots ?? 0),
     uploadOpen: j.upload_open === true,
     checkPosition: typeof j.check_position === "number" ? j.check_position : null,
+    myGuests: Array.isArray(j.my_guests)
+      ? (j.my_guests as Record<string, unknown>[]).map((g) => ({
+          id: String(g.id ?? ""),
+          name: String(g.name ?? ""),
+          response: String(g.response ?? ""),
+          paid: g.paid === true,
+          paidAt: str(g.paid_at),
+          hasReceipt: g.has_receipt === true,
+          receiptAt: str(g.receipt_at),
+          rejectedReason: str(g.rejected_reason),
+          payBy: str(g.pay_by),
+          movedUnpaid: g.moved_unpaid === true,
+          played: g.played === true,
+          checkPosition: typeof g.check_position === "number" ? g.check_position : null,
+        }))
+      : [],
     me: me
       ? {
           spots: Number(me.spots ?? 0),
@@ -847,6 +882,70 @@ export async function getCallupReceipt(eventId: string, userId: string): Promise
   if (error) throw new Error(error.message);
   const j = data as { mime?: string; image?: string } | null;
   return j?.image ? `data:${j.mime ?? "image/jpeg"};base64,${j.image}` : null;
+}
+
+/* ── 0085: guests pay for themselves ─────────────────────────────────── */
+
+export interface GuestPaymentRow {
+  guestId: string;
+  displayName: string;
+  invitedBy: string | null;
+  invitedByName: string | null;
+  response: string;
+  paidAt: string | null;
+  hasReceipt: boolean;
+  receiptAt: string | null;
+  rejectedReason: string | null;
+  payBy: string | null;
+  /** In (or played): owes. False for a guest asking to get in, or paid and gone. */
+  holdsSpot: boolean;
+}
+
+/** Admin: each guest's own payment. Empty before 0085. */
+export async function getCallupGuestPayments(eventId: string): Promise<GuestPaymentRow[]> {
+  const { data, error } = await rpcAny("get_callup_guest_payments", { p_event_id: eventId });
+  if (error) return [];
+  const str = (v: unknown) => (typeof v === "string" && v ? v : null);
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    guestId: String(r.guest_id ?? ""),
+    displayName: String(r.display_name ?? ""),
+    invitedBy: str(r.invited_by),
+    invitedByName: str(r.invited_by_name),
+    response: String(r.response ?? ""),
+    paidAt: str(r.paid_at),
+    hasReceipt: r.has_receipt === true,
+    receiptAt: str(r.receipt_at),
+    rejectedReason: str(r.rejected_reason),
+    payBy: str(r.pay_by),
+    holdsSpot: r.holds_spot === true,
+  }));
+}
+
+/** Whoever brought the guest: upload (or replace) that guest's receipt. */
+export async function uploadGuestReceipt(guestId: string, file: File): Promise<CallupExtras | null> {
+  let blob = await resizeImage(file, 1400, 0.8);
+  if (blob.size > RECEIPT_MAX_BYTES) blob = await resizeImage(file, 1000, 0.7);
+  if (blob.size > RECEIPT_MAX_BYTES) throw new Error("That image is too large.");
+  const { data, error } = await rpcAny("upload_guest_receipt", {
+    p_guest_id: guestId,
+    p_image_base64: await blobToBase64(blob),
+    p_mime: "image/jpeg",
+  });
+  if (error) throw new Error(error.message);
+  return extrasFromJson(data as Record<string, unknown> | null);
+}
+
+export async function getGuestReceipt(guestId: string): Promise<string | null> {
+  const { data, error } = await rpcAny("get_guest_receipt", { p_guest_id: guestId });
+  if (error) throw new Error(error.message);
+  const j = data as { mime?: string; image?: string } | null;
+  return j?.image ? `data:${j.mime ?? "image/jpeg"};base64,${j.image}` : null;
+}
+
+/** Admin: a guest paid, not paid, or receipt rejected. */
+export async function setGuestPayment(guestId: string, action: "paid" | "unpaid" | "reject", reason?: string | null): Promise<void> {
+  const { error } = await rpcAny("set_guest_payment", { p_guest_id: guestId, p_action: action, p_reason: reason ?? null });
+  if (error) throw new Error(error.message);
 }
 
 /** Admin: paid, not paid, or receipt rejected (with a reason). */

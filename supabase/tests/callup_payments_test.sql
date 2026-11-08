@@ -120,9 +120,14 @@ select expect('Citra and Dewi (no receipt) go to the waiting list',
 select expect('...and are told why', $$ (select count(*) from notifications where type = 'callup_moved_unpaid') = 2 $$);
 select expect('Eko moves up (the queue, not the moved)',
   $$ resp('e2000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-00000000000e') = 'in' $$);
-select expect('Dewi''s guest stays with Dewi on the waiting list',
-  $$ (select response from club_event_guests where id = '90000000-0000-0000-0000-000000000001') = 'waitlist'
-     and event_in_count('e2000000-0000-0000-0000-000000000002') = 2 $$);
+-- 0085: a guest pays for themselves, so Dewi's friend is not held back by
+-- Dewi: she moves up in her turn, with her own hour, and Dewi is told.
+select expect('Dewi''s friend moves up on her own, with her own hour',
+  $$ (select response from club_event_guests where id = '90000000-0000-0000-0000-000000000001') = 'in'
+     and (select pay_by from club_event_guest_payments where guest_id = '90000000-0000-0000-0000-000000000001') is not null
+     and event_in_count('e2000000-0000-0000-0000-000000000002') = 3 $$);
+select expect('...and Dewi hears about it', $$ exists (select 1 from notifications
+   where user_id = 'd0000000-0000-0000-0000-00000000000d' and type = 'event_promoted' and body like '%Pay within 1 hour%') $$);
 select expect('Eko''s message gives him the hour', $$ exists (select 1 from notifications
    where user_id = 'e0000000-0000-0000-0000-00000000000e' and type = 'event_promoted' and body like '%Pay within 1 hour%') $$);
 select expect('one message, not two', $$ (select count(*) from notifications where user_id = 'e0000000-0000-0000-0000-00000000000e') = 1 $$);
@@ -133,7 +138,18 @@ update club_event_payments set pay_by = now() - interval '1 minute'
  where event_id = 'e2000000-0000-0000-0000-000000000002' and user_id = 'e0000000-0000-0000-0000-00000000000e';
 select process_callup_payments() is not null;
 select expect('Eko goes back to the waiting list', $$ resp('e2000000-0000-0000-0000-000000000002', 'e0000000-0000-0000-0000-00000000000e') = 'waitlist' $$);
-select expect('nobody who was moved for not paying is moved back up', $$ event_in_count('e2000000-0000-0000-0000-000000000002') = 1 $$);
+select expect('nobody who was moved for not paying is moved back up', $$ event_in_count('e2000000-0000-0000-0000-000000000002') = 2 $$);
+select expect('Dewi''s friend keeps her spot (her hour is still running)', $$ (select response from club_event_guests where id = '90000000-0000-0000-0000-000000000001') = 'in' $$);
+
+\echo ''
+\echo '=== The friend''s hour runs out too ==='
+reset role;
+update club_event_guest_payments set pay_by = now() - interval '1 minute' where guest_id = '90000000-0000-0000-0000-000000000001';
+select process_callup_payments() is not null;
+select expect('Dewi''s friend goes to the waiting list, on her own', $$ (select response from club_event_guests where id = '90000000-0000-0000-0000-000000000001') = 'waitlist'
+   and event_in_count('e2000000-0000-0000-0000-000000000002') = 1 $$);
+select expect('Dewi is told it was her friend''s spot', $$ exists (select 1 from notifications
+   where user_id = 'd0000000-0000-0000-0000-00000000000d' and type = 'callup_moved_unpaid' and title like '%friend%') $$);
 
 \echo ''
 \echo '=== Taking the open spot back ==='

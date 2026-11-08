@@ -4,6 +4,12 @@ import {
   CallupPaymentRow,
   PaymentMode,
   WalkinRow,
+  GuestPaymentRow,
+  MyGuestPay,
+  getCallupGuestPayments,
+  getGuestReceipt,
+  setGuestPayment,
+  uploadGuestReceipt,
   getCallupWalkins,
   setCallupCollecting,
   setCallupWalkinPayment,
@@ -160,7 +166,8 @@ export function PlayerPayment({
   if (!amIn && !(mode === "prepay" && waiting)) return null;
 
   const guests = Math.max(0, (me?.spots ?? 1) - 1);
-  const covers = guests > 0 ? ` Covers you and ${guests === 1 ? "your guest" : `your ${guests} guests`}.` : "";
+  // 0085: a receipt covers you only; each guest is paid for on their own.
+  const covers = "";
 
   async function pick(e: ChangeEvent<HTMLInputElement>) {
     const f = e.target.files?.[0];
@@ -356,6 +363,7 @@ export function AdminPayments({
   onChanged: () => void;
 }) {
   const [rows, setRows] = useState<CallupPaymentRow[] | null>(null);
+  const [guestRows, setGuestRows] = useState<GuestPaymentRow[]>([]);
   const [walkins, setWalkins] = useState<WalkinRow[]>([]);
   const [err, setErr] = useState<string | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
@@ -372,6 +380,8 @@ export function AdminPayments({
         setErr(null);
       })
       .catch((e) => setErr(e instanceof Error ? e.message : "Couldn't load payments."));
+    // 0085: each guest pays for themselves.
+    getCallupGuestPayments(eventId).then(setGuestRows);
     if (played) getCallupWalkins(eventId).then(setWalkins);
     else setWalkins([]);
   }
@@ -379,6 +389,105 @@ export function AdminPayments({
     load();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [eventId, version, mode, played]);
+
+  // Members and guests in one list. A guest's row says who brought them.
+  const items: PayItem[] = [
+    ...(rows ?? []).map(
+      (r): PayItem => ({
+        key: "m:" + r.userId,
+        kind: "member",
+        id: r.userId,
+        name: r.displayName,
+        avatarUrl: r.avatarUrl,
+        note: null,
+        paidAt: r.paidAt,
+        hasReceipt: r.hasReceipt,
+        receiptAt: r.receiptAt,
+        rejectedReason: r.rejectedReason,
+        payBy: r.payBy,
+        holdsSpot: r.ownIn,
+        asking: mode === "prepay" && !r.ownIn && r.hasReceipt && !r.paidAt,
+      }),
+    ),
+    ...guestRows.map(
+      (g): PayItem => ({
+        key: "g:" + g.guestId,
+        kind: "guest",
+        id: g.guestId,
+        name: g.displayName,
+        avatarUrl: null,
+        note: g.invitedByName ? `Guest of ${g.invitedByName}` : "Guest",
+        paidAt: g.paidAt,
+        hasReceipt: g.hasReceipt,
+        receiptAt: g.receiptAt,
+        rejectedReason: g.rejectedReason,
+        payBy: g.payBy,
+        holdsSpot: g.holdsSpot,
+        asking: mode === "prepay" && !g.holdsSpot && g.hasReceipt && !g.paidAt,
+      }),
+    ),
+  ];
+
+  // Thumbnails for the receipts waiting to be checked (only those).
+  const toCheckKeys = items.filter((r) => !r.paidAt && r.hasReceipt).map((r) => r.key).join(",");
+  useEffect(() => {
+    let alive = true;
+    for (const key of toCheckKeys ? toCheckKeys.split(",") : []) {
+      if (thumbs[key]) continue;
+      receiptOf(key)
+        .then((src) => alive && src && setThumbs((t) => ({ ...t, [key]: src })))
+        .catch(() => {});
+    }
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [toCheckKeys, eventId]);
+
+  function receiptOf(key: string): Promise<string | null> {
+    const [kind, id] = [key.slice(0, 1), key.slice(2)];
+    return kind === "g" ? getGuestReceipt(id) : getCallupReceipt(eventId, id);
+  }
+
+  async function act(r: PayItem, action: "paid" | "unpaid" | "reject", why?: string) {
+    setBusy(r.key);
+    setErr(null);
+    try {
+      if (r.kind === "guest") await setGuestPayment(r.id, action, why);
+      else await setCallupPayment(eventId, r.id, action, why);
+      setRejecting(null);
+      setReason("");
+      if (action !== "paid")
+        setThumbs((t) => {
+          const n = { ...t };
+          delete n[r.key];
+          return n;
+        });
+      load();
+      onChanged();
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "That didn't work.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function view(r: PayItem) {
+    if (thumbs[r.key]) {
+      setPreview({ src: thumbs[r.key], name: r.name });
+      return;
+    }
+    setBusy(r.key);
+    try {
+      const src = await receiptOf(r.key);
+      if (src) setPreview({ src, name: r.name });
+      else setErr(`${r.name}'s receipt is no longer there.`);
+    } catch (e) {
+      setErr(e instanceof Error ? e.message : "Couldn't open it.");
+    } finally {
+      setBusy(null);
+    }
+  }
 
   async function tickWalkin(w: WalkinRow, paidNow: boolean) {
     setBusy("w:" + w.nameKey);
@@ -407,72 +516,17 @@ export function AdminPayments({
     }
   }
 
-  // Thumbnails for the receipts waiting to be checked (only those).
-  const toCheckIds = (rows ?? []).filter((r) => !r.paidAt && r.hasReceipt).map((r) => r.userId).join(",");
-  useEffect(() => {
-    let alive = true;
-    for (const id of toCheckIds ? toCheckIds.split(",") : []) {
-      if (thumbs[id]) continue;
-      getCallupReceipt(eventId, id)
-        .then((src) => alive && src && setThumbs((t) => ({ ...t, [id]: src })))
-        .catch(() => {});
-    }
-    return () => {
-      alive = false;
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [toCheckIds, eventId]);
-
-  async function act(r: CallupPaymentRow, action: "paid" | "unpaid" | "reject", why?: string) {
-    setBusy(r.userId);
-    setErr(null);
-    try {
-      await setCallupPayment(eventId, r.userId, action, why);
-      setRejecting(null);
-      setReason("");
-      if (action !== "paid") setThumbs((t) => {
-        const n = { ...t };
-        delete n[r.userId];
-        return n;
-      });
-      load();
-      onChanged();
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "That didn't work.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
-  async function view(r: CallupPaymentRow) {
-    if (thumbs[r.userId]) {
-      setPreview({ src: thumbs[r.userId], name: r.displayName });
-      return;
-    }
-    setBusy(r.userId);
-    try {
-      const src = await getCallupReceipt(eventId, r.userId);
-      if (src) setPreview({ src, name: r.displayName });
-      else setErr(`${r.displayName}'s receipt is no longer there.`);
-    } catch (e) {
-      setErr(e instanceof Error ? e.message : "Couldn't open it.");
-    } finally {
-      setBusy(null);
-    }
-  }
-
   if (mode === "none") return null;
   if (!rows) return err ? <p className="text-[12px] text-loss mt-4">{err}</p> : <p className="text-[12px] text-warm-gray mt-4 text-center">Loading payments…</p>;
 
-  const paid = rows.filter((r) => r.paidAt);
-  const toCheck = rows.filter((r) => !r.paidAt && r.hasReceipt);
-  const unpaid = rows.filter((r) => !r.paidAt && !r.hasReceipt);
-  // Waiting to get in (Pay to get in): the receipt is for them plus their guests.
-  const spotsOf = (r: CallupPaymentRow) => (r.ownIn || (mode === "prepay" && r.hasReceipt && !r.paidAt) ? 1 + r.guestsIn : r.guestsIn);
-  const guestsLabel = (r: CallupPaymentRow) => (r.guestsIn > 0 ? ` +${r.guestsIn} guest${r.guestsIn === 1 ? "" : "s"}` : "");
+  const byArrival = (x: PayItem, y: PayItem) => (x.receiptAt ?? "").localeCompare(y.receiptAt ?? "");
+  const paid = items.filter((r) => r.paidAt);
+  const toCheck = items.filter((r) => !r.paidAt && r.hasReceipt).sort(byArrival);
+  const unpaid = items.filter((r) => !r.paidAt && !r.hasReceipt && r.holdsSpot);
   const walkPaid = walkins.filter((w) => w.paidAt);
   const walkUnpaid = walkins.filter((w) => !w.paidAt);
   const everyonePaid = unpaid.length + toCheck.length + walkUnpaid.length === 0;
+  const sub = (r: PayItem, extra: string) => [r.note, extra].filter(Boolean).join(" · ");
   const walkRow = (w: WalkinRow) => (
     <div key={"w:" + w.nameKey} className="flex items-center gap-3 px-3.5 py-3 border-t border-line first:border-t-0">
       <Face name={w.displayName} url={null} size={34} />
@@ -514,43 +568,41 @@ export function AdminPayments({
       </div>
       {mode === "prepay" && !played && (
         <p className="text-[11.5px] text-warm-gray mt-2 px-0.5">
-          Pay to get in: receipts are listed in the order they were sent, to the second. Accepting one moves that player (and their guests) in.
+          Pay to get in: receipts are listed in the order they were sent, to the second. Accepting one moves that player in.
         </p>
       )}
       {mode === "receipt" && deadline && !played && (
         <p className="text-[11.5px] text-warm-gray mt-2 px-0.5">
-          Deadline {dayAndTime(deadline)}. Anyone in without a receipt then moves to the waiting list.
+          Deadline {dayAndTime(deadline)}. Anyone in without a receipt then moves to the waiting list, guests included.
         </p>
       )}
       {err && <p className="text-[11.5px] text-loss mt-2 px-0.5">{err}</p>}
-      {rows.length === 0 && walkins.length === 0 && <p className="text-[12.5px] text-warm-gray mt-4 text-center">{played ? "Nobody on the roster yet." : "Nobody is in yet."}</p>}
+      {items.length === 0 && walkins.length === 0 && <p className="text-[12.5px] text-warm-gray mt-4 text-center">{played ? "Nobody on the roster yet." : "Nobody is in yet."}</p>}
 
       {toCheck.length > 0 && (
         <>
           <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-gold-ink mt-5 mb-2 px-0.5">To check</p>
           <div className="flex flex-col gap-2">
             {toCheck.map((r, i) => (
-              <div key={r.userId} className={`${card} p-3`}>
+              <div key={r.key} className={`${card} p-3`}>
                 <div className="flex items-center gap-3">
-                  <button onClick={() => view(r)} className="w-[54px] h-[72px] rounded-[10px] bg-surface-2 border border-line overflow-hidden shrink-0" aria-label={`View ${r.displayName}'s receipt`}>
-                    {thumbs[r.userId] ? <img src={thumbs[r.userId]} alt="" className="w-full h-full object-cover" /> : <span className="text-[10px] text-warm-gray">Receipt</span>}
+                  <button onClick={() => view(r)} className="w-[54px] h-[72px] rounded-[10px] bg-surface-2 border border-line overflow-hidden shrink-0" aria-label={`View ${r.name}'s receipt`}>
+                    {thumbs[r.key] ? <img src={thumbs[r.key]} alt="" className="w-full h-full object-cover" /> : <span className="text-[10px] text-warm-gray">Receipt</span>}
                   </button>
                   <span className="flex-1 min-w-0">
                     <b className="block text-[14.5px] font-semibold text-graphite truncate">
                       {mode === "prepay" && <span className="font-mono tnum text-gold-ink mr-1.5">#{i + 1}</span>}
-                      {r.displayName}
-                      <span className="font-normal text-warm-gray text-[12.5px]">{guestsLabel(r)}</span>
+                      {r.name}
                     </b>
                     <span className="block text-[11.5px] text-warm-gray mt-0.5">
-                      {spotsOf(r)} {spotsOf(r) === 1 ? "spot" : "spots"}
-                      {r.receiptAt && hhmm(r.receiptAt) ? ` · sent ${mode === "prepay" ? hhmmss(r.receiptAt) : hhmm(r.receiptAt)}` : ""}
+                      {sub(r, r.receiptAt && hhmm(r.receiptAt) ? `sent ${mode === "prepay" ? hhmmss(r.receiptAt) : hhmm(r.receiptAt)}` : "")}
                     </span>
                     <button onClick={() => view(r)} className="text-[11.5px] font-semibold text-gold-ink mt-1.5">
                       View full size
                     </button>
                   </span>
                 </div>
-                {rejecting === r.userId ? (
+                {rejecting === r.key ? (
                   <form
                     onSubmit={(e) => {
                       e.preventDefault();
@@ -559,7 +611,7 @@ export function AdminPayments({
                     className="flex gap-1.5 mt-3"
                   >
                     <input autoFocus value={reason} onChange={(e) => setReason(e.target.value.slice(0, 200))} placeholder="Why? e.g. wrong amount" className="flex-1 min-w-0 rounded-full border border-line bg-ivory px-3.5 py-2 text-[16px] text-ink" />
-                    <button type="submit" disabled={busy === r.userId} className="shrink-0 rounded-full bg-loss-soft text-loss text-[12.5px] font-semibold px-3.5 disabled:opacity-40">
+                    <button type="submit" disabled={busy === r.key} className="shrink-0 rounded-full bg-loss-soft text-loss text-[12.5px] font-semibold px-3.5 disabled:opacity-40">
                       Reject
                     </button>
                     <button type="button" onClick={() => setRejecting(null)} className="shrink-0 text-[12px] text-warm-gray px-1">
@@ -568,15 +620,15 @@ export function AdminPayments({
                   </form>
                 ) : (
                   <div className="flex gap-2 mt-3">
-                    <button onClick={() => act(r, "paid")} disabled={busy === r.userId} className="flex-1 h-10 rounded-full bg-win text-surface text-[13px] font-semibold disabled:opacity-40">
-                      {mode === "prepay" && !r.ownIn ? "Accept · let in" : "Accept"}
+                    <button onClick={() => act(r, "paid")} disabled={busy === r.key} className="flex-1 h-10 rounded-full bg-win text-surface text-[13px] font-semibold disabled:opacity-40">
+                      {r.asking ? "Accept · let in" : "Accept"}
                     </button>
                     <button
                       onClick={() => {
-                        setRejecting(r.userId);
+                        setRejecting(r.key);
                         setReason("");
                       }}
-                      disabled={busy === r.userId}
+                      disabled={busy === r.key}
                       className="flex-1 h-10 rounded-full bg-loss-soft text-loss text-[13px] font-semibold disabled:opacity-40"
                     >
                       Reject…
@@ -595,19 +647,15 @@ export function AdminPayments({
           <div className={`${card} overflow-hidden`}>
             {unpaid.map((r) => {
               const left = r.payBy ? timeLeft(r.payBy, now) : null;
+              const status = r.rejectedReason ? `Rejected: ${r.rejectedReason}` : left ? `Has until ${hhmm(r.payBy!)}` : mode === "receipt" ? "No receipt yet" : "Not ticked";
               return (
-                <div key={r.userId} className="flex items-center gap-3 px-3.5 py-3 border-t border-line first:border-t-0">
-                  <Face name={r.displayName} url={r.avatarUrl} size={34} />
+                <div key={r.key} className="flex items-center gap-3 px-3.5 py-3 border-t border-line first:border-t-0">
+                  <Face name={r.name} url={r.avatarUrl} size={34} />
                   <span className="flex-1 min-w-0">
-                    <b className="block text-[14px] font-semibold text-graphite truncate">
-                      {r.displayName}
-                      <span className="font-normal text-warm-gray text-[12px]">{guestsLabel(r)}</span>
-                    </b>
-                    <span className={`block text-[11.5px] ${left || r.rejectedReason ? "text-gold-ink font-semibold" : "text-warm-gray"}`}>
-                      {r.rejectedReason ? `Rejected: ${r.rejectedReason}` : left ? `Has until ${hhmm(r.payBy!)}` : mode === "receipt" ? "No receipt yet" : "Not ticked"}
-                    </span>
+                    <b className="block text-[14px] font-semibold text-graphite truncate">{r.name}</b>
+                    <span className={`block text-[11.5px] truncate ${left || r.rejectedReason ? "text-gold-ink font-semibold" : "text-warm-gray"}`}>{sub(r, status)}</span>
                   </span>
-                  <button onClick={() => act(r, "paid")} disabled={busy === r.userId} className="h-8 px-3 rounded-full border border-win/40 text-win text-[12px] font-semibold disabled:opacity-40">
+                  <button onClick={() => act(r, "paid")} disabled={busy === r.key} className="h-8 px-3 rounded-full border border-win/40 text-win text-[12px] font-semibold disabled:opacity-40">
                     Mark paid
                   </button>
                 </div>
@@ -623,17 +671,16 @@ export function AdminPayments({
           <p className="text-[10.5px] font-bold uppercase tracking-[0.12em] text-win mt-5 mb-2 px-0.5">Paid · {paid.length + walkPaid.length}</p>
           <div className={`${card} overflow-hidden`}>
             {paid.map((r) => (
-              <div key={r.userId} className="flex items-center gap-3 px-3.5 py-3 border-t border-line first:border-t-0">
-                <Face name={r.displayName} url={r.avatarUrl} size={34} />
+              <div key={r.key} className="flex items-center gap-3 px-3.5 py-3 border-t border-line first:border-t-0">
+                <Face name={r.name} url={r.avatarUrl} size={34} />
                 <span className="flex-1 min-w-0">
-                  <b className="block text-[14px] font-semibold text-graphite truncate">
-                    {r.displayName}
-                    <span className="font-normal text-warm-gray text-[12px]">{guestsLabel(r)}</span>
-                  </b>
-                  {!r.ownIn && r.guestsIn === 0 && <span className="block text-[11px] text-warm-gray">{played ? "Paid, didn't play" : "Paid, no longer in"}</span>}
+                  <b className="block text-[14px] font-semibold text-graphite truncate">{r.name}</b>
+                  {(r.note || !r.holdsSpot) && (
+                    <span className="block text-[11px] text-warm-gray truncate">{sub(r, r.holdsSpot ? "" : played ? "Paid, didn't play" : "Paid, no longer in")}</span>
+                  )}
                 </span>
-                <span className="text-[11px] font-bold rounded-full px-2.5 py-1 bg-win-soft text-win">{r.hasReceipt ? "Paid · receipt" : "Paid"}</span>
-                <button onClick={() => act(r, "unpaid")} disabled={busy === r.userId} className="text-[11.5px] font-semibold text-warm-gray px-1 disabled:opacity-40">
+                <span className="text-[11px] font-bold rounded-full px-2.5 py-1 bg-win-soft text-win shrink-0">{r.hasReceipt ? "Paid · receipt" : "Paid"}</span>
+                <button onClick={() => act(r, "unpaid")} disabled={busy === r.key} className="text-[11.5px] font-semibold text-warm-gray px-1 disabled:opacity-40">
                   Undo
                 </button>
               </div>
@@ -661,6 +708,131 @@ export function AdminPayments({
           Receipts are visible only to admins and the person who sent them, and are deleted 3 days after the night.
         </p>
       )}
+      {preview && <AvatarLightbox src={preview.src} alt={`${preview.name}'s receipt`} onClose={() => setPreview(null)} />}
+    </div>
+  );
+}
+
+/** One row of the admin list: a member's own spot, or one guest's. */
+interface PayItem {
+  key: string;
+  kind: "member" | "guest";
+  id: string;
+  name: string;
+  avatarUrl: string | null;
+  /** "Guest of Gilang". */
+  note: string | null;
+  paidAt: string | null;
+  hasReceipt: boolean;
+  receiptAt: string | null;
+  rejectedReason: string | null;
+  payBy: string | null;
+  holdsSpot: boolean;
+  /** Pay to get in: waiting, with a receipt asking for a spot. */
+  asking: boolean;
+}
+
+/* ── 0085: the guests I brought, each paid for on their own ────────────── */
+
+export function MyGuestsPayment({
+  extras,
+  onChanged,
+  afterNight = false,
+}: {
+  extras: CallupExtras;
+  onChanged: (next: CallupExtras | null) => void;
+  /** On a played night: only the guests who played. */
+  afterNight?: boolean;
+}) {
+  const fileRef = useRef<HTMLInputElement>(null);
+  const [target, setTarget] = useState<string | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const [err, setErr] = useState<string | null>(null);
+  const [preview, setPreview] = useState<{ src: string; name: string } | null>(null);
+  const mode = extras.paymentMode;
+  const guests = extras.myGuests.filter((g) => (afterNight ? g.played : g.response === "in" || g.response === "waitlist" || g.paid));
+  if (mode === "none" || guests.length === 0) return null;
+
+  function canUpload(g: MyGuestPay): boolean {
+    if (g.paid) return false;
+    if (mode === "receipt") return g.response === "in" || g.played;
+    if (mode === "prepay") return g.response === "in" || g.hasReceipt || (g.response === "waitlist" && extras.uploadOpen);
+    return false;
+  }
+
+  async function pick(e: ChangeEvent<HTMLInputElement>) {
+    const f = e.target.files?.[0];
+    e.target.value = "";
+    if (!f || !target) return;
+    setBusy(target);
+    setErr(null);
+    try {
+      onChanged(await uploadGuestReceipt(target, f));
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "Couldn't upload that.");
+    } finally {
+      setBusy(null);
+      setTarget(null);
+    }
+  }
+
+  async function view(g: MyGuestPay) {
+    try {
+      const src = await getGuestReceipt(g.id);
+      if (src) setPreview({ src, name: g.name });
+    } catch (e2) {
+      setErr(e2 instanceof Error ? e2.message : "Couldn't open it.");
+    }
+  }
+
+  return (
+    <div className="mt-3.5 rounded-[20px] bg-surface-2 px-3.5 py-3">
+      <input ref={fileRef} type="file" accept="image/*" className="hidden" onChange={pick} />
+      <p className="text-[11.5px] font-semibold text-warm-gray">Your guests · each pays for their own spot</p>
+      <div className="mt-1">
+        {guests.map((g) => {
+          const [label, tone] = g.paid
+            ? ["Paid", "text-win"]
+            : g.hasReceipt
+              ? [g.checkPosition ? `Receipt sent · #${g.checkPosition} to check` : "Receipt sent · being checked", "text-gold-ink"]
+              : g.rejectedReason
+                ? [`Not accepted: ${g.rejectedReason}`, "text-loss"]
+                : g.movedUnpaid && g.response === "waitlist"
+                  ? ["Moved to the waiting list (no receipt)", "text-loss"]
+                  : mode === "tick"
+                    ? ["Not ticked yet · pay the admin", "text-warm-gray"]
+                    : mode === "prepay" && g.response === "waitlist"
+                      ? [extras.uploadOpen ? "Waiting · upload to ask for a spot" : "Waiting · every spot is taken or being checked", "text-warm-gray"]
+                      : [g.payBy ? `No receipt · by ${hhmm(g.payBy)}` : "No receipt yet", g.payBy ? "text-gold-ink" : "text-warm-gray"];
+          return (
+            <div key={g.id} className="flex items-center gap-3 py-2.5 border-t border-line first:border-t-0">
+              <Face name={g.name} url={null} size={32} />
+              <span className="flex-1 min-w-0">
+                <b className="block text-[13.5px] font-semibold text-graphite truncate">{g.name}</b>
+                <span className={`block text-[11.5px] truncate ${tone}`}>{label}</span>
+              </span>
+              {g.hasReceipt && !g.paid && (
+                <button onClick={() => view(g)} className="shrink-0 text-[12px] font-semibold text-ink-2 px-1.5">
+                  View
+                </button>
+              )}
+              {canUpload(g) && (
+                <button
+                  onClick={() => {
+                    setTarget(g.id);
+                    fileRef.current?.click();
+                  }}
+                  disabled={busy === g.id}
+                  className={`shrink-0 h-8 px-3 rounded-full text-[12px] font-bold disabled:opacity-40 ${g.hasReceipt ? "bg-surface text-ink-2" : "bg-gold text-graphite"}`}
+                >
+                  {busy === g.id ? "Uploading…" : g.hasReceipt ? "Replace" : "Upload"}
+                </button>
+              )}
+            </div>
+          );
+        })}
+      </div>
+      {err && <p className="text-[11.5px] text-loss mt-1.5">{err}</p>}
       {preview && <AvatarLightbox src={preview.src} alt={`${preview.name}'s receipt`} onClose={() => setPreview(null)} />}
     </div>
   );

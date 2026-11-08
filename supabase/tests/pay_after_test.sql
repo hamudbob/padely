@@ -98,7 +98,8 @@ select expect('played', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000
 select expect('6 spots: Admin, Budi, Dewi+Rina, Eko, Joko', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') ->> 'in_spots')::int = 6 $$);
 select expect('Citra (no-show) does not owe', $$ not exists (select 1 from get_callup_payments('e1000000-0000-0000-0000-000000000001') where user_id = 'c0000000-0000-0000-0000-00000000000c') $$);
 select expect('Eko (came without answering) owes', $$ exists (select 1 from get_callup_payments('e1000000-0000-0000-0000-000000000001') where user_id = 'e0000000-0000-0000-0000-00000000000e' and own_in) $$);
-select expect('Rina is counted under Dewi', $$ (select guests_in from get_callup_payments('e1000000-0000-0000-0000-000000000001') where user_id = 'd0000000-0000-0000-0000-00000000000d') = 1 $$);
+select expect('Rina has her own row, as Dewi''s guest', $$ exists (select 1 from get_callup_guest_payments('e1000000-0000-0000-0000-000000000001')
+   where display_name = 'Rina' and invited_by = 'd0000000-0000-0000-0000-00000000000d' and holds_spot) $$);
 select expect('Joko is the only walk-in', $$ (select array_agg(display_name) from get_callup_walkins('e1000000-0000-0000-0000-000000000001')) = array['Joko'] $$);
 select expect('someone who left without playing is not counted', $$ not exists (select 1 from get_callup_walkins('e1000000-0000-0000-0000-000000000001') where display_name = 'Gone Early') $$);
 select expect('admin sees Tuesday to collect, 0 of 6', $$ (select (x ->> 'in_spots')::int = 6 and (x ->> 'paid_spots')::int = 0 from jsonb_array_elements(get_club_money('c1000000-0000-0000-0000-000000000001') -> 'collect') x) $$);
@@ -120,14 +121,21 @@ select as_user('a0000000-0000-0000-0000-00000000000a');
 select t('admin ticks Dewi', $$ select set_callup_payment('e1000000-0000-0000-0000-000000000001', 'd0000000-0000-0000-0000-00000000000d', 'paid') $$);
 select t('admin ticks Joko the walk-in', $$ select set_callup_walkin_payment('e1000000-0000-0000-0000-000000000001', 'joko', true) $$);
 select t('a name not on the roster is refused', $$ select set_callup_walkin_payment('e1000000-0000-0000-0000-000000000001', 'nobody', true) $$, true);
-select expect('3 of 6 paid (Dewi covers Rina)', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') ->> 'paid_spots')::int = 3 $$);
+select expect('2 of 6 paid (Dewi''s payment doesn''t cover Rina)', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') ->> 'paid_spots')::int = 2 $$);
 select as_user('d0000000-0000-0000-0000-00000000000d');
-select expect('Dewi no longer owes', $$ jsonb_array_length(get_club_money('c1000000-0000-0000-0000-000000000001') -> 'owe') = 0 $$);
+select expect('Dewi still owes 1, for Rina', $$ (select (x ->> 'spots')::int = 1 from jsonb_array_elements(get_club_money('c1000000-0000-0000-0000-000000000001') -> 'owe') x) $$);
 select expect('Dewi sees herself paid on the Call-up', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') -> 'me' ->> 'paid')::boolean $$);
+select expect('...and Rina, played and not paid, under "your guests"', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') -> 'my_guests' -> 0 ->> 'name') = 'Rina'
+   and (get_callup_extras('e1000000-0000-0000-0000-000000000001') -> 'my_guests' -> 0 ->> 'played')::boolean
+   and not (get_callup_extras('e1000000-0000-0000-0000-000000000001') -> 'my_guests' -> 0 ->> 'paid')::boolean $$);
 
 select as_user('a0000000-0000-0000-0000-00000000000a');
 select t('untick Joko', $$ select set_callup_walkin_payment('e1000000-0000-0000-0000-000000000001', 'joko', false) $$);
-select expect('2 of 6 again', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') ->> 'paid_spots')::int = 2 $$);
+select expect('1 of 6 again', $$ (get_callup_extras('e1000000-0000-0000-0000-000000000001') ->> 'paid_spots')::int = 1 $$);
+select t('tick Rina on her own', $$ select set_guest_payment((select id from club_event_guests where display_name = 'Rina'), 'paid') $$);
+select as_user('d0000000-0000-0000-0000-00000000000d');
+select expect('now Dewi owes nothing', $$ jsonb_array_length(get_club_money('c1000000-0000-0000-0000-000000000001') -> 'owe') = 0 $$);
+select as_user('a0000000-0000-0000-0000-00000000000a');
 select t('tick Joko, Admin, Budi, Eko', $$ select set_callup_walkin_payment('e1000000-0000-0000-0000-000000000001', 'joko', true),
   set_callup_payment('e1000000-0000-0000-0000-000000000001', 'a0000000-0000-0000-0000-00000000000a', 'paid'),
   set_callup_payment('e1000000-0000-0000-0000-000000000001', 'b0000000-0000-0000-0000-00000000000b', 'paid'),
