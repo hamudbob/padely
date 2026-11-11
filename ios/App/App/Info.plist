@@ -47,9 +47,9 @@
 	     <input type="file" accept="image/*">, which offers "Take Photo".
 	     Apple also rejects vague strings, so each one names what it is for. -->
 	<key>NSCameraUsageDescription</key>
-	<string>Padelier uses the camera so you can take a photo for your profile picture or your club's logo.</string>
+	<string>Padelier uses the camera so you can take a photo for your profile picture, your club's logo, or a payment receipt for a Call-up.</string>
 	<key>NSPhotoLibraryUsageDescription</key>
-	<string>Padelier needs access to your photos so you can choose a profile picture or a club logo.</string>
+	<string>Padelier needs access to your photos so you can choose a profile picture, a club logo, or a transfer receipt to send to your club's admins.</string>
 	<key>NSPhotoLibraryAddUsageDescription</key>
 	<string>Padelier saves session recap images to your photo library when you tap Save.</string>
 	<key>UILaunchStoryboardName</key>
