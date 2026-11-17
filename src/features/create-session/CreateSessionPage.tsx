@@ -759,7 +759,11 @@ export default function CreateSessionPage() {
   // scores. Mexicano still only ever previews Round 1 — its later rounds
   // depend on standings that don't exist yet, so they're generated
   // round-by-round after each is scored. ----
+  // Only drawn on the Review step: the whole-night balancing takes a moment on
+  // a phone, and nothing before Review shows the rounds.
+  const onReview = step === 5;
   const previewRounds: RoundResult[] = useMemo(() => {
+    if (!onReview) return [];
     // Single source of truth shared with the lobby's Start (see initialSchedule.ts).
     return generateInitialRounds({
       players: players.map((p) => ({
@@ -775,7 +779,7 @@ export default function CreateSessionPage() {
       fixedPartnerStyle: isFixedPartner ? fixedPartnerStyle : null,
       pairs: isFixedPartner ? resolvedPairs : undefined,
     });
-  }, [players, courtCount, format, schedulingSeed, roundCount, resolvedPairs, isFixedPartner, fixedPartnerStyle]);
+  }, [onReview, players, courtCount, format, schedulingSeed, roundCount, resolvedPairs, isFixedPartner, fixedPartnerStyle]);
 
   const nameByTempId = useMemo(() => new Map(players.map((p) => [p.tempId, p.name])), [players]);
 

@@ -15,6 +15,7 @@ import {
 import { generateMixAmericanoRound, Gender } from "../scheduling/mixAmericano";
 import { generateMixMexicanoRound } from "../scheduling/mixMexicano";
 import { generateInitialRounds, isFullyPreGeneratedFormat, ScheduleFormat } from "../scheduling/initialSchedule";
+import { SchedulePrior, priorFromRounds } from "../scheduling/balance";
 import {
   emptyHistory,
   recordRoundInHistory,
@@ -961,9 +962,10 @@ export async function regenerateCurrentRound(sessionId: string, opts: { randomiz
   return generateNextRound(sessionId, randomSeed, opts.randomize, { firstRound: prevId === null });
 }
 export interface RedrawRemainingResult {
-  /** First round sequence that was replaced. */
+  /** The rounds that were replaced, in order. They keep their numbers. */
+  sequences: number[];
+  /** First and last of them (kept for older callers). */
   fromSequence: number;
-  /** Last one. */
   toSequence: number;
   /** How many rounds were redrawn. */
   rounds: number;
@@ -971,184 +973,252 @@ export interface RedrawRemainingResult {
   players: number;
 }
 
-/**
- * Which rounds a redraw would replace, without touching anything.
- *
- * The boundary is the last round that has a score in it. Everything after that
- * is unplayed, so it is fair game; everything up to and including it stays,
- * because those results are real and people were told about them.
- *
- * Exported so the button can name the exact rounds in its confirmation. A host
- * standing on a court should never tap something called "redraw" and find out
- * afterwards what it redrew.
- */
-export async function previewRedrawRemaining(sessionId: string): Promise<{ fromSequence: number; toSequence: number; rounds: number } | null> {
-  // A local session answers from the device. Without this the preview read the
-  // server while the redraw below wrote to it, and the host's screen — which
-  // reads localStorage — never changed, so Redraw looked like it did nothing.
-  const localPreview = getLocalSession(sessionId);
-  if (localPreview) {
-    const ordered = localPreview.rounds.slice().sort((a, b) => a.sequence - b.sequence);
-    if (ordered.length === 0) return null;
-    const playedRoundIds = new Set(
-      localPreview.matches
-        .filter((m) => m.status === "final" || m.score_a !== null || m.score_b !== null)
-        .map((m) => m.round_id),
-    );
-    const firstUntouched = ordered.find((r) => !playedRoundIds.has(r.id));
-    if (!firstUntouched) return null;
-    const last = ordered[ordered.length - 1];
-    return {
-      fromSequence: firstUntouched.sequence,
-      toSequence: last.sequence,
-      rounds: ordered.filter((r) => r.sequence >= firstUntouched.sequence).length,
-    };
-  }
-
-  const { data: roundRows, error: roundsError } = await supabase
-    .from("rounds")
-    .select("id, sequence")
-    .eq("session_id", sessionId)
-    .order("sequence", { ascending: true });
-  if (roundsError) throw roundsError;
-  const rounds = roundRows ?? [];
-  if (rounds.length === 0) return null;
-
-  const { data: matchRows, error: matchError } = await supabase
-    .from("matches")
-    .select("round_id, status, score_a")
-    .in("round_id", rounds.map((r) => r.id));
-  if (matchError) throw matchError;
-
-  const scoredRoundIds = new Set(
-    (matchRows ?? []).filter((m) => m.status === "final" || m.score_a !== null).map((m) => m.round_id),
-  );
-  const lastScored = rounds.reduce((acc, r) => (scoredRoundIds.has(r.id) ? r.sequence : acc), 0);
-  const targets = rounds.filter((r) => r.sequence > lastScored);
-  if (targets.length === 0) return null;
-
-  return {
-    fromSequence: targets[0].sequence,
-    toSequence: targets[targets.length - 1].sequence,
-    rounds: targets.length,
-  };
+export interface RedrawPreview {
+  /** Every round with no score in it yet, wherever it sits in the order. */
+  sequences: number[];
+  fromSequence: number;
+  toSequence: number;
+  rounds: number;
 }
 
-/**
- * Redraw every unplayed round of a pre-generated session from the current roster.
- *
- * WHY THIS EXISTS. Americano and its relatives lay the whole schedule out at
- * session start. `markPlayerLeft` is documented as excluding someone from every
- * future round, and for Mexicano it does — those rounds don't exist yet, and
- * each one filters on `status = 'active'` as it's drawn. In Americano the rounds
- * already exist with that player written into them, and nothing was ever going
- * to take them out. So a host whose twelfth player went home at round 5 spent
- * the rest of the night reading names off a schedule that included someone
- * standing in the car park.
- *
- * WHAT IT KEEPS. Every round up to and including the last one with a score in
- * it — those were played, and their results are real. Only the unplayed tail is
- * replaced, at the same sequence numbers, so "round 9" is still round 9.
- *
- * WHY IT'S A BUTTON AND NOT AUTOMATIC. Marking someone as left shouldn't
- * silently rewrite a schedule the host may have already read out. The host
- * decides when the roster has settled; usually that's after two people leave
- * together, not after the first.
- *
- * ONE KNOWN SIMPLIFICATION. The new draw starts its fairness counters at zero
- * rather than carrying in what everyone has already played. `generateInitialRounds`
- * has no input for prior state, and widening that interface would mean editing
- * the one piece of this app with a 942-run simulation behind it — for a case
- * where it rarely matters, because a pre-generated schedule has everyone on
- * near-identical counts by construction. If a session ever redraws from a badly
- * uneven position, that's the thing to revisit.
- */
-export async function redrawRemainingRounds(sessionId: string): Promise<RedrawRemainingResult> {
-  // ── Local session: redraw on the device ────────────────────────────────
-  //
-  // THE BUG THIS FIXES. This function had no local branch at all. It deleted
-  // the server's unplayed rounds and re-inserted them — while the host's
-  // screen reads localStorage, so nothing visibly changed. A host who marked
-  // someone as left and tapped Redraw watched that player keep appearing on
-  // every future court, because the rounds they were looking at had never been
-  // touched. The next replication then pushed the local rounds back over the
-  // server's redraw, so even the invisible half was undone.
-  //
-  // Redrawing is a local-first operation like every other draw: rebuild the
-  // unplayed tail from the roster that is still playing, save it, and let
-  // replication carry it. Same generator, same seed rule, same shapes as
-  // generateNextRound writes — the ids are minted here so 0060/0064 accept the
-  // graph verbatim.
+/** "4, 6, 8–10": round numbers the way a host would say them. */
+export function describeSequences(seqs: number[]): string {
+  const sorted = [...seqs].sort((a, b) => a - b);
+  const parts: string[] = [];
+  for (let i = 0; i < sorted.length; ) {
+    let j = i;
+    while (j + 1 < sorted.length && sorted[j + 1] === sorted[j] + 1) j++;
+    parts.push(j === i ? `${sorted[i]}` : j === i + 1 ? `${sorted[i]}, ${sorted[j]}` : `${sorted[i]}–${sorted[j]}`);
+    i = j + 1;
+  }
+  return parts.join(", ");
+}
+
+// ---------------------------------------------------------------------------
+// The whole drawn night of a pre-drawn session (Americano and relatives), read
+// the same way from the device or the server, so redrawing and adding rounds
+// can carry what has already happened into the new draw.
+// ---------------------------------------------------------------------------
+
+interface NightRound {
+  id: string;
+  sequence: number;
+  status: string;
+  /** Any court in it has a score. Played rounds are never touched. */
+  played: boolean;
+  result: RoundResult;
+}
+
+interface Night {
+  local: LocalSession | null;
+  session: { format: string; scheduling_seed: number; status: string; fixed_partner_style: string | null };
+  courts: { id: string }[];
+  /** Still in the draw, in join order. */
+  activePlayers: { id: string; gender: string | null; team_side: string | null; preferred_side: string | null }[];
+  /** Fixed Partner: the pairs whose two players are both still in. */
+  pairs: Pair[];
+  isFixedPartner: boolean;
+  /** Oldest first. */
+  rounds: NightRound[];
+}
+
+const sideOf = (raw: string | null | undefined): "L" | "R" | null => {
+  // "L"/"R" for someone who joined by code, "left"/"right" for someone typed in.
+  const v = (raw ?? "").toString().trim().toLowerCase();
+  return v.startsWith("l") ? "L" : v.startsWith("r") ? "R" : null;
+};
+
+function nightRounds(
+  rounds: { id: string; sequence: number; status: string }[],
+  matches: { id: string; round_id: string; court_id: string; status: string; score_a: number | null; score_b: number | null }[],
+  participants: { match_id: string; player_id: string; side: string }[],
+  rests: { round_id: string; player_id: string }[],
+  courtOrder: Map<string, number>,
+): NightRound[] {
+  const partsByMatch = new Map<string, { player_id: string; side: string }[]>();
+  for (const p of participants) {
+    const list = partsByMatch.get(p.match_id) ?? [];
+    list.push(p);
+    partsByMatch.set(p.match_id, list);
+  }
+  return rounds
+    .slice()
+    .sort((a, b) => a.sequence - b.sequence)
+    .map((r) => {
+      const ms = matches
+        .filter((m) => m.round_id === r.id)
+        .sort((a, b) => (courtOrder.get(a.court_id) ?? 0) - (courtOrder.get(b.court_id) ?? 0));
+      const result: RoundResult = {
+        courtsUsed: ms.length,
+        matches: ms.flatMap((m, i) => {
+          const ps = partsByMatch.get(m.id) ?? [];
+          const a = ps.filter((p) => p.side === "A").map((p) => p.player_id);
+          const b = ps.filter((p) => p.side === "B").map((p) => p.player_id);
+          return a.length === 2 && b.length === 2 ? [{ courtIndex: i, teamA: [a[0], a[1]] as [PlayerId, PlayerId], teamB: [b[0], b[1]] as [PlayerId, PlayerId] }] : [];
+        }),
+        restingIds: rests.filter((x) => x.round_id === r.id).map((x) => x.player_id),
+        explanation: "",
+      };
+      return {
+        id: r.id,
+        sequence: r.sequence,
+        status: r.status,
+        played: ms.some((m) => m.status === "final" || m.score_a !== null || m.score_b !== null),
+        result,
+      };
+    });
+}
+
+async function loadNight(sessionId: string): Promise<Night> {
   const local = getLocalSession(sessionId);
   if (local) {
-    if (local.session.status !== "live") throw new Error("Only a live session can be redrawn.");
-    if (!isFullyPreGeneratedFormat(local.session.format, local.session.fixed_partner_style)) {
-      throw new Error(
-        "This format draws each round as it goes, so there are no future rounds to redraw — the next one already uses whoever is still playing.",
-      );
-    }
-
-    const preview = await previewRedrawRemaining(sessionId);
-    if (!preview) throw new Error("Every round has been played or scored — there's nothing left to redraw.");
-
-    const courts = local.courts.filter((c) => c.available).sort((a, b) => a.ordinal - b.ordinal);
+    const courtsAll = local.courts.slice().sort((a, b) => a.ordinal - b.ordinal);
+    const courtOrder = new Map(courtsAll.map((c, i) => [c.id, i]));
     const activePlayers = local.players
       .filter((p) => p.status === "active")
       .slice()
-      .sort((a, b) => a.joined_at.localeCompare(b.joined_at) || a.id.localeCompare(b.id));
+      .sort((a, b) => a.joined_at.localeCompare(b.joined_at) || a.id.localeCompare(b.id))
+      .map((p) => ({ id: p.id, gender: p.gender ?? null, team_side: p.team_side ?? null, preferred_side: (p.preferred_side ?? null) as string | null }));
+    const isFixedPartner = local.session.fixed_partner_style != null || local.session.format === "fixed_partner";
+    const activeIds = new Set(activePlayers.map((p) => p.id));
+    return {
+      local,
+      session: local.session,
+      courts: courtsAll.filter((c) => c.available),
+      activePlayers,
+      isFixedPartner,
+      pairs: isFixedPartner
+        ? local.pairs
+            .filter((pr) => activeIds.has(pr.player_a_id) && activeIds.has(pr.player_b_id))
+            .map((pr) => ({ pairId: pr.id, playerA: pr.player_a_id, playerB: pr.player_b_id }))
+        : [],
+      rounds: nightRounds(local.rounds, local.matches, local.participants, local.rests, courtOrder),
+    };
+  }
 
-    // Every refusal before anything is removed. Deleting first and finding the
-    // replacement cannot be built leaves a hole in the evening, on a court, in
-    // front of people.
-    if (courts.length === 0) throw new Error("No courts are available — turn at least one back on before redrawing.");
-    if (activePlayers.length < 4) {
-      throw new Error("A round needs at least 4 active players. Add someone back before redrawing.");
+  const [sessionRes, courtsRes, playersRes, roundsRes] = await Promise.all([
+    supabase.from("sessions").select("format, scheduling_seed, status, fixed_partner_style").eq("id", sessionId).single(),
+    supabase.from("courts").select("id, ordinal, available").eq("session_id", sessionId).order("ordinal", { ascending: true }),
+    supabase
+      .from("players")
+      .select("id, gender, team_side, preferred_side")
+      .eq("session_id", sessionId)
+      .eq("status", "active")
+      .order("joined_at", { ascending: true })
+      .order("id", { ascending: true }),
+    supabase.from("rounds").select("id, sequence, status").eq("session_id", sessionId).order("sequence", { ascending: true }),
+  ]);
+  if (sessionRes.error) throw sessionRes.error;
+  if (!sessionRes.data) throw new Error("Session not found.");
+  if (courtsRes.error) throw courtsRes.error;
+  if (playersRes.error) throw playersRes.error;
+  if (roundsRes.error) throw roundsRes.error;
+  const session = sessionRes.data;
+  const roundRows = roundsRes.data ?? [];
+  const roundIds = roundRows.map((r) => r.id);
+
+  let matchRows: { id: string; round_id: string; court_id: string; status: string; score_a: number | null; score_b: number | null }[] = [];
+  let partRows: { match_id: string; player_id: string; side: string }[] = [];
+  let restRows: { round_id: string; player_id: string }[] = [];
+  if (roundIds.length > 0) {
+    const [mRes, rRes] = await Promise.all([
+      supabase.from("matches").select("id, round_id, court_id, status, score_a, score_b").in("round_id", roundIds),
+      supabase.from("round_rests").select("round_id, player_id").in("round_id", roundIds),
+    ]);
+    if (mRes.error) throw mRes.error;
+    if (rRes.error) throw rRes.error;
+    matchRows = mRes.data ?? [];
+    restRows = rRes.data ?? [];
+    const matchIds = matchRows.map((m) => m.id);
+    if (matchIds.length > 0) {
+      const pRes = await supabase.from("match_participants").select("match_id, player_id, side").in("match_id", matchIds);
+      if (pRes.error) throw pRes.error;
+      partRows = pRes.data ?? [];
     }
+  }
 
-    const isFixedPartnerLocal = local.session.fixed_partner_style != null || local.session.format === "fixed_partner";
-    let localPairs: Pair[] = [];
-    if (isFixedPartnerLocal) {
-      const activeIds = new Set(activePlayers.map((p) => p.id));
-      localPairs = local.pairs
-        .filter((pr) => activeIds.has(pr.player_a_id) && activeIds.has(pr.player_b_id))
-        .map((pr) => ({ pairId: pr.id, playerA: pr.player_a_id, playerB: pr.player_b_id }));
-      if (localPairs.length < 2) throw new Error("Redrawing needs at least two complete pairs still playing.");
-    }
+  const courtsAll = courtsRes.data ?? [];
+  const courtOrder = new Map(courtsAll.map((c, i) => [c.id, i]));
+  const activePlayers = playersRes.data ?? [];
+  const isFixedPartner = session.fixed_partner_style != null || session.format === "fixed_partner";
+  let pairs: Pair[] = [];
+  if (isFixedPartner) {
+    const { data: pairRows, error: pairError } = await supabase.from("pairs").select("id, player_a_id, player_b_id").eq("session_id", sessionId);
+    if (pairError) throw pairError;
+    const activeIds = new Set(activePlayers.map((p) => p.id));
+    // A pair with one player gone can't be scheduled as a pair. Dropping it is
+    // the only honest option: silently re-partnering someone would change who
+    // they're playing with for the rest of the night without telling them.
+    pairs = (pairRows ?? [])
+      .filter((p) => activeIds.has(p.player_a_id) && activeIds.has(p.player_b_id))
+      .map((p) => ({ pairId: p.id, playerA: p.player_a_id, playerB: p.player_b_id }));
+  }
+  return {
+    local: null,
+    session,
+    courts: courtsAll.filter((c) => c.available),
+    activePlayers,
+    isFixedPartner,
+    pairs,
+    rounds: nightRounds(roundRows, matchRows, partRows, restRows, courtOrder),
+  };
+}
 
-    const targets = local.rounds
-      .filter((r) => r.sequence >= preview.fromSequence)
-      .slice()
-      .sort((a, b) => a.sequence - b.sequence);
-    const statusBySeq = new Map(targets.map((r) => [r.sequence, r.status]));
+/** Every refusal before anything is touched. */
+function assertCanDraw(night: Night, verb: "redraw" | "add"): void {
+  if (night.session.status !== "live") throw new Error(verb === "redraw" ? "Only a live session can be redrawn." : "Rounds can only be added to a live session.");
+  if (!isFullyPreGeneratedFormat(night.session.format, night.session.fixed_partner_style)) {
+    throw new Error(
+      verb === "redraw"
+        ? "This format draws each round as it goes, so there are no future rounds to redraw — the next one already uses whoever is still playing."
+        : "This format draws each round as it goes — use the next-round button instead.",
+    );
+  }
+  const doing = verb === "redraw" ? "redrawing" : "adding rounds";
+  if (night.courts.length === 0) throw new Error(`No courts are available — turn at least one back on before ${doing}.`);
+  if (night.activePlayers.length < 4) throw new Error(`A round needs at least 4 active players. Add someone back before ${doing}.`);
+  if (night.isFixedPartner && night.pairs.length < 2) throw new Error(`${verb === "redraw" ? "Redrawing" : "Adding rounds"} needs at least two complete pairs still playing.`);
+}
 
-    // Derived, not random: a host who taps Redraw twice because they weren't
-    // sure it worked gets the same schedule, not a third arrangement.
-    const seed = local.session.scheduling_seed + preview.fromSequence * 7919 + activePlayers.length;
+function drawFor(night: Night, count: number, seed: number, prior: SchedulePrior): RoundResult[] {
+  return generateInitialRounds({
+    players: night.activePlayers.map((p) => ({
+      id: p.id,
+      gender: (p.gender as Gender) ?? "M",
+      teamSide: (p.team_side as "A" | "B" | null) ?? null,
+      side: sideOf(p.preferred_side),
+    })),
+    courtsAvailable: night.courts.length,
+    format: night.session.format as ScheduleFormat,
+    schedulingSeed: seed,
+    roundCount: count,
+    fixedPartnerStyle: (night.session.fixed_partner_style as "round_robin" | "rank_based" | null) ?? null,
+    pairs: night.isFixedPartner ? night.pairs : undefined,
+    prior,
+  });
+}
 
-    const drawn = generateInitialRounds({
-      players: activePlayers.map((p) => ({
-        id: p.id,
-        gender: (p.gender as Gender) ?? "M",
-        teamSide: (p.team_side as "A" | "B" | null) ?? null,
-        side: ((p.preferred_side ?? "").toString().trim().toLowerCase().startsWith("l")
-          ? "L"
-          : (p.preferred_side ?? "").toString().trim().toLowerCase().startsWith("r")
-            ? "R"
-            : null) as "L" | "R" | null,
-      })),
-      courtsAvailable: courts.length,
-      format: local.session.format as ScheduleFormat,
-      schedulingSeed: seed,
-      roundCount: targets.length,
-      fixedPartnerStyle: (local.session.fixed_partner_style as "round_robin" | "rank_based" | null) ?? null,
-      pairs: isFixedPartnerLocal ? localPairs : undefined,
-    });
-    if (drawn.length === 0) {
-      throw new Error("Couldn't build a schedule from the players still in. Nothing has been changed.");
-    }
+/**
+ * Writes drawn rounds at the given sequence numbers, on the device or the
+ * server, replacing any existing rounds listed in `replace` (only now, after
+ * the new ones were built).
+ */
+async function writeRounds(
+  sessionId: string,
+  night: Night,
+  drawn: RoundResult[],
+  sequences: number[],
+  statusBySeq: Map<number, string>,
+  reason: string,
+  seed: number,
+  replace: NightRound[],
+): Promise<void> {
+  const pairByPlayer = night.isFixedPartner ? buildPairByPlayerId(night.pairs) : new Map<string, string>();
+  const courts = night.courts;
 
-    // Only now is anything removed.
-    const doomedRoundIds = new Set(targets.map((r) => r.id));
+  if (night.local) {
+    const local = night.local;
+    const doomedRoundIds = new Set(replace.map((r) => r.id));
     const doomedMatchIds = new Set(local.matches.filter((m) => doomedRoundIds.has(m.round_id)).map((m) => m.id));
     local.rounds = local.rounds.filter((r) => !doomedRoundIds.has(r.id));
     for (const id of doomedRoundIds) noteDiscardedRound(local, id);
@@ -1156,29 +1226,23 @@ export async function redrawRemainingRounds(sessionId: string): Promise<RedrawRe
     local.participants = local.participants.filter((mp) => !doomedMatchIds.has(mp.match_id));
     local.rests = local.rests.filter((rr) => !doomedRoundIds.has(rr.round_id));
 
-    const pairByPlayerLocal = isFixedPartnerLocal ? buildPairByPlayerId(localPairs) : new Map<string, string>();
     const now = new Date().toISOString();
-    let created = 0;
-
     drawn.forEach((round, i) => {
-      const sequence = preview.fromSequence + i;
+      const sequence = sequences[i];
       const roundId = localUuid();
       local.rounds.push({
         id: roundId,
         session_id: sessionId,
         sequence,
-        // Keep whatever the replaced round carried: in a pre-generated session
-        // round 1 is still in_progress, and forcing everything to "planned"
-        // would leave the session with no round marked live.
-        status: statusBySeq.get(sequence) ?? "planned",
-        generation_reason: "Remaining rounds redrawn from the current roster.",
+        status: (statusBySeq.get(sequence) ?? "planned") as LocalSession["rounds"][number]["status"],
+        generation_reason: reason,
         seed_used: seed + i + 1,
         generated_at: now,
       });
       for (const match of round.matches) {
         const matchId = localUuid();
-        const pairAId = pairByPlayerLocal.get(match.teamA[0]) ?? null;
-        const pairBId = pairByPlayerLocal.get(match.teamB[0]) ?? null;
+        const pairAId = pairByPlayer.get(match.teamA[0]) ?? null;
+        const pairBId = pairByPlayer.get(match.teamB[0]) ?? null;
         local.matches.push({
           id: matchId,
           round_id: roundId,
@@ -1196,188 +1260,61 @@ export async function redrawRemainingRounds(sessionId: string): Promise<RedrawRe
       for (const playerId of round.restingIds) {
         local.rests.push({ round_id: roundId, player_id: playerId, consecutive_rest_count: 0 });
       }
-      created += 1;
     });
-
     local.rounds.sort((a, b) => a.sequence - b.sequence);
     saveLocalSession(local);
-    return {
-      fromSequence: preview.fromSequence,
-      toSequence: preview.fromSequence + created - 1,
-      rounds: created,
-      players: activePlayers.length,
-    };
+    return;
   }
 
-  const { data: session, error: sessionError } = await supabase
-    .from("sessions")
-    .select("id, format, scheduling_seed, status, fixed_partner_style")
-    .eq("id", sessionId)
-    .single();
-  if (sessionError) throw sessionError;
-  if (!session) throw new Error("Session not found.");
-  if (session.status !== "live") {
-    throw new Error("Only a live session can be redrawn.");
+  // Rounds cascade to matches, participants and rests.
+  if (replace.length > 0) {
+    const { error } = await supabase.from("rounds").delete().in("id", replace.map((r) => r.id));
+    if (error) throw error;
   }
-  if (!isFullyPreGeneratedFormat(session.format, session.fixed_partner_style)) {
-    throw new Error(
-      "This format draws each round as it goes, so there are no future rounds to redraw — the next one already uses whoever is still playing.",
-    );
-  }
-
-  // Check every reason to refuse BEFORE deleting anything. Deleting first and
-  // discovering the replacement can't be built leaves a session with a hole in
-  // it, on a court, in front of people.
-  const [{ data: courtRows, error: courtsError }, { data: playerRows, error: playersError }] = await Promise.all([
-    supabase.from("courts").select("id, ordinal").eq("session_id", sessionId).eq("available", true).order("ordinal", { ascending: true }),
-    supabase
-      .from("players")
-      .select("id, gender, team_side, preferred_side")
-      .eq("session_id", sessionId)
-      .eq("status", "active")
-      .order("joined_at", { ascending: true })
-      .order("id", { ascending: true }),
-  ]);
-  if (courtsError) throw courtsError;
-  if (playersError) throw playersError;
-
-  const courts = courtRows ?? [];
-  const players = playerRows ?? [];
-  if (courts.length === 0) {
-    throw new Error("No courts are available — turn at least one back on before redrawing.");
-  }
-  if (players.length < 4) {
-    throw new Error("A round needs at least 4 active players. Add someone back before redrawing.");
-  }
-
-  const preview = await previewRedrawRemaining(sessionId);
-  if (!preview) {
-    throw new Error("Every round has been played or scored — there's nothing left to redraw.");
-  }
-
-  const { data: targetRows, error: targetError } = await supabase
-    .from("rounds")
-    .select("id, sequence, status")
-    .eq("session_id", sessionId)
-    .gte("sequence", preview.fromSequence)
-    .order("sequence", { ascending: true });
-  if (targetError) throw targetError;
-  const targets = targetRows ?? [];
-  // Keep whatever status each replaced round carried. Only generateNextRound
-  // maintains these, and only for round-by-round formats, so in a pre-generated
-  // session round 1 is still marked in_progress — forcing every new round to
-  // "planned" would silently drop that marker and leave the session with no
-  // round marked live.
-  const statusBySequence = new Map(targets.map((r) => [r.sequence, r.status as "planned" | "in_progress" | "scored" | "superseded"]));
-
-  // Fixed Partner round-robin schedules pairs, not individuals.
-  const isFixedPartner = session.fixed_partner_style != null || session.format === "fixed_partner";
-  let pairs: Pair[] = [];
-  if (isFixedPartner) {
-    const { data: pairRows, error: pairError } = await supabase
-      .from("pairs")
-      .select("id, player_a_id, player_b_id")
-      .eq("session_id", sessionId);
-    if (pairError) throw pairError;
-    const activeIds = new Set(players.map((p) => p.id));
-    pairs = (pairRows ?? [])
-      // A pair with one player gone can't be scheduled as a pair. Dropping it is
-      // the only honest option: silently re-partnering someone would change who
-      // they're playing with for the rest of the night without telling them.
-      .filter((p) => activeIds.has(p.player_a_id) && activeIds.has(p.player_b_id))
-      .map((p) => ({ pairId: p.id, playerA: p.player_a_id, playerB: p.player_b_id }));
-    if (pairs.length < 2) {
-      throw new Error("Redrawing needs at least two complete pairs still playing.");
-    }
-  }
-
-  // A different seed from the original, derived rather than random, so the same
-  // roster redrawn twice gives the same schedule — a host who taps it again
-  // because they weren't sure it worked shouldn't get a third arrangement.
-  const seed = session.scheduling_seed + preview.fromSequence * 7919 + players.length;
-
-  const drawn = generateInitialRounds({
-    players: players.map((p) => ({
-      id: p.id,
-      gender: (p.gender as Gender) ?? "M",
-      teamSide: (p.team_side as "A" | "B" | null) ?? null,
-      // Normalised on the first letter, exactly as generateNextRound does:
-      // preferred_side is "L"/"R" for someone who joined by code and
-      // "left"/"right" for someone the host typed in. Matching only the long
-      // form would silently drop the side of every code-joiner in a Fixed
-      // Position redraw, and they'd be scheduled as though they had no
-      // preference.
-      side: ((p.preferred_side ?? "").toString().trim().toLowerCase().startsWith("l")
-        ? "L"
-        : (p.preferred_side ?? "").toString().trim().toLowerCase().startsWith("r")
-          ? "R"
-          : null) as "L" | "R" | null,
-    })),
-    courtsAvailable: courts.length,
-    format: session.format as ScheduleFormat,
-    schedulingSeed: seed,
-    roundCount: targets.length,
-    fixedPartnerStyle: (session.fixed_partner_style as "round_robin" | "rank_based" | null) ?? null,
-    pairs: isFixedPartner ? pairs : undefined,
-  });
-  if (drawn.length === 0) {
-    throw new Error("Couldn't build a schedule from the players still in. Nothing has been changed.");
-  }
-
-  // Only now. Rounds cascade to matches, participants and rests.
-  const { error: deleteError } = await supabase
-    .from("rounds")
-    .delete()
-    .in("id", targets.map((r) => r.id));
-  if (deleteError) throw deleteError;
-
-  // Same sequence numbers as the rounds they replace: round 9 stays round 9,
-  // both in the app and in whatever the host has already said out loud.
   const { data: newRounds, error: insertRoundsError } = await supabase
     .from("rounds")
     .insert(
       drawn.map((_, i) => ({
         session_id: sessionId,
-        sequence: preview.fromSequence + i,
-        status: statusBySequence.get(preview.fromSequence + i) ?? ("planned" as const),
-        generation_reason: "Remaining rounds redrawn from the current roster.",
+        sequence: sequences[i],
+        status: (statusBySeq.get(sequences[i]) ?? "planned") as "planned" | "in_progress" | "scored" | "superseded",
+        generation_reason: reason,
         seed_used: seed + i + 1,
       })),
     )
     .select("id, sequence");
   if (insertRoundsError) throw insertRoundsError;
-
   const roundIdBySequence = new Map((newRounds ?? []).map((r) => [r.sequence, r.id]));
-  const courtIds = courts.map((c) => c.id);
 
-  const matchInserts: { round_id: string; court_id: string; status: "not_started" }[] = [];
+  const matchInserts: { round_id: string; court_id: string; status: "not_started"; pair_a_id?: string; pair_b_id?: string }[] = [];
   const restInserts: { round_id: string; player_id: string; consecutive_rest_count: number }[] = [];
   drawn.forEach((round, i) => {
-    const roundId = roundIdBySequence.get(preview.fromSequence + i)!;
+    const roundId = roundIdBySequence.get(sequences[i])!;
     for (const match of round.matches) {
-      matchInserts.push({ round_id: roundId, court_id: courtIds[match.courtIndex], status: "not_started" });
+      const pairAId = pairByPlayer.get(match.teamA[0]);
+      const pairBId = pairByPlayer.get(match.teamB[0]);
+      matchInserts.push({
+        round_id: roundId,
+        court_id: courts[match.courtIndex].id,
+        status: "not_started",
+        ...(pairAId && pairBId ? { pair_a_id: pairAId, pair_b_id: pairBId } : {}),
+      });
     }
-    for (const playerId of round.restingIds) {
-      restInserts.push({ round_id: roundId, player_id: playerId, consecutive_rest_count: 0 });
-    }
+    for (const playerId of round.restingIds) restInserts.push({ round_id: roundId, player_id: playerId, consecutive_rest_count: 0 });
   });
-
-  const { data: newMatches, error: insertMatchesError } = await supabase
-    .from("matches")
-    .insert(matchInserts)
-    .select("id, round_id, court_id");
+  const [{ data: newMatches, error: insertMatchesError }, restRes] = await Promise.all([
+    supabase.from("matches").insert(matchInserts).select("id, round_id, court_id"),
+    restInserts.length > 0 ? supabase.from("round_rests").insert(restInserts) : Promise.resolve({ error: null }),
+  ]);
   if (insertMatchesError) throw insertMatchesError;
-  if (restInserts.length > 0) {
-    const { error: restError } = await supabase.from("round_rests").insert(restInserts);
-    if (restError) throw restError;
-  }
+  if (restRes.error) throw restRes.error;
 
   const matchIdByRoundCourt = new Map((newMatches ?? []).map((m) => [`${m.round_id}|${m.court_id}`, m.id]));
   const participantInserts: { match_id: string; player_id: string; side: "A" | "B" }[] = [];
   drawn.forEach((round, i) => {
-    const roundId = roundIdBySequence.get(preview.fromSequence + i)!;
+    const roundId = roundIdBySequence.get(sequences[i])!;
     for (const match of round.matches) {
-      const matchId = matchIdByRoundCourt.get(`${roundId}|${courtIds[match.courtIndex]}`)!;
+      const matchId = matchIdByRoundCourt.get(`${roundId}|${courts[match.courtIndex].id}`)!;
       participantInserts.push(
         ...match.teamA.map((id) => ({ match_id: matchId, player_id: id, side: "A" as const })),
         ...match.teamB.map((id) => ({ match_id: matchId, player_id: id, side: "B" as const })),
@@ -1385,14 +1322,130 @@ export async function redrawRemainingRounds(sessionId: string): Promise<RedrawRe
     }
   });
   if (participantInserts.length > 0) {
-    const { error: partError } = await supabase.from("match_participants").insert(participantInserts);
-    if (partError) throw partError;
+    const { error } = await supabase.from("match_participants").insert(participantInserts);
+    if (error) throw error;
   }
+}
 
+/**
+ * Which rounds a redraw would replace, without touching anything: every round
+ * with no score in it, wherever it sits. Rounds can be played out of order
+ * (round 5 while someone for round 3 is still parking), so "everything after
+ * the last scored round" would throw away nothing in the gaps and keep stale
+ * rounds behind it.
+ *
+ * Exported so the button can name the exact rounds in its confirmation. A host
+ * standing on a court should never tap something called "redraw" and find out
+ * afterwards what it redrew.
+ */
+export async function previewRedrawRemaining(sessionId: string): Promise<RedrawPreview | null> {
+  const night = await loadNight(sessionId);
+  const sequences = night.rounds.filter((r) => !r.played).map((r) => r.sequence);
+  if (sequences.length === 0) return null;
+  return { sequences, fromSequence: sequences[0], toSequence: sequences[sequences.length - 1], rounds: sequences.length };
+}
+
+/**
+ * Redraw every unplayed round of a pre-drawn session from the current roster.
+ *
+ * WHY THIS EXISTS. Americano and its relatives lay the whole schedule out at
+ * session start, with everyone written into it. Someone who goes home (or
+ * hasn't arrived) stays on every future court until the host redraws.
+ *
+ * WHAT IT KEEPS. Every round with a score in it, wherever it is — those were
+ * played and their results are real. Only rounds with no score are replaced,
+ * at the same numbers, so "round 9" is still round 9.
+ *
+ * WHAT IT CARRIES IN (Nov 2026). The new draw starts from what the played
+ * rounds already did: games played, who partnered and faced whom, who sat out
+ * last. Before, it started from zero, so after a redraw someone could get the
+ * partner they'd already had twice, and a latecomer wasn't caught up.
+ *
+ * WHY IT'S A BUTTON AND NOT AUTOMATIC. Marking someone as left shouldn't
+ * silently rewrite a schedule the host may have already read out.
+ */
+export async function redrawRemainingRounds(sessionId: string): Promise<RedrawRemainingResult> {
+  const night = await loadNight(sessionId);
+  assertCanDraw(night, "redraw");
+  const targets = night.rounds.filter((r) => !r.played);
+  if (targets.length === 0) throw new Error("Every round has been played or scored — there's nothing left to redraw.");
+  const prior = priorFromRounds(night.rounds.filter((r) => r.played).map((r) => r.result));
+
+  // Derived, not random: a host who taps Redraw twice because they weren't
+  // sure it worked gets the same schedule, not a third arrangement.
+  const seed = night.session.scheduling_seed + targets[0].sequence * 7919 + night.activePlayers.length;
+  const drawn = drawFor(night, targets.length, seed, prior);
+  if (drawn.length === 0) throw new Error("Couldn't build a schedule from the players still in. Nothing has been changed.");
+
+  const sequences = targets.slice(0, drawn.length).map((r) => r.sequence);
+  // Keep whatever status each replaced round carried (round 1 of a pre-drawn
+  // session is in_progress; forcing "planned" would leave none marked live).
+  const statusBySeq = new Map(targets.map((r) => [r.sequence, r.status]));
+  await writeRounds(sessionId, night, drawn, sequences, statusBySeq, "Unplayed rounds redrawn from the current roster.", seed, targets);
   return {
-    fromSequence: preview.fromSequence,
-    toSequence: preview.fromSequence + drawn.length - 1,
-    rounds: drawn.length,
-    players: players.length,
+    sequences,
+    fromSequence: sequences[0],
+    toSequence: sequences[sequences.length - 1],
+    rounds: sequences.length,
+    players: night.activePlayers.length,
   };
+}
+
+export interface AddRoundsResult {
+  sequences: number[];
+  players: number;
+}
+
+/**
+ * Adds `count` rounds to the end of a pre-drawn session in one go, drawn to
+ * continue the night's balance: everything already played or planned counts,
+ * so nobody gets a partner again while there's someone they haven't had.
+ *
+ * Before Nov 2026 the only way past the last round was the next-round button,
+ * one round at a time, each drawn on its own — the same corner-painting the
+ * whole-night balancer exists to prevent.
+ */
+export async function addRounds(sessionId: string, count: number): Promise<AddRoundsResult> {
+  const n = Math.floor(count);
+  if (!(n >= 1 && n <= 30)) throw new Error("Add between 1 and 30 rounds.");
+  const night = await loadNight(sessionId);
+  assertCanDraw(night, "add");
+  const prior = priorFromRounds(night.rounds.map((r) => r.result));
+  const last = night.rounds.reduce((m, r) => Math.max(m, r.sequence), 0);
+  const seed = night.session.scheduling_seed + (last + 1) * 7919 + night.activePlayers.length * 31 + n;
+  const drawn = drawFor(night, n, seed, prior);
+  if (drawn.length === 0) throw new Error("Couldn't build rounds from the players still in. Nothing has been changed.");
+  const sequences = drawn.map((_, i) => last + 1 + i);
+  await writeRounds(
+    sessionId,
+    night,
+    drawn,
+    sequences,
+    new Map(),
+    `${drawn.length === 1 ? "Round" : "Rounds"} added by the host after round ${last}.`,
+    seed,
+    [],
+  );
+  return { sequences, players: night.activePlayers.length };
+}
+
+/**
+ * The fewest added rounds (up to `max`) after which everyone in each group has
+ * played the same number of games, or null if none does. Each group is the
+ * games everyone in it has played or is down to play, and how many of them
+ * are on court each round (Team Sparring: each team on its own; Fixed
+ * Partner: count pairs, not players).
+ */
+export function roundsForEvenGames(groups: { counts: number[]; perRound: number }[], max = 12): number | null {
+  for (let r = 1; r <= max; r++) {
+    const ok = groups.every(({ counts, perRound }) => {
+      if (counts.length === 0) return true;
+      const total = counts.reduce((a, b) => a + b, 0) + r * perRound;
+      if (total % counts.length !== 0) return false;
+      const target = total / counts.length;
+      return counts.every((c) => c <= target && target - c <= r);
+    });
+    if (ok) return r;
+  }
+  return null;
 }

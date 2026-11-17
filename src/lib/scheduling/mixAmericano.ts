@@ -25,6 +25,8 @@ import {
   recordRoundInHistory,
 } from "./types";
 import { selectPlayersForRound, hasUnavoidableConsecutiveRest, balancePoolByKey } from "./fairness";
+import { BalanceRules, SchedulePrior, balanceBestOf, emptyPrior, roundFromTeams, seededShuffle } from "./balance";
+import { advanceStats, startFrom } from "./americano";
 
 export type Gender = "M" | "F";
 
@@ -184,21 +186,36 @@ export interface GenerateMixAmericanoScheduleInput {
   courtsAvailable: number;
   roundCount: number;
   schedulingSeed: number;
+  /** What has already been played before these rounds (redraw / added rounds). */
+  prior?: SchedulePrior;
+}
+
+/** Mix (and Fixed Position, which uses the court side as its "gender"): a team
+ *  is one of each. Swaps may cross genders; the team penalty keeps teams mixed
+ *  wherever the numbers allow. */
+export function mixRules(genderById: Map<PlayerId, Gender>): BalanceRules {
+  const g = (id: PlayerId) => genderById.get(id);
+  return {
+    canSwap: () => true,
+    partnerEligible: (a, b) => g(a) !== undefined && g(b) !== undefined && g(a) !== g(b),
+    opponentEligible: () => true,
+    teamPenalty: (a, b) => (g(a) !== undefined && g(a) === g(b) ? 1 : 0),
+  };
 }
 
 /**
  * Generates the FULL Mix Americano schedule up front, same reasoning as
  * plain Americano: nothing about pairing (including the gender-mix
  * preference) depends on scores, so the whole thing can be committed the
- * moment the session starts.
+ * moment the session starts. Drawn round by round, then balanced as a whole
+ * night (balance.ts) — before Nov 2026 it had no whole-night pass at all, and
+ * a player could partner one person three times while never partnering
+ * another they could have.
  */
 export function generateMixAmericanoSchedule(input: GenerateMixAmericanoScheduleInput): RoundResult[] {
   const { activePlayerIds, genderById, courtsAvailable, roundCount, schedulingSeed } = input;
-
-  const statsById = new Map<PlayerId, PlayerFairnessState>(
-    activePlayerIds.map((id) => [id, { playerId: id, matchesPlayed: 0, restedLastRound: false }]),
-  );
-  const history: MatchHistory = emptyHistory();
+  const prior = input.prior ?? emptyPrior();
+  const { statsById, history } = startFrom(prior, activePlayerIds);
   const rounds: RoundResult[] = [];
 
   for (let sequence = 1; sequence <= roundCount; sequence++) {
@@ -208,18 +225,25 @@ export function generateMixAmericanoSchedule(input: GenerateMixAmericanoSchedule
 
     rounds.push(result);
     recordRoundInHistory(history, result);
-
-    const playingIds = new Set(result.matches.flatMap((m) => [...m.teamA, ...m.teamB]));
-    for (const id of activePlayerIds) {
-      const s = statsById.get(id)!;
-      statsById.set(
-        id,
-        playingIds.has(id)
-          ? { playerId: id, matchesPlayed: s.matchesPlayed + 1, restedLastRound: false }
-          : { playerId: id, matchesPlayed: s.matchesPlayed, restedLastRound: true },
-      );
-    }
+    advanceStats(statsById, activePlayerIds, result);
   }
 
-  return rounds;
+  if (rounds.length === 0) return rounds;
+  const starts = [rounds];
+  // Everyone on court every round, as many men as women: a Latin-square
+  // rotation (man i with woman i + r) partners every man with every woman
+  // once per cycle, and every team stays mixed.
+  const men = activePlayerIds.filter((id) => genderById.get(id) === "M");
+  const women = activePlayerIds.filter((id) => genderById.get(id) === "F");
+  const k = courtsAvailable * 2;
+  if (men.length === k && women.length === k) {
+    const m = seededShuffle(men, schedulingSeed + 4242);
+    const w = seededShuffle(women, schedulingSeed + 4343);
+    starts.push(
+      rounds.map((_, r) =>
+        roundFromTeams(seededShuffle(m.map((id, i) => [id, w[(i + r) % k]] as [PlayerId, PlayerId]), schedulingSeed + 50 + r)),
+      ),
+    );
+  }
+  return balanceBestOf(starts, activePlayerIds, mixRules(genderById), prior, schedulingSeed);
 }

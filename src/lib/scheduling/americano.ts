@@ -15,6 +15,7 @@ import {
   recordRoundInHistory,
 } from "./types";
 import { selectPlayersForRound, hasUnavoidableConsecutiveRest } from "./fairness";
+import { BalanceRules, SchedulePrior, balanceBestOf, circlePairs, emptyPrior, roundFromTeams, seededShuffle } from "./balance";
 
 function scorePairing(
   matches: Match[],
@@ -79,132 +80,6 @@ function buildMatchesFromOrder(order: PlayerId[]): Match[] {
     });
   }
   return matches;
-}
-
-/**
- * Global balance pass over a whole generated schedule (simulated annealing).
- *
- * Per-round greedy can't fix cases like "hamud & gilang never share a round" —
- * because WHO RESTS each round determines who CAN even partner. This search uses
- * two moves that together rebalance both:
- *   1. swap two on-court players within a round (changes partners/opponents),
- *   2. swap an on-court player with a bench player (changes who plays that round).
- * It minimises Σ partnerCount² (primary — spreads partnerships to all-distinct),
- * Σ opponentCount² (secondary), and Σ playCount² (keeps rests fair). Deterministic
- * for a given rng, so the same session always produces the same schedule.
- */
-function optimizeAmericano(rounds: RoundResult[], players: PlayerId[], rng: Rng, iterations: number): void {
-  const objective = (): number => {
-    const pc = new Map<string, number>();
-    const oc = new Map<string, number>();
-    const play = new Map<string, number>(players.map((p) => [p, 0]));
-    let runningUnfairness = 0;
-    for (const r of rounds) {
-      for (const m of r.matches) {
-        const ak = pairKey(m.teamA[0], m.teamA[1]);
-        const bk = pairKey(m.teamB[0], m.teamB[1]);
-        pc.set(ak, (pc.get(ak) ?? 0) + 1);
-        pc.set(bk, (pc.get(bk) ?? 0) + 1);
-        for (const a of m.teamA) {
-          play.set(a, (play.get(a) ?? 0) + 1);
-          for (const b of m.teamB) {
-            const ok = pairKey(a, b);
-            oc.set(ok, (oc.get(ok) ?? 0) + 1);
-          }
-        }
-        for (const b of m.teamB) play.set(b, (play.get(b) ?? 0) + 1);
-      }
-      // ── Fairness DURING the night, not just at the end of it ───────────
-      //
-      // Everything above this line is a total for the whole schedule, and a
-      // total has no notion of WHEN. That was the bug: moving one player's
-      // games to the back of the night left Σ playCount² completely unchanged,
-      // so the search was free to do it — and did, because partner variety is
-      // weighted 1000 and one fresh partnership looked like a bargain.
-      //
-      // A real session on 8 Sep 2026, six players on one court: player C sat
-      // out rounds 1, 2 and 3, then played five in a row. Totals were fine.
-      // The evening was not.
-      //
-      // So the running counts are measured after EVERY round. The invariant is
-      // the one selectPlayersForRound already guarantees when it builds the
-      // schedule greedily — most-played and least-played differ by at most one
-      // — which in plain terms is "everybody rests once before anybody rests
-      // twice". This term stops the optimizer trading that away again.
-      let lo = Infinity;
-      let hi = -Infinity;
-      for (const v of play.values()) {
-        if (v < lo) lo = v;
-        if (v > hi) hi = v;
-      }
-      const over = hi - lo - 1;
-      if (over > 0) runningUnfairness += over * over;
-    }
-    let f = 0;
-    for (const v of pc.values()) f += v * v * 1000;
-    for (const v of oc.values()) f += v * v;
-    for (const v of play.values()) f += v * v * 60;
-    // Weighted to dominate: a single unfair round costs 200,000, where a whole
-    // schedule's partner repeats run to tens of thousands. This is deliberately
-    // not a tunable trade — a player benched three rounds running does not care
-    // that it bought somebody a novel partnership. Measured before and after:
-    // partner variety is UNCHANGED (still every possible pair, same max
-    // repeat), because the optimizer has enough freedom in within-round swaps
-    // to reach the same variety without touching who is on the bench.
-    f += runningUnfairness * 200000;
-    return f;
-  };
-
-  let cur = objective();
-  const T0 = Math.max(1, cur * 0.03);
-  for (let it = 0; it < iterations; it++) {
-    const r = rounds[Math.floor(rng() * rounds.length)];
-    if (!r || r.matches.length === 0) continue;
-    const T = T0 * (1 - it / iterations);
-    let revert: (() => void) | null = null;
-
-    if (r.restingIds.length > 0 && rng() < 0.5) {
-      // Bench swap: an on-court player trades places with a resting one.
-      const m = r.matches[Math.floor(rng() * r.matches.length)];
-      const side = rng() < 0.5 ? m.teamA : m.teamB;
-      const pos = Math.floor(rng() * 2);
-      const bi = Math.floor(rng() * r.restingIds.length);
-      const onCourt = side[pos];
-      const benched = r.restingIds[bi];
-      side[pos] = benched;
-      r.restingIds[bi] = onCourt;
-      revert = () => {
-        side[pos] = onCourt;
-        r.restingIds[bi] = benched;
-      };
-    } else {
-      // Team swap: two on-court positions in the round trade players.
-      const positions: { arr: PlayerId[]; idx: number }[] = [];
-      for (const m of r.matches) {
-        positions.push({ arr: m.teamA, idx: 0 }, { arr: m.teamA, idx: 1 }, { arr: m.teamB, idx: 0 }, { arr: m.teamB, idx: 1 });
-      }
-      if (positions.length < 2) continue;
-      const pi = positions[Math.floor(rng() * positions.length)];
-      const pj = positions[Math.floor(rng() * positions.length)];
-      const a = pi.arr[pi.idx];
-      const b = pj.arr[pj.idx];
-      if (a === b) continue;
-      pi.arr[pi.idx] = b;
-      pj.arr[pj.idx] = a;
-      revert = () => {
-        pi.arr[pi.idx] = a;
-        pj.arr[pj.idx] = b;
-      };
-    }
-
-    const next = objective();
-    const delta = next - cur;
-    if (delta <= 0 || (T > 0 && rng() < Math.exp(-delta / T))) {
-      cur = next;
-    } else if (revert) {
-      revert();
-    }
-  }
 }
 
 export interface GenerateAmericanoRoundInput {
@@ -304,6 +179,43 @@ export interface GenerateAmericanoScheduleInput {
    * schedulingSeed + its own 1-based sequence number, matching how a single
    * round is seeded when generated on-demand (see roundActions.ts). */
   schedulingSeed: number;
+  /** What has already been played (or planned) before these rounds: redraws
+   *  and added rounds keep the whole night balanced, not just the new part. */
+  prior?: SchedulePrior;
+}
+
+export const AMERICANO_RULES: BalanceRules = {
+  canSwap: () => true,
+  partnerEligible: () => true,
+  opponentEligible: () => true,
+};
+
+/** Starting fairness state and history from what has already happened. */
+export function startFrom(prior: SchedulePrior, ids: PlayerId[]) {
+  const statsById = new Map<PlayerId, PlayerFairnessState>(
+    ids.map((id) => [id, { playerId: id, matchesPlayed: prior.playCounts.get(id) ?? 0, restedLastRound: prior.restedLast.has(id) }]),
+  );
+  const history: MatchHistory = {
+    partnerPairsSeen: new Set(prior.history.partnerPairsSeen),
+    opponentPairsSeen: new Set(prior.history.opponentPairsSeen),
+    partnerCounts: new Map(prior.history.partnerCounts),
+    opponentCounts: new Map(prior.history.opponentCounts),
+  };
+  return { statsById, history };
+}
+
+/** Folds one drawn round into the running fairness state. */
+export function advanceStats(statsById: Map<PlayerId, PlayerFairnessState>, ids: PlayerId[], result: RoundResult): void {
+  const playingIds = new Set(result.matches.flatMap((m) => [...m.teamA, ...m.teamB]));
+  for (const id of ids) {
+    const s = statsById.get(id)!;
+    statsById.set(
+      id,
+      playingIds.has(id)
+        ? { playerId: id, matchesPlayed: s.matchesPlayed + 1, restedLastRound: false }
+        : { playerId: id, matchesPlayed: s.matchesPlayed, restedLastRound: true },
+    );
+  }
 }
 
 /**
@@ -312,14 +224,13 @@ export interface GenerateAmericanoScheduleInput {
  * rules never depend on scores (unlike Mexicano's rank-based pairing), so
  * the whole schedule can be committed the moment the session starts — no
  * "Next Round" button is needed to progress through it later.
+ *
+ * Drawn round by round, then balanced as a whole night (balance.ts).
  */
 export function generateAmericanoSchedule(input: GenerateAmericanoScheduleInput): RoundResult[] {
   const { activePlayerIds, courtsAvailable, roundCount, schedulingSeed } = input;
-
-  const statsById = new Map<PlayerId, PlayerFairnessState>(
-    activePlayerIds.map((id) => [id, { playerId: id, matchesPlayed: 0, restedLastRound: false }]),
-  );
-  const history: MatchHistory = emptyHistory();
+  const prior = input.prior ?? emptyPrior();
+  const { statsById, history } = startFrom(prior, activePlayerIds);
   const rounds: RoundResult[] = [];
 
   for (let sequence = 1; sequence <= roundCount; sequence++) {
@@ -329,31 +240,17 @@ export function generateAmericanoSchedule(input: GenerateAmericanoScheduleInput)
 
     rounds.push(result);
     recordRoundInHistory(history, result);
-
-    const playingIds = new Set(result.matches.flatMap((m) => [...m.teamA, ...m.teamB]));
-    for (const id of activePlayerIds) {
-      const s = statsById.get(id)!;
-      statsById.set(
-        id,
-        playingIds.has(id)
-          ? { playerId: id, matchesPlayed: s.matchesPlayed + 1, restedLastRound: false }
-          : { playerId: id, matchesPlayed: s.matchesPlayed, restedLastRound: true },
-      );
-    }
+    advanceStats(statsById, activePlayerIds, result);
   }
 
-  // Global balance pass: jointly rebalances rests + partners so nobody ends up
-  // partnering one person repeatedly while never partnering another (the
-  // per-round greedy above can't see across rounds). Deterministic seed derived
-  // from the session seed so the schedule is stable/reproducible.
-  if (rounds.length > 0) {
-    const iterations = Math.min(80000, Math.max(8000, rounds.length * activePlayerIds.length * 300));
-    optimizeAmericano(rounds, activePlayerIds, mulberry32(schedulingSeed + 99991), iterations);
-
-    // Re-assign courts across each round after the swaps (keeps a stable,
-    // low-churn court layout; the optimizer only cares about who-plays-whom).
-    for (const r of rounds) r.matches.forEach((m, i) => (m.courtIndex = i));
+  if (rounds.length === 0) return rounds;
+  const starts = [rounds];
+  // Everyone on court every round: a circle-method rotation gives every
+  // partnership exactly once per n - 1 rounds, and the optimiser then only
+  // has to even out opponents.
+  if (activePlayerIds.length === courtsAvailable * 4) {
+    const order = seededShuffle(activePlayerIds, schedulingSeed + 4242);
+    starts.push(rounds.map((_, r) => roundFromTeams(seededShuffle(circlePairs(order, r), schedulingSeed + 50 + r))));
   }
-
-  return rounds;
+  return balanceBestOf(starts, activePlayerIds, AMERICANO_RULES, prior, schedulingSeed);
 }

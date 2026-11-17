@@ -5,7 +5,18 @@ import { withFallback } from "../../lib/errors";
 import { useEffect, useRef, useState } from "react";
 import { Link, useParams, useNavigate } from "react-router-dom";
 import { getHostLiveSnapshot, HostLiveSnapshot } from "../../lib/supabase/sessionQueries";
-import { generateNextRound, regenerateCurrentRound, deleteCurrentRound, swapRoundPlayers, previewRedrawRemaining, redrawRemainingRounds } from "../../lib/supabase/roundActions";
+import {
+  generateNextRound,
+  regenerateCurrentRound,
+  deleteCurrentRound,
+  swapRoundPlayers,
+  previewRedrawRemaining,
+  redrawRemainingRounds,
+  addRounds,
+  describeSequences,
+  roundsForEvenGames,
+  RedrawPreview,
+} from "../../lib/supabase/roundActions";
 import { endSession } from "../../lib/supabase/sessionActions";
 import { getSessionStandings, SessionStandings } from "../../lib/supabase/standingsQueries";
 import { getRoundHistory, RoundHistoryEntry } from "../../lib/supabase/roundHistoryQueries";
@@ -211,7 +222,15 @@ export default function HostLivePage() {
   const [manageError, setManageError] = useState<unknown>(null);
   // Which unplayed rounds a redraw would replace — loaded when the Manage
   // panel opens so the button can name them before it's tapped.
-  const [redrawPreview, setRedrawPreview] = useState<{ fromSequence: number; toSequence: number; rounds: number } | null>(null);
+  const [redrawPreview, setRedrawPreview] = useState<RedrawPreview | null>(null);
+  // "Add rounds" sheet (pre-drawn formats): several rounds at once, drawn to
+  // carry on the night's balance, instead of one round per tap.
+  const [showAddRounds, setShowAddRounds] = useState(false);
+  const [addCount, setAddCount] = useState(4);
+  const [addingRounds, setAddingRounds] = useState(false);
+  const [addRoundsError, setAddRoundsError] = useState<unknown>(null);
+  // After rounds are added or redrawn, show this round once the history reloads.
+  const [jumpToSequence, setJumpToSequence] = useState<number | null>(null);
   const [redrawing, setRedrawing] = useState(false);
   const [redrawNote, setRedrawNote] = useState<string | null>(null);
   const [manageSaving, setManageSaving] = useState(false);
@@ -407,17 +426,43 @@ export default function HostLivePage() {
       setHasAutoPositioned(true);
       return;
     }
-    let target = 0;
-    for (let i = roundHistory.length - 1; i >= 0; i--) {
+    // Prefer the first open round everyone in it is here for: rounds are often
+    // played out of order while someone is still on their way.
+    const away = new Set(snapshot.roster.filter((p) => p.status !== "active").map((p) => p.id));
+    const open = (i: number) => {
       const r = roundHistory[i];
-      if (r.matches.length === 0 || r.matches.some((m) => m.status !== "final")) {
+      return r.matches.length === 0 || r.matches.some((m) => m.status !== "final");
+    };
+    const allHere = (i: number) =>
+      roundHistory[i].matches.every((m) => m.status === "final" || [...m.teamAIds, ...m.teamBIds].every((id) => !away.has(id)));
+    let target = -1;
+    for (let i = roundHistory.length - 1; i >= 0; i--) {
+      if (open(i) && allHere(i)) {
         target = i;
         break;
+      }
+    }
+    if (target < 0) {
+      target = 0;
+      for (let i = roundHistory.length - 1; i >= 0; i--) {
+        if (open(i)) {
+          target = i;
+          break;
+        }
       }
     }
     setViewedIndex(target);
     setHasAutoPositioned(true);
   }, [snapshot, roundHistory, hasAutoPositioned]);
+
+  useEffect(() => {
+    if (jumpToSequence === null || !roundHistory) return;
+    const i = roundHistory.findIndex((r) => r.sequence === jumpToSequence);
+    if (i >= 0) {
+      setViewedIndex(i);
+      setJumpToSequence(null);
+    }
+  }, [jumpToSequence, roundHistory]);
 
   // While the end check is open, keep it current: someone may be claiming
   // their spot right now from the code on screen.
@@ -693,6 +738,68 @@ export default function HostLivePage() {
   const roundCount = roundHistory?.length ?? 0;
   const roundActionsAvailable = !fullyPreGenerated && isViewingCurrent && canEdit && !sessionEnded && roundCount >= 1;
   const canDeleteRound = roundCount > 1;
+
+  // ── Playing rounds out of order (pre-drawn formats) ──
+  // When someone isn't here yet, hosts play whichever round has everyone it
+  // needs and come back to the others. "Away" is anyone out of the draw: not
+  // here yet, or gone home.
+  const awayIds = new Set(snapshot.roster.filter((p) => p.status !== "active").map((p) => p.id));
+  const nameById = new Map(snapshot.roster.map((p) => [p.id, p.name]));
+  const isOpenRound = (r: RoundHistoryEntry) => r.matches.length === 0 || r.matches.some((m) => m.status !== "final");
+  const missingFrom = (r: RoundHistoryEntry) => [
+    ...new Set(
+      r.matches
+        .filter((m) => m.status !== "final")
+        .flatMap((m) => [...m.teamAIds, ...m.teamBIds])
+        .filter((id) => awayIds.has(id)),
+    ),
+  ];
+  const viewedMissing = fullyPreGenerated && canEdit && viewedRound && isOpenRound(viewedRound) ? missingFrom(viewedRound) : [];
+  const playableIndex = (() => {
+    if (!roundHistory || viewedMissing.length === 0 || !viewedRound) return -1;
+    const ready = roundHistory
+      .map((r, i) => ({ r, i }))
+      .filter(({ r, i }) => i !== safeIndex && r.matches.length > 0 && isOpenRound(r) && missingFrom(r).length === 0)
+      .sort((a, b) => a.r.sequence - b.r.sequence);
+    const after = ready.find(({ r }) => r.sequence > viewedRound.sequence);
+    return (after ?? ready[0])?.i ?? -1;
+  })();
+  const playableRound = playableIndex >= 0 ? roundHistory![playableIndex] : null;
+  const listNames = (ids: string[]) => {
+    const names = ids.map((id) => nameById.get(id) ?? "someone");
+    return names.length <= 1 ? names.join("") : `${names.slice(0, -1).join(", ")} and ${names[names.length - 1]}`;
+  };
+
+  // ── Adding rounds (pre-drawn formats) ──
+  // The fewest rounds that leave everyone still in on the same number of
+  // games, counting every round already drawn (played or not).
+  const evenGamesAt = (() => {
+    if (!fullyPreGenerated || !roundHistory) return null;
+    const courtsOn = snapshot.courts.filter((c) => c.available).length;
+    const active = snapshot.roster.filter((p) => p.status === "active");
+    const games = new Map<string, number>();
+    for (const r of roundHistory) for (const m of r.matches) for (const id of [...m.teamAIds, ...m.teamBIds]) games.set(id, (games.get(id) ?? 0) + 1);
+    const countsOf = (list: typeof active) => list.map((p) => games.get(p.id) ?? 0);
+    if (isTeamSparring) {
+      const a = active.filter((p) => p.teamSide === "A");
+      const b = active.filter((p) => p.teamSide === "B");
+      const used = Math.min(courtsOn, Math.floor(a.length / 2), Math.floor(b.length / 2));
+      if (used === 0) return null;
+      return roundsForEvenGames([
+        { counts: countsOf(a), perRound: used * 2 },
+        { counts: countsOf(b), perRound: used * 2 },
+      ]);
+    }
+    const used = Math.min(courtsOn, Math.floor(active.length / 4));
+    if (used === 0) return null;
+    return roundsForEvenGames([{ counts: countsOf(active), perRound: used * 4 }]);
+  })();
+
+  function openAddRounds() {
+    setAddRoundsError(null);
+    setAddCount(evenGamesAt !== null && evenGamesAt <= 8 ? evenGamesAt : 4);
+    setShowAddRounds(true);
+  }
 
   // The rank BADGE always reflects the session's official ranking_basis
   // (points_first/wins_first — set at session creation and used for the
@@ -1081,28 +1188,62 @@ export default function HostLivePage() {
     }
   }
 
+  // Online sessions read the server's rows to decide what has been played, so
+  // scores still queued on this phone must land first — otherwise a round that
+  // was just played looks unplayed and gets redrawn.
+  async function scoresSynced(onRefused: (msg: string) => void): Promise<boolean> {
+    if (!sessionId || hasLocalSession(sessionId)) return true;
+    const remaining = await flushAndCount(sessionId);
+    if (remaining === 0) return true;
+    onRefused(`Waiting to sync ${remaining} score${remaining > 1 ? "s" : ""} — reconnect to the internet and try again.`);
+    void notify("warning");
+    return false;
+  }
+
   async function handleRedraw() {
     if (!sessionId || !redrawPreview) return;
-    const { fromSequence: from, toSequence: to } = redrawPreview;
-    const which = from === to ? `round ${from}` : `rounds ${from}–${to}`;
-    if (!confirm(`Redraw ${which} from the players still in? Rounds already played are untouched.`)) return;
+    const n = redrawPreview.sequences.length;
+    const which = `${n === 1 ? "round" : "rounds"} ${describeSequences(redrawPreview.sequences)}`;
+    if (!confirm(`Redraw ${which} from the players still in? Rounds with a score stay exactly as they are.`)) return;
     setRedrawing(true);
     setManageError(null);
     setRedrawNote(null);
     try {
+      if (!(await scoresSynced((m) => setManageError(new Error(m))))) return;
       const result = await redrawRemainingRounds(sessionId);
       setRedrawNote(
-        `${result.rounds === 1 ? "Round" : "Rounds"} ${
-          result.fromSequence === result.toSequence ? result.fromSequence : `${result.fromSequence}–${result.toSequence}`
-        } redrawn for ${result.players} players.`,
+        `${result.rounds === 1 ? "Round" : "Rounds"} ${describeSequences(result.sequences)} redrawn for ${result.players} players.`,
       );
       load();
       loadRoundHistory();
+      notifyLiveUpdate(sessionId);
       setRedrawPreview(await previewRedrawRemaining(sessionId));
     } catch (err) {
       setManageError(withFallback(err, "Could not redraw the remaining rounds."));
     } finally {
       setRedrawing(false);
+    }
+  }
+
+  async function handleAddRounds() {
+    if (!sessionId) return;
+    setAddingRounds(true);
+    setAddRoundsError(null);
+    try {
+      if (!(await scoresSynced((m) => setAddRoundsError(new Error(m))))) return;
+      const result = await addRounds(sessionId, addCount);
+      setShowAddRounds(false);
+      setJumpToSequence(result.sequences[0]);
+      load();
+      loadRoundHistory();
+      if (tab === "standings" || isTeamSparring) loadStandings();
+      notifyLiveUpdate(sessionId);
+      if (showManage) setRedrawPreview(await previewRedrawRemaining(sessionId));
+      void tap("medium");
+    } catch (err) {
+      setAddRoundsError(withFallback(err, "Could not add rounds."));
+    } finally {
+      setAddingRounds(false);
     }
   }
 
@@ -1354,7 +1495,9 @@ export default function HostLivePage() {
                   <b className="font-serif text-[16px] font-semibold text-graphite">Round <span className="font-mono tnum">{viewedRound.sequence}</span></b>
                   <span className={`block text-[10px] mt-0.5 ${advanceAvailable ? "text-win font-semibold" : "text-warm-gray"}`}>
                     {advanceAvailable
-                      ? "All scored — tap › for the next round"
+                      ? fullyPreGenerated
+                        ? "All scored — tap › to add rounds"
+                        : "All scored — tap › for the next round"
                       : fullyPreGenerated
                         ? `Round ${viewedRound.sequence} of ${roundHistory?.length ?? viewedRound.sequence}${
                             sessionEnded ? " · session ended" : ""
@@ -1370,9 +1513,9 @@ export default function HostLivePage() {
                     When the round is fully scored it lights up (graphite fill, gold
                     arrow) and advances; otherwise it browses newer history. */}
                 <button
-                  onClick={advanceAvailable ? handleNextRound : goNewer}
-                  disabled={advanceAvailable ? generatingRound : !canGoNewer}
-                  aria-label={advanceAvailable ? "Start next round" : "Next round"}
+                  onClick={advanceAvailable ? (fullyPreGenerated ? openAddRounds : handleNextRound) : goNewer}
+                  disabled={advanceAvailable ? generatingRound || addingRounds : !canGoNewer}
+                  aria-label={advanceAvailable ? (fullyPreGenerated ? "Add rounds" : "Start next round") : "Next round"}
                   className={`w-9 h-9 rounded-full flex items-center justify-center text-[17px] shrink-0 transition-colors ${
                     advanceAvailable
                       ? "bg-graphite text-gold disabled:opacity-40"
@@ -1382,6 +1525,27 @@ export default function HostLivePage() {
                   ›
                 </button>
               </div>
+
+              {viewedMissing.length > 0 && (
+                <div className="mb-3.5 rounded-2xl border border-line bg-surface-2 px-3.5 py-2.5 flex items-center gap-3">
+                  <p className="flex-1 min-w-0 text-[12px] text-ink-2 leading-snug">
+                    <b className="text-ink">Waiting for {listNames(viewedMissing)}</b>
+                    <span className="block text-[11px] text-warm-gray mt-0.5">
+                      {playableRound
+                        ? `Round ${playableRound.sequence} has everyone here. Play it now and come back to this one.`
+                        : "No other round has everyone here yet."}
+                    </span>
+                  </p>
+                  {playableRound && (
+                    <button
+                      onClick={() => setViewedIndex(playableIndex)}
+                      className="shrink-0 rounded-full bg-graphite text-ivory text-[12px] font-semibold px-3 py-2 active:scale-95 transition-transform"
+                    >
+                      Round {playableRound.sequence} ›
+                    </button>
+                  )}
+                </div>
+              )}
 
               {/* Round options — redraw or delete the live round */}
               {roundActionsAvailable && (
@@ -1896,6 +2060,90 @@ export default function HostLivePage() {
         </div>
       )}
 
+      {showAddRounds && (
+        <div className="fixed inset-0 bg-black/40 flex items-end justify-center z-40" onClick={() => !addingRounds && setShowAddRounds(false)}>
+          <div className="w-full max-w-sm bg-ivory rounded-t-2xl p-4 pb-[calc(1rem+env(safe-area-inset-bottom))]" onClick={(e) => e.stopPropagation()}>
+            <div className="flex justify-between items-center mb-1">
+              <b className="text-sm text-ink">Add rounds</b>
+              <button
+                onClick={() => setShowAddRounds(false)}
+                disabled={addingRounds}
+                aria-label="Close"
+                className="w-7 h-7 rounded-full bg-surface border border-line text-warm-gray text-xs"
+              >
+                ✕
+              </button>
+            </div>
+            <p className="text-[12px] text-warm-gray leading-snug">
+              Drawn to carry on from tonight so far: nobody gets a partner again while there's someone they haven't
+              partnered, and games stay level.
+            </p>
+
+            <div className="flex items-center justify-center gap-5 my-4">
+              <button
+                onClick={() => setAddCount((c) => Math.max(1, c - 1))}
+                disabled={addingRounds || addCount <= 1}
+                aria-label="One fewer round"
+                className="w-11 h-11 rounded-full border border-line bg-surface text-ink text-[20px] font-semibold disabled:opacity-30"
+              >
+                −
+              </button>
+              <div className="text-center min-w-[84px]">
+                <p className="font-mono tnum text-[34px] font-semibold text-graphite leading-none">{addCount}</p>
+                <p className="text-[11px] text-warm-gray mt-1">{addCount === 1 ? "round" : "rounds"}</p>
+              </div>
+              <button
+                onClick={() => setAddCount((c) => Math.min(20, c + 1))}
+                disabled={addingRounds || addCount >= 20}
+                aria-label="One more round"
+                className="w-11 h-11 rounded-full border border-line bg-surface text-ink text-[20px] font-semibold disabled:opacity-30"
+              >
+                +
+              </button>
+            </div>
+
+            <div className="flex flex-wrap justify-center gap-1.5 mb-2">
+              {[2, 4, 6, 8].map((n) => (
+                <button
+                  key={n}
+                  onClick={() => setAddCount(n)}
+                  disabled={addingRounds}
+                  className={`rounded-full px-3.5 py-1.5 text-[12px] font-semibold border transition-colors ${
+                    addCount === n ? "bg-graphite text-ivory border-graphite" : "bg-surface text-ink-2 border-line"
+                  }`}
+                >
+                  {n}
+                </button>
+              ))}
+            </div>
+            {evenGamesAt !== null && (
+              <p className="text-[11.5px] text-center text-ink-2 mb-1">
+                {addCount === evenGamesAt ? (
+                  <span className="text-win font-semibold">Everyone ends on the same number of games.</span>
+                ) : (
+                  <>
+                    <button onClick={() => setAddCount(evenGamesAt)} className="font-semibold text-graphite underline underline-offset-2">
+                      {evenGamesAt} {evenGamesAt === 1 ? "round" : "rounds"}
+                    </button>{" "}
+                    leaves everyone on the same number of games.
+                  </>
+                )}
+              </p>
+            )}
+
+            <ErrorNote error={addRoundsError} where="HostLivePage.addRounds" />
+
+            <button
+              onClick={handleAddRounds}
+              disabled={addingRounds}
+              className="w-full mt-3 rounded-full bg-graphite text-ivory font-semibold py-3 active:scale-[0.99] transition-transform disabled:opacity-50"
+            >
+              {addingRounds ? "Drawing…" : `Add ${addCount} ${addCount === 1 ? "round" : "rounds"}`}
+            </button>
+          </div>
+        </div>
+      )}
+
       {showCoHosts && (
         <CoHostSheet
           sessionId={snapshot.session.id}
@@ -2130,12 +2378,12 @@ export default function HostLivePage() {
                 <p className="text-[12px] font-semibold text-ink">Rounds not yet played</p>
                 <p className="text-[11px] text-warm-gray mt-1 leading-snug">
                   {redrawPreview
-                    ? `The whole schedule was drawn at the start, so ${
-                        redrawPreview.fromSequence === redrawPreview.toSequence
-                          ? `round ${redrawPreview.fromSequence} still lists`
-                          : `rounds ${redrawPreview.fromSequence}–${redrawPreview.toSequence} still list`
-                      } anyone who has left. Redraw them from the players still in — everything already played stays exactly as it is.`
-                    : "Every round has been played or scored. There's nothing left to redraw."}
+                    ? `${redrawPreview.sequences.length === 1 ? "Round" : "Rounds"} ${describeSequences(redrawPreview.sequences)} ${
+                        redrawPreview.sequences.length === 1 ? "has" : "have"
+                      } no score yet and still list anyone who has left or isn't here. Redraw ${
+                        redrawPreview.sequences.length === 1 ? "it" : "them"
+                      } from the players still in, carrying on from what's been played. Rounds with a score stay exactly as they are.`
+                    : "Every round has a score. There's nothing left to redraw."}
                 </p>
                 <button
                   onClick={handleRedraw}
@@ -2145,19 +2393,26 @@ export default function HostLivePage() {
                   {redrawing
                     ? "Redrawing…"
                     : redrawPreview
-                      ? redrawPreview.fromSequence === redrawPreview.toSequence
-                        ? `Redraw round ${redrawPreview.fromSequence}`
-                        : `Redraw rounds ${redrawPreview.fromSequence}–${redrawPreview.toSequence}`
+                      ? `Redraw ${redrawPreview.sequences.length === 1 ? "round" : "rounds"} ${describeSequences(redrawPreview.sequences)}`
                       : "Nothing to redraw"}
                 </button>
                 {redrawNote && <p className="text-[11px] text-win font-semibold mt-2">{redrawNote}</p>}
+                <button
+                  onClick={() => {
+                    setShowManage(false);
+                    openAddRounds();
+                  }}
+                  className="w-full mt-2 rounded-full bg-graphite text-ivory text-[12.5px] font-semibold py-2.5 active:scale-[0.99] transition-transform"
+                >
+                  Add rounds
+                </button>
               </div>
             )}
 
             <p className="text-[11px] text-warm-gray mt-4">
               Scores and rounds already played always stay exactly as they are. In Mexicano, player changes take effect
               from the next round you generate; in Americano the schedule was drawn up front, so use Redraw above to
-              apply them to the rounds still to come. Anyone marked "not here yet" is left out of the draw until you say
+              apply them to the rounds with no score yet. Anyone marked "not here yet" is left out of the draw until you say
               they've arrived, and keeps their place and their points meanwhile.
             </p>
           </div>

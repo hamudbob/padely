@@ -28,6 +28,8 @@ import {
   mulberry32,
   recordRoundInHistory,
 } from "./types";
+import { BalanceRules, SchedulePrior, balanceBestOf, circlePairs, emptyPrior, roundFromTeams, seededShuffle } from "./balance";
+import { advanceStats, startFrom } from "./americano";
 
 export interface TeamRoster {
   teamA: PlayerId[];
@@ -199,21 +201,33 @@ export interface GenerateTeamSparringScheduleInput {
   /** Same session-level seed used everywhere else; each round is seeded with
    * schedulingSeed + its own 1-based sequence number, matching Americano. */
   schedulingSeed: number;
+  /** What has already been played before these rounds (redraw / added rounds). */
+  prior?: SchedulePrior;
+}
+
+/** Team Sparring: partners come from your own team, opponents from the other,
+ *  and games are kept level within each team. Only same-team swaps. */
+export function teamSparringRules(roster: TeamRoster): BalanceRules {
+  const side = new Map<PlayerId, "A" | "B">([...roster.teamA.map((id) => [id, "A"] as const), ...roster.teamB.map((id) => [id, "B"] as const)]);
+  return {
+    canSwap: (a, b) => side.get(a) === side.get(b),
+    partnerEligible: (a, b) => side.get(a) === side.get(b),
+    opponentEligible: (a, b) => side.get(a) !== side.get(b),
+    group: (a) => side.get(a) ?? "",
+  };
 }
 
 /**
  * Generates the FULL Team Sparring schedule for a session in one call —
  * same rationale as generateAmericanoSchedule: pairing never depends on
  * scores, so there's no need to gate progress on a "Next Round" button.
+ * Drawn round by round, then balanced as a whole night (balance.ts).
  */
 export function generateTeamSparringSchedule(input: GenerateTeamSparringScheduleInput): RoundResult[] {
   const { roster, courtsAvailable, roundCount, schedulingSeed } = input;
   const allIds = [...roster.teamA, ...roster.teamB];
-
-  const statsById = new Map<PlayerId, PlayerFairnessState>(
-    allIds.map((id) => [id, { playerId: id, matchesPlayed: 0, restedLastRound: false }]),
-  );
-  const history: MatchHistory = emptyHistory();
+  const prior = input.prior ?? emptyPrior();
+  const { statsById, history } = startFrom(prior, allIds);
   const rounds: RoundResult[] = [];
 
   for (let sequence = 1; sequence <= roundCount; sequence++) {
@@ -223,18 +237,24 @@ export function generateTeamSparringSchedule(input: GenerateTeamSparringSchedule
 
     rounds.push(result);
     recordRoundInHistory(history, result);
-
-    const playingIds = new Set(result.matches.flatMap((m) => [...m.teamA, ...m.teamB]));
-    for (const id of allIds) {
-      const s = statsById.get(id)!;
-      statsById.set(
-        id,
-        playingIds.has(id)
-          ? { playerId: id, matchesPlayed: s.matchesPlayed + 1, restedLastRound: false }
-          : { playerId: id, matchesPlayed: s.matchesPlayed, restedLastRound: true },
-      );
-    }
+    advanceStats(statsById, allIds, result);
   }
 
-  return rounds;
+  if (rounds.length === 0) return rounds;
+  const starts = [rounds];
+  // Both teams fill every court every round: rotate partners within each team
+  // with the circle method; the optimiser then evens out who meets whom.
+  const k = courtsAvailable * 2;
+  if (roster.teamA.length === k && roster.teamB.length === k) {
+    const a = seededShuffle(roster.teamA, schedulingSeed + 4242);
+    const b = seededShuffle(roster.teamB, schedulingSeed + 4343);
+    starts.push(
+      rounds.map((_, r) => {
+        const pa = circlePairs(a, r);
+        const pb = seededShuffle(circlePairs(b, r), schedulingSeed + 50 + r);
+        return roundFromTeams(pa.flatMap((t, i) => [t, pb[i]]));
+      }),
+    );
+  }
+  return balanceBestOf(starts, allIds, teamSparringRules(roster), prior, schedulingSeed);
 }

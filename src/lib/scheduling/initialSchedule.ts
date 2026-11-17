@@ -5,6 +5,7 @@ import { generateMixAmericanoSchedule, Gender } from "./mixAmericano";
 import { generateMixMexicanoRound } from "./mixMexicano";
 import { Pair, PairFairnessState, generateFixedPartnerSchedule, generateFixedPartnerRankedRound } from "./fixedPartner";
 import { mulberry32, PlayerFairnessState, PlayerId, RoundResult } from "./types";
+import type { SchedulePrior } from "./balance";
 
 export type ScheduleFormat =
   | "americano"
@@ -70,6 +71,10 @@ export interface InitialScheduleInput {
   fixedPartnerStyle?: "round_robin" | "rank_based" | null;
   /** Fixed Partner only — the resolved pairs to schedule. */
   pairs?: Pair[];
+  /** Rounds already played (redraw) or already planned (adding rounds): the
+   *  new rounds continue the night's balance instead of starting from zero.
+   *  Pre-drawn formats only; score-based formats ignore it. */
+  prior?: SchedulePrior;
 }
 
 /**
@@ -88,7 +93,7 @@ export interface InitialScheduleInput {
  * Partner round_robin) return the whole schedule up front.
  */
 export function generateInitialRounds(input: InitialScheduleInput): RoundResult[] {
-  const { players, courtsAvailable, format, schedulingSeed, roundCount, fixedPartnerStyle, pairs } = input;
+  const { players, courtsAvailable, format, schedulingSeed, roundCount, fixedPartnerStyle, pairs, prior } = input;
   if (players.length < 4) return [];
   const activePlayerIds: PlayerId[] = players.map((p) => p.id);
   const genderById = new Map<PlayerId, Gender>(players.map((p) => [p.id, p.gender]));
@@ -98,7 +103,7 @@ export function generateInitialRounds(input: InitialScheduleInput): RoundResult[
     const resolvedPairs = pairs ?? [];
     if (resolvedPairs.length === 0) return [];
     if (fixedPartnerStyle === "round_robin") {
-      return generateFixedPartnerSchedule({ pairs: resolvedPairs, courtsAvailable, roundCount, schedulingSeed });
+      return generateFixedPartnerSchedule({ pairs: resolvedPairs, courtsAvailable, roundCount, schedulingSeed, prior });
     }
     // rank_based — round-by-round like Mexicano, so only Round 1 up front.
     const pairStats = new Map<string, PairFairnessState>(
@@ -147,11 +152,11 @@ export function generateInitialRounds(input: InitialScheduleInput): RoundResult[
   if (format === "team_sparring") {
     const teamA = players.filter((p) => p.teamSide === "A").map((p) => p.id);
     const teamB = players.filter((p) => p.teamSide === "B").map((p) => p.id);
-    return generateTeamSparringSchedule({ roster: { teamA, teamB }, courtsAvailable, roundCount, schedulingSeed });
+    return generateTeamSparringSchedule({ roster: { teamA, teamB }, courtsAvailable, roundCount, schedulingSeed, prior });
   }
 
   if (format === "mix_americano") {
-    return generateMixAmericanoSchedule({ activePlayerIds, genderById, courtsAvailable, roundCount, schedulingSeed });
+    return generateMixAmericanoSchedule({ activePlayerIds, genderById, courtsAvailable, roundCount, schedulingSeed, prior });
   }
 
   if (format === "side_americano") {
@@ -159,8 +164,8 @@ export function generateInitialRounds(input: InitialScheduleInput): RoundResult[
     // than gender — every team pairs one left with one right. The engine only
     // cares that teammates differ, so we feed side as a two-valued key.
     const sideKey = new Map<PlayerId, Gender>(players.map((p) => [p.id, (p.side === "L" ? "M" : "F") as Gender]));
-    return generateMixAmericanoSchedule({ activePlayerIds, genderById: sideKey, courtsAvailable, roundCount, schedulingSeed });
+    return generateMixAmericanoSchedule({ activePlayerIds, genderById: sideKey, courtsAvailable, roundCount, schedulingSeed, prior });
   }
 
-  return generateAmericanoSchedule({ activePlayerIds, courtsAvailable, roundCount, schedulingSeed });
+  return generateAmericanoSchedule({ activePlayerIds, courtsAvailable, roundCount, schedulingSeed, prior });
 }

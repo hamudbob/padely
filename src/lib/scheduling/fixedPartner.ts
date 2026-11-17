@@ -8,6 +8,7 @@
 // partner-repeat axis to worry about — partners never change.
 
 import { Match, PlayerId, RoundResult, Rng, pairKey, mulberry32 } from "./types";
+import type { SchedulePrior } from "./balance";
 
 export interface Pair {
   /** Canonical id for this pair — pairKey(playerA, playerB), so it's stable
@@ -356,13 +357,43 @@ export interface GenerateFixedPartnerScheduleInput {
   courtsAvailable: number;
   roundCount: number;
   schedulingSeed: number;
+  /** What has already been played before these rounds (redraw / added rounds),
+   *  so pairs that already met aren't put together again first. */
+  prior?: SchedulePrior;
+}
+
+/** Pair-level games, rests and meetings from a player-level prior. Fixed
+ *  partners always play together, so either partner's numbers are the pair's. */
+function pairStart(pairs: Pair[], prior: SchedulePrior | undefined) {
+  const statsById = new Map<string, PairFairnessState>(
+    pairs.map((p) => [
+      p.pairId,
+      {
+        pairId: p.pairId,
+        matchesPlayed: prior?.playCounts.get(p.playerA) ?? 0,
+        restedLastRound: prior?.restedLast.has(p.playerA) ?? false,
+      },
+    ]),
+  );
+  const history = emptyPairHistory();
+  if (prior) {
+    for (let i = 0; i < pairs.length; i++) {
+      for (let j = i + 1; j < pairs.length; j++) {
+        const met = prior.history.opponentCounts.get(pairKey(pairs[i].playerA, pairs[j].playerA)) ?? 0;
+        for (let k = 0; k < met; k++) recordPairMatchup(history, pairs[i].pairId, pairs[j].pairId);
+      }
+    }
+  }
+  return { statsById, history };
 }
 
 /** What makes one whole schedule better than another, lowest first. */
-function scheduleCost(rounds: RoundResult[], pairs: Pair[]): number {
+function scheduleCost(rounds: RoundResult[], pairs: Pair[], prior?: SchedulePrior): number {
   const pairByPlayerId = buildPairByPlayerId(pairs);
-  const history = emptyPairHistory();
+  const start = pairStart(pairs, prior);
+  const history = start.history;
   const lastRested = new Map<string, number>();
+  for (const p of pairs) if (start.statsById.get(p.pairId)!.restedLastRound) lastRested.set(p.pairId, -1);
   let cost = 0;
   rounds.forEach((r, i) => {
     const total = pairs.length * (pairs.length - 1) / 2;
@@ -385,11 +416,8 @@ function scheduleCost(rounds: RoundResult[], pairs: Pair[]): number {
   return cost;
 }
 
-function buildSchedule(pairs: Pair[], courtsAvailable: number, roundCount: number, seed: number): RoundResult[] {
-  const statsById = new Map<string, PairFairnessState>(
-    pairs.map((p) => [p.pairId, { pairId: p.pairId, matchesPlayed: 0, restedLastRound: false }]),
-  );
-  const history = emptyPairHistory();
+function buildSchedule(pairs: Pair[], courtsAvailable: number, roundCount: number, seed: number, prior?: SchedulePrior): RoundResult[] {
+  const { statsById, history } = pairStart(pairs, prior);
   const pairByPlayerId = buildPairByPlayerId(pairs);
   const rounds: RoundResult[] = [];
 
@@ -431,12 +459,12 @@ function buildSchedule(pairs: Pair[], courtsAvailable: number, roundCount: numbe
  * fewest back-to-back rests, is kept.
  */
 export function generateFixedPartnerSchedule(input: GenerateFixedPartnerScheduleInput): RoundResult[] {
-  const { pairs, courtsAvailable, roundCount, schedulingSeed } = input;
+  const { pairs, courtsAvailable, roundCount, schedulingSeed, prior } = input;
   let best: RoundResult[] = [];
   let bestCost = Number.POSITIVE_INFINITY;
   for (let attempt = 0; attempt < 24; attempt++) {
-    const rounds = buildSchedule(pairs, courtsAvailable, roundCount, schedulingSeed + attempt * 104729);
-    const cost = scheduleCost(rounds, pairs);
+    const rounds = buildSchedule(pairs, courtsAvailable, roundCount, schedulingSeed + attempt * 104729, prior);
+    const cost = scheduleCost(rounds, pairs, prior);
     if (cost < bestCost) {
       best = rounds;
       bestCost = cost;
