@@ -540,6 +540,16 @@ export function buildLocalSession(
     player_b_id: playerIdByTempId.get(pair.playerB)!,
   }));
 
+  // Which pair each player is in, so every pre-drawn match says which two
+  // pairs it is between. These were left empty (Nov 2026 fix): the next round
+  // generated live then saw no pair history at all — nobody had played anyone —
+  // and could rest a pair on 8 games while another got a 9th.
+  const localPairIdByPlayerId = new Map<string, string>();
+  for (const pr of pairs) {
+    localPairIdByPlayerId.set(pr.player_a_id, pr.id);
+    localPairIdByPlayerId.set(pr.player_b_id, pr.id);
+  }
+
   const rounds: LocalRoundRow[] = [];
   const matches: LocalMatchRow[] = [];
   const participants: LocalParticipantRow[] = [];
@@ -563,12 +573,14 @@ export function buildLocalSession(
 
     for (const match of round.matches) {
       const matchId = localUuid();
+      const pairAId = localPairIdByPlayerId.get(playerIdByTempId.get(match.teamA[0]) ?? "") ?? null;
+      const pairBId = localPairIdByPlayerId.get(playerIdByTempId.get(match.teamB[0]) ?? "") ?? null;
       matches.push({
         id: matchId,
         round_id: roundId,
         court_id: courts[match.courtIndex].id,
-        pair_a_id: null,
-        pair_b_id: null,
+        pair_a_id: pairAId && pairBId ? pairAId : null,
+        pair_b_id: pairAId && pairBId ? pairBId : null,
         score_a: null,
         score_b: null,
         outcome: null,

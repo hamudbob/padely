@@ -105,10 +105,13 @@ export interface PairFairnessState {
 export interface PairHistory {
   /** pairKey(pairIdA, pairIdB) of every pair-vs-pair matchup already played. */
   opponentPairsSeen: Set<string>;
+  /** How many times each pair-vs-pair matchup has been played. When absent,
+   *  opponentPairsSeen stands in (seen = once). */
+  opponentCounts?: Map<string, number>;
 }
 
 export function emptyPairHistory(): PairHistory {
-  return { opponentPairsSeen: new Set() };
+  return { opponentPairsSeen: new Set(), opponentCounts: new Map() };
 }
 
 /** Folds a generated round into running pair history — call after a round is accepted. */
@@ -120,8 +123,20 @@ export function recordRoundInPairHistory(
   for (const m of round.matches) {
     const pairA = pairByPlayerId.get(m.teamA[0]);
     const pairB = pairByPlayerId.get(m.teamB[0]);
-    if (pairA && pairB) history.opponentPairsSeen.add(pairKey(pairA, pairB));
+    if (pairA && pairB) recordPairMatchup(history, pairA, pairB);
   }
+}
+
+export function recordPairMatchup(history: PairHistory, pairA: string, pairB: string): void {
+  const key = pairKey(pairA, pairB);
+  history.opponentPairsSeen.add(key);
+  if (!history.opponentCounts) history.opponentCounts = new Map();
+  history.opponentCounts.set(key, (history.opponentCounts.get(key) ?? 0) + 1);
+}
+
+function meetCount(history: PairHistory, a: string, b: string): number {
+  const key = pairKey(a, b);
+  return history.opponentCounts?.get(key) ?? (history.opponentPairsSeen.has(key) ? 1 : 0);
 }
 
 interface PairSelectionResult {
@@ -132,12 +147,9 @@ interface PairSelectionResult {
 
 /** Same "rest whoever's played the most" rule as fairness.ts's
  * selectPlayersForRound, just at pair granularity (2 pair-units per court,
- * not 4 individual players) — kept as its own function rather than
- * generalizing the shared one, matching how teamSparring.ts also wrote its
- * own side-aware selection instead of reusing the individual-player version.
- * Exported so generateFixedPartnerRankedRound below can share it — WHO
- * plays is identical fairness logic regardless of how they're then matched
- * up (round-robin vs rank-based), same split americano.ts/mexicano.ts use. */
+ * not 4 individual players). Used by the rank-based flavor below; the
+ * round-robin flavor chooses who rests and who plays whom together (see
+ * generateFixedPartnerRound), under the same games-played rule. */
 export function selectPairsForRound(
   pairs: Pair[],
   statsById: Map<string, PairFairnessState>,
@@ -169,12 +181,64 @@ export function selectPairsForRound(
   return { playingPairs, restingPairs, courtsUsed };
 }
 
-function scorePairMatchups(matchups: [Pair, Pair][], history: PairHistory): number {
-  let repeats = 0;
-  for (const [a, b] of matchups) {
-    if (history.opponentPairsSeen.has(pairKey(a.pairId, b.pairId))) repeats++;
-  }
-  return repeats;
+// Weights for choosing a round. A repeated matchup always costs more than any
+// amount of the softer preferences, so a pair never meets someone twice while
+// a never-played opponent could have been scheduled instead.
+const REPEAT_COST = 1000;
+const REST_AGAIN_COST = 40; // resting two rounds running
+const UNMET_REST_COST = 3; // resting a pair that still has many opponents to meet
+
+/** Every way to split `pool` into `pairsOf2` disjoint matchups, cheapest first
+ *  found by branch and bound. Exact for the sizes a padel night has (up to 8
+ *  courts = 16 pairs on court) within the node budget; falls back to the best
+ *  found so far beyond it. */
+function bestMatching(pool: Pair[], cost: (a: Pair, b: Pair) => number, rng: Rng): { matchups: [Pair, Pair][]; cost: number } {
+  const order = shuffle(pool, rng);
+  let best: [Pair, Pair][] | null = null;
+  let bestCost = Number.POSITIVE_INFINITY;
+  let nodes = 0;
+  const used = new Array(order.length).fill(false);
+  const cur: [Pair, Pair][] = [];
+  const walk = (acc: number) => {
+    if (acc >= bestCost || nodes++ > 60000) return;
+    const i = used.indexOf(false);
+    if (i < 0) {
+      best = [...cur];
+      bestCost = acc;
+      return;
+    }
+    used[i] = true;
+    const options: { j: number; c: number }[] = [];
+    for (let j = i + 1; j < order.length; j++) if (!used[j]) options.push({ j, c: cost(order[i], order[j]) });
+    options.sort((x, y) => x.c - y.c);
+    for (const { j, c } of options) {
+      used[j] = true;
+      cur.push([order[i], order[j]]);
+      walk(acc + c);
+      cur.pop();
+      used[j] = false;
+    }
+    used[i] = false;
+  };
+  walk(0);
+  return { matchups: best ?? [], cost: bestCost };
+}
+
+/** All k-element subsets of `items` (at most `limit`, sampled if more). */
+function subsets<T>(items: T[], k: number, rng: Rng, limit = 400): T[][] {
+  const out: T[][] = [];
+  if (k <= 0) return [[]];
+  if (k > items.length) return [];
+  const rec = (start: number, acc: T[]) => {
+    if (out.length >= limit * 4) return;
+    if (acc.length === k) {
+      out.push([...acc]);
+      return;
+    }
+    for (let i = start; i < items.length; i++) rec(i + 1, [...acc, items[i]]);
+  };
+  rec(0, []);
+  return out.length <= limit ? out : shuffle(out, rng).slice(0, limit);
 }
 
 export interface GenerateFixedPartnerRoundInput {
@@ -183,52 +247,76 @@ export interface GenerateFixedPartnerRoundInput {
   courtsAvailable: number;
   history: PairHistory;
   rng: Rng;
-  /** How many randomized attempts to try when minimizing repeat matchups. */
+  /** Kept for callers; the search below is exact, not sampled. */
   tries?: number;
 }
 
+/**
+ * One round of the round-robin flavor. Who rests and who plays whom are
+ * chosen TOGETHER (Nov 2026 fix). Before, the resting pairs were picked first
+ * on games played alone and the six left were then matched as well as they
+ * could be, so by the last rounds the only matchups still unplayed were
+ * between pairs that had been sent to rest, and the night ended with repeats
+ * and a pair that never met another.
+ *
+ * Rules, in order:
+ *   1. Games stay level: a pair never rests while a pair with more games
+ *      plays. (Same rule as every other format.)
+ *   2. Nobody meets an opponent again while they still have someone unplayed
+ *      who could be put on the same court instead.
+ *   3. Nobody rests two rounds running if it can be helped, and pairs with
+ *      the most opponents still to meet are kept on court.
+ */
 export function generateFixedPartnerRound(input: GenerateFixedPartnerRoundInput): RoundResult {
-  const { pairs, statsById, courtsAvailable, history, rng, tries = 300 } = input;
-
-  const { playingPairs, restingPairs, courtsUsed } = selectPairsForRound(pairs, statsById, courtsAvailable, rng);
+  const { pairs, statsById, courtsAvailable, history, rng } = input;
+  const n = pairs.length;
+  const courtsUsed = Math.min(Math.max(0, courtsAvailable), Math.floor(n / 2));
 
   if (courtsUsed === 0) {
     return {
       courtsUsed: 0,
       matches: [],
-      restingIds: restingPairs.flatMap((p) => [p.playerA, p.playerB]),
+      restingIds: pairs.flatMap((p) => [p.playerA, p.playerB]),
       explanation: `Not enough active pairs for a full court (need 2 pairs, have ${pairs.length}).`,
     };
   }
 
-  const slots = courtsUsed * 2;
-  const playPool = playingPairs.slice(0, slots);
+  const stat = (p: Pair) => statsById.get(p.pairId) ?? { pairId: p.pairId, matchesPlayed: 0, restedLastRound: false };
+  const restSlots = n - courtsUsed * 2;
+  const unmetLeft = (p: Pair) => pairs.filter((q) => q.pairId !== p.pairId && meetCount(history, p.pairId, q.pairId) === 0).length;
 
-  // Randomized local search: try many random pair-vs-pair matchups, keep the
-  // one with the fewest repeated opponent-pair matchups against history.
-  // No partner-repeat term needed here — unlike Americano, partners are
-  // permanently fixed, so there's nothing to optimize on that axis.
-  let best: [Pair, Pair][] | null = null;
-  let bestScore = Number.POSITIVE_INFINITY;
-  for (let t = 0; t < tries; t++) {
-    const order = shuffle(playPool, rng);
-    const candidate: [Pair, Pair][] = [];
-    for (let i = 0; i + 1 < order.length; i += 2) candidate.push([order[i], order[i + 1]]);
-    const score = scorePairMatchups(candidate, history);
-    if (score < bestScore) {
-      best = candidate;
-      bestScore = score;
-      if (score === 0) break;
-    }
+  // Rule 1: who MUST rest (more games than the boundary) and who MAY.
+  const byGames = [...pairs].sort((a, b) => stat(b).matchesPlayed - stat(a).matchesPlayed);
+  let mustRest: Pair[] = [];
+  let mayRest: Pair[] = [];
+  if (restSlots > 0) {
+    const boundary = stat(byGames[restSlots - 1]).matchesPlayed;
+    mustRest = pairs.filter((p) => stat(p).matchesPlayed > boundary);
+    mayRest = pairs.filter((p) => stat(p).matchesPlayed === boundary);
   }
-  const matchups: [Pair, Pair][] =
-    best ??
-    (() => {
-      const fallback: [Pair, Pair][] = [];
-      for (let i = 0; i + 1 < playPool.length; i += 2) fallback.push([playPool[i], playPool[i + 1]]);
-      return fallback;
-    })();
+  const restChoices = restSlots > 0 ? subsets(mayRest, restSlots - mustRest.length, rng).map((c) => [...mustRest, ...c]) : [[]];
 
+  // The cheapest opponent a pair could still get: 0 if any unplayed opponent
+  // exists among the pairs on court, else the fewest times met.
+  const matchCost = (a: Pair, b: Pair) => REPEAT_COST * meetCount(history, a.pairId, b.pairId);
+
+  let best: { rest: Pair[]; matchups: [Pair, Pair][]; cost: number } | null = null;
+  for (const rest of restChoices) {
+    const restIds = new Set(rest.map((p) => p.pairId));
+    const pool = pairs.filter((p) => !restIds.has(p.pairId));
+    let restCost = 0;
+    for (const r of rest) {
+      if (stat(r).restedLastRound) restCost += REST_AGAIN_COST;
+      restCost += UNMET_REST_COST * unmetLeft(r);
+    }
+    if (best && restCost >= best.cost) continue;
+    const m = bestMatching(pool, matchCost, rng);
+    const total = m.cost + restCost + rng() * 0.5; // tiny jitter: seeded variety between equals
+    if (!best || total < best.cost) best = { rest, matchups: m.matchups, cost: total };
+  }
+
+  const restingPairs = best!.rest;
+  const matchups = best!.matchups;
   const matches: Match[] = matchups.map(([pairA, pairB]) => ({
     courtIndex: -1, // assigned below
     teamA: [pairA.playerA, pairA.playerB],
@@ -244,12 +332,12 @@ export function generateFixedPartnerRound(input: GenerateFixedPartnerRoundInput)
   });
   matches.sort((a, b) => a.courtIndex - b.courtIndex);
 
-  const repeats = scorePairMatchups(matchups, history);
+  const repeats = matchups.filter(([a, b]) => meetCount(history, a.pairId, b.pairId) > 0).length;
   const explanationParts = [
-    `${playPool.length} of ${pairs.length} pairs are on court this round across ${courtsUsed} court${courtsUsed > 1 ? "s" : ""}.`,
+    `${courtsUsed * 2} of ${pairs.length} pairs are on court this round across ${courtsUsed} court${courtsUsed > 1 ? "s" : ""}.`,
   ];
   if (restingPairs.length > 0) {
-    explanationParts.push(`${restingPairs.length} pair(s) rest this round, chosen by fewest matches played so far.`);
+    explanationParts.push(`${restingPairs.length} pair(s) rest this round, chosen from the pairs that have played the most.`);
   }
   if (repeats > 0) {
     explanationParts.push(`${repeats} repeated pair-vs-pair matchup(s) were unavoidable this round.`);
@@ -270,15 +358,34 @@ export interface GenerateFixedPartnerScheduleInput {
   schedulingSeed: number;
 }
 
-/**
- * Generates the FULL Fixed Partner schedule up front, same reasoning as
- * Americano/Team Sparring: pairing never depends on scores (pairs are fixed,
- * and opponent rotation only depends on who's played whom before), so the
- * whole thing can be committed at session start.
- */
-export function generateFixedPartnerSchedule(input: GenerateFixedPartnerScheduleInput): RoundResult[] {
-  const { pairs, courtsAvailable, roundCount, schedulingSeed } = input;
+/** What makes one whole schedule better than another, lowest first. */
+function scheduleCost(rounds: RoundResult[], pairs: Pair[]): number {
+  const pairByPlayerId = buildPairByPlayerId(pairs);
+  const history = emptyPairHistory();
+  const lastRested = new Map<string, number>();
+  let cost = 0;
+  rounds.forEach((r, i) => {
+    const total = pairs.length * (pairs.length - 1) / 2;
+    for (const m of r.matches) {
+      const a = pairByPlayerId.get(m.teamA[0])!;
+      const b = pairByPlayerId.get(m.teamB[0])!;
+      const seen = meetCount(history, a, b);
+      // A repeat while some matchup is still unplayed is the worst outcome.
+      if (seen > 0 && (history.opponentCounts?.size ?? 0) < total) cost += REPEAT_COST;
+      cost += seen * 50;
+      recordPairMatchup(history, a, b);
+    }
+    const playing = new Set(r.matches.flatMap((m) => [pairByPlayerId.get(m.teamA[0])!, pairByPlayerId.get(m.teamB[0])!]));
+    for (const p of pairs) {
+      if (playing.has(p.pairId)) continue;
+      if (lastRested.get(p.pairId) === i - 1) cost += REST_AGAIN_COST;
+      lastRested.set(p.pairId, i);
+    }
+  });
+  return cost;
+}
 
+function buildSchedule(pairs: Pair[], courtsAvailable: number, roundCount: number, seed: number): RoundResult[] {
   const statsById = new Map<string, PairFairnessState>(
     pairs.map((p) => [p.pairId, { pairId: p.pairId, matchesPlayed: 0, restedLastRound: false }]),
   );
@@ -287,7 +394,7 @@ export function generateFixedPartnerSchedule(input: GenerateFixedPartnerSchedule
   const rounds: RoundResult[] = [];
 
   for (let sequence = 1; sequence <= roundCount; sequence++) {
-    const rng = mulberry32(schedulingSeed + sequence);
+    const rng = mulberry32(seed + sequence);
     const result = generateFixedPartnerRound({ pairs, statsById, courtsAvailable, history, rng });
     if (result.courtsUsed === 0) break; // not enough pairs — stop rather than push empty rounds
 
@@ -309,8 +416,34 @@ export function generateFixedPartnerSchedule(input: GenerateFixedPartnerSchedule
       );
     }
   }
-
   return rounds;
+}
+
+/**
+ * Generates the FULL Fixed Partner schedule up front, same reasoning as
+ * Americano/Team Sparring: pairing never depends on scores (pairs are fixed,
+ * and opponent rotation only depends on who's played whom before), so the
+ * whole thing can be committed at session start.
+ *
+ * Round by round can still paint itself into a corner, so several complete
+ * schedules are drawn (each deterministic from the session seed) and the one
+ * where every pair meets every other before anyone meets twice, with the
+ * fewest back-to-back rests, is kept.
+ */
+export function generateFixedPartnerSchedule(input: GenerateFixedPartnerScheduleInput): RoundResult[] {
+  const { pairs, courtsAvailable, roundCount, schedulingSeed } = input;
+  let best: RoundResult[] = [];
+  let bestCost = Number.POSITIVE_INFINITY;
+  for (let attempt = 0; attempt < 24; attempt++) {
+    const rounds = buildSchedule(pairs, courtsAvailable, roundCount, schedulingSeed + attempt * 104729);
+    const cost = scheduleCost(rounds, pairs);
+    if (cost < bestCost) {
+      best = rounds;
+      bestCost = cost;
+      if (cost === 0) break;
+    }
+  }
+  return best;
 }
 
 // ---------------------------------------------------------------------------

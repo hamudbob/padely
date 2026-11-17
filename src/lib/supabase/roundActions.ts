@@ -9,6 +9,8 @@ import {
   PairFairnessState,
   PairHistory,
   buildPairByPlayerId,
+  emptyPairHistory,
+  recordPairMatchup,
 } from "../scheduling/fixedPartner";
 import { generateMixAmericanoRound, Gender } from "../scheduling/mixAmericano";
 import { generateMixMexicanoRound } from "../scheduling/mixMexicano";
@@ -366,19 +368,26 @@ export async function generateNextRound(
   // from matches.pair_a_id/pair_b_id (no round_rests-style table needed —
   // a resting pair simply has no match row that round, so "did this pair
   // play in the latest round" is enough to know restedLastRound). ---
-  const pairHistory: PairHistory = { opponentPairsSeen: new Set() };
+  const pairHistory: PairHistory = emptyPairHistory();
   const pairStatsById = new Map<string, PairFairnessState>();
   if (needsPairs) {
     const matchesPlayedByPairId = new Map<string, number>();
     const pairIdsInLatestRound = new Set<string>();
+    // Which two pairs a match was between: the match row's own pair ids, or,
+    // when those are empty (every pre-drawn round on a host phone before the
+    // Nov 2026 fix), the pairs of the players who were actually on court.
+    const pairOfPlayer = buildPairByPlayerId(pairs);
     for (const m of matches) {
-      if (m.pair_a_id) matchesPlayedByPairId.set(m.pair_a_id, (matchesPlayedByPairId.get(m.pair_a_id) ?? 0) + 1);
-      if (m.pair_b_id) matchesPlayedByPairId.set(m.pair_b_id, (matchesPlayedByPairId.get(m.pair_b_id) ?? 0) + 1);
+      const parts = participantsByMatch.get(m.id) ?? [];
+      const pairA = m.pair_a_id ?? pairOfPlayer.get(parts.find((x) => x.side === "A")?.player_id ?? "") ?? null;
+      const pairB = m.pair_b_id ?? pairOfPlayer.get(parts.find((x) => x.side === "B")?.player_id ?? "") ?? null;
+      if (pairA) matchesPlayedByPairId.set(pairA, (matchesPlayedByPairId.get(pairA) ?? 0) + 1);
+      if (pairB) matchesPlayedByPairId.set(pairB, (matchesPlayedByPairId.get(pairB) ?? 0) + 1);
       if (m.round_id === latestRound.id) {
-        if (m.pair_a_id) pairIdsInLatestRound.add(m.pair_a_id);
-        if (m.pair_b_id) pairIdsInLatestRound.add(m.pair_b_id);
+        if (pairA) pairIdsInLatestRound.add(pairA);
+        if (pairB) pairIdsInLatestRound.add(pairB);
       }
-      if (m.pair_a_id && m.pair_b_id) pairHistory.opponentPairsSeen.add(pairKey(m.pair_a_id, m.pair_b_id));
+      if (pairA && pairB) recordPairMatchup(pairHistory, pairA, pairB);
     }
     for (const p of pairs) {
       pairStatsById.set(p.pairId, {
