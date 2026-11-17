@@ -825,6 +825,8 @@ export interface CallupPaymentRow {
   receiptAt: string | null;
   rejectedReason: string | null;
   payBy: string | null;
+  /** 0086: the admin who marked this paid. */
+  paidByName: string | null;
 }
 
 /** Admin: everyone holding a place (and anyone who paid and left). Receipts to
@@ -843,6 +845,7 @@ export async function getCallupPayments(eventId: string): Promise<CallupPaymentR
     receiptAt: (r.receipt_at as string) || null,
     rejectedReason: (r.rejected_reason as string) || null,
     payBy: (r.pay_by as string) || null,
+    paidByName: (r.paid_by_name as string) || null,
   }));
 }
 
@@ -899,6 +902,8 @@ export interface GuestPaymentRow {
   payBy: string | null;
   /** In (or played): owes. False for a guest asking to get in, or paid and gone. */
   holdsSpot: boolean;
+  /** 0086: the admin who marked this guest paid. */
+  paidByName: string | null;
 }
 
 /** Admin: each guest's own payment. Empty before 0085. */
@@ -918,6 +923,7 @@ export async function getCallupGuestPayments(eventId: string): Promise<GuestPaym
     rejectedReason: str(r.rejected_reason),
     payBy: str(r.pay_by),
     holdsSpot: r.holds_spot === true,
+    paidByName: str(r.paid_by_name),
   }));
 }
 
@@ -1133,4 +1139,38 @@ export async function getClubMoney(clubId: string): Promise<ClubMoney> {
       hasReceipt: r.has_receipt === true,
     })),
   };
+}
+
+/* ── 0086: the activity log, and moving a guest ───────────────────────── */
+
+export interface CallupLogEntry {
+  at: string;
+  /** The person who did it; null with `automatic` when Padelier did. */
+  actorName: string | null;
+  automatic: boolean;
+  subjectName: string | null;
+  isGuest: boolean;
+  action: string;
+  detail: Record<string, unknown>;
+}
+
+/** Admin: everything that happened on a Call-up, newest first. Empty before 0086. */
+export async function getCallupLog(eventId: string): Promise<CallupLogEntry[]> {
+  const { data, error } = await rpcAny("get_callup_log", { p_event_id: eventId, p_limit: 500 });
+  if (error) return [];
+  return ((data ?? []) as Record<string, unknown>[]).map((r) => ({
+    at: String(r.at ?? ""),
+    actorName: typeof r.actor_name === "string" ? r.actor_name : null,
+    automatic: r.automatic === true,
+    subjectName: typeof r.subject_name === "string" ? r.subject_name : null,
+    isGuest: r.is_guest === true,
+    action: String(r.action ?? ""),
+    detail: (r.detail && typeof r.detail === "object" ? r.detail : {}) as Record<string, unknown>,
+  }));
+}
+
+/** Admin: move a guest in (may go over the cap, as for a member) or back to waiting. */
+export async function setGuestRsvp(guestId: string, response: "in" | "waitlist"): Promise<void> {
+  const { error } = await rpcAny("event_set_guest_rsvp", { p_guest_id: guestId, p_response: response });
+  if (error) throw new Error(error.message);
 }

@@ -405,6 +405,7 @@ export function AdminPayments({
         receiptAt: r.receiptAt,
         rejectedReason: r.rejectedReason,
         payBy: r.payBy,
+        paidByName: r.paidByName,
         holdsSpot: r.ownIn,
         asking: mode === "prepay" && !r.ownIn && r.hasReceipt && !r.paidAt,
       }),
@@ -422,6 +423,7 @@ export function AdminPayments({
         receiptAt: g.receiptAt,
         rejectedReason: g.rejectedReason,
         payBy: g.payBy,
+        paidByName: g.paidByName,
         holdsSpot: g.holdsSpot,
         asking: mode === "prepay" && !g.holdsSpot && g.hasReceipt && !g.paidAt,
       }),
@@ -675,9 +677,17 @@ export function AdminPayments({
                 <Face name={r.name} url={r.avatarUrl} size={34} />
                 <span className="flex-1 min-w-0">
                   <b className="block text-[14px] font-semibold text-graphite truncate">{r.name}</b>
-                  {(r.note || !r.holdsSpot) && (
-                    <span className="block text-[11px] text-warm-gray truncate">{sub(r, r.holdsSpot ? "" : played ? "Paid, didn't play" : "Paid, no longer in")}</span>
-                  )}
+                  <span className="block text-[11px] text-warm-gray truncate">
+                    {sub(
+                      r,
+                      [
+                        r.holdsSpot ? "" : played ? "Paid, didn't play" : "Paid, no longer in",
+                        r.paidAt ? `${r.hasReceipt ? "Accepted" : "Marked paid"}${r.paidByName ? ` by ${r.paidByName}` : ""} · ${hhmmss(r.paidAt)}` : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" · "),
+                    )}
+                  </span>
                 </span>
                 <span className="text-[11px] font-bold rounded-full px-2.5 py-1 bg-win-soft text-win shrink-0">{r.hasReceipt ? "Paid · receipt" : "Paid"}</span>
                 <button onClick={() => act(r, "unpaid")} disabled={busy === r.key} className="text-[11.5px] font-semibold text-warm-gray px-1 disabled:opacity-40">
@@ -727,6 +737,8 @@ interface PayItem {
   receiptAt: string | null;
   rejectedReason: string | null;
   payBy: string | null;
+  /** 0086: who marked it paid. */
+  paidByName: string | null;
   holdsSpot: boolean;
   /** Pay to get in: waiting, with a receipt asking for a spot. */
   asking: boolean;

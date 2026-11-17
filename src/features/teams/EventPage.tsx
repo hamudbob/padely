@@ -16,6 +16,7 @@ import {
   getCallupExtras,
   getClubAdminTodo,
   cancelEvent,
+  setGuestRsvp,
   mapsLinkFor,
   CallupExtras,
   PaymentMode,
@@ -28,6 +29,7 @@ import { shareUrl } from "../../lib/shareLink";
 import ConfirmSheet, { ConfirmRequest } from "../shell/ConfirmSheet";
 import { BottomSheet } from "../shell/Sheet";
 import CallupFormSheet, { PinIcon } from "./club/CallupFormSheet";
+import ActivityLog from "./club/ActivityLog";
 import { Face, Segmented, card } from "./club/ui";
 
 /**
@@ -124,7 +126,8 @@ export default function EventPage() {
   const [editing, setEditing] = useState(false);
   const [managing, setManaging] = useState<{ p: EventAttendee; list: ListKey } | null>(null);
   const [list, setList] = useState<ListKey | null>(null);
-  const adminTab: "players" | "payments" = params.get("tab") === "payments" ? "payments" : "players";
+  const adminTab: "players" | "payments" | "activity" =
+    params.get("tab") === "payments" ? "payments" : params.get("tab") === "activity" ? "activity" : "players";
 
   // NOTE ON eventId vs ev.id, which is the bug this page shipped with.
   //
@@ -259,6 +262,20 @@ export default function EventPage() {
       tone: "danger",
       run: () => doDropGuest(guestId, who),
     });
+  }
+
+  async function guestIn(guestId: string, who: string) {
+    setBusy(true);
+    setNote(null);
+    try {
+      await setGuestRsvp(guestId, "in");
+      setNote(`${who} is in.`);
+      load();
+    } catch (e) {
+      setNote(e instanceof Error ? e.message : "That didn't work.");
+    } finally {
+      setBusy(false);
+    }
   }
 
   async function doDropGuest(guestId: string, who: string) {
@@ -659,21 +676,21 @@ export default function EventPage() {
         </button>
       )}
 
-      {/* ── Admin: Players | Payments ───────────────────────────────── */}
-      {showPayments && (
+      {/* ── Admin: Players | Payments | Activity ────────────────────── */}
+      {ev.isAdmin && (
         <div className="mt-6">
           <Segmented
             label="Manage"
-            value={adminTab}
+            value={adminTab === "payments" && !showPayments ? "players" : adminTab}
             onChange={(t) => {
               const p = new URLSearchParams(params);
-              if (t === "payments") p.set("tab", "payments");
-              else p.delete("tab");
+              if (t === "players") p.delete("tab");
+              else p.set("tab", t);
               setParams(p, { replace: true });
             }}
             options={[
               { value: "players", label: "Players" },
-              {
+              ...(showPayments ? [{
                 value: "payments",
                 label: (
                   <span className="inline-flex items-center gap-1.5">
@@ -683,13 +700,16 @@ export default function EventPage() {
                     )}
                   </span>
                 ),
-              },
+              }] : []),
+              { value: "activity", label: "Activity" },
             ]}
           />
         </div>
       )}
 
-      {showPayments && adminTab === "payments" ? (
+      {ev.isAdmin && adminTab === "activity" ? (
+        <ActivityLog eventId={ev.id} version={payVersion} />
+      ) : showPayments && adminTab === "payments" ? (
         <AdminPayments
           eventId={ev.id}
           mode={payMode}
@@ -705,7 +725,7 @@ export default function EventPage() {
       ) : (
         <>
           {/* ── Who's coming ─────────────────────────────────────────── */}
-          <div className={`flex items-baseline justify-between ${showPayments ? "mt-4" : "mt-6"} px-0.5`}>
+          <div className={`flex items-baseline justify-between ${ev.isAdmin ? "mt-4" : "mt-6"} px-0.5`}>
             <h2 className="font-serif text-[18px] font-semibold text-graphite">Players</h2>
             <PaidCount extras={extras} />
           </div>
@@ -886,10 +906,24 @@ export default function EventPage() {
                 Take out
               </MenuItem>
             )}
+            {/* 0086: a guest waiting can be moved in, like a member. */}
+            {managing.p.isGuest && managing.p.guestId && managing.list === "waitlist" && (
+              <MenuItem
+                strong
+                first
+                onClick={() => {
+                  const p = managing.p;
+                  setManaging(null);
+                  void guestIn(p.guestId!, p.displayName);
+                }}
+              >
+                Move in
+              </MenuItem>
+            )}
             {managing.p.isGuest && managing.p.guestId && (
               <MenuItem
                 danger
-                first
+                first={managing.list !== "waitlist"}
                 onClick={() => {
                   const p = managing.p;
                   setManaging(null);
