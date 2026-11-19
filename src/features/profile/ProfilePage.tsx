@@ -3,6 +3,7 @@ import ErrorNote from "../shell/ErrorNote";
 import { withFallback } from "../../lib/errors";
 import { Link, useNavigate } from "react-router-dom";
 import { useHostSession } from "../../lib/supabase/useHostSession";
+import BadgeShelf from "../badges/BadgeShelf";
 import TabHeader from "../shell/TabHeader";
 import {
   RatingStrip,
@@ -428,6 +429,9 @@ export default function ProfilePage() {
         onOpen={insights ? () => setRecordOpen(true) : undefined}
       />
       {recordOpen && insights && <RecordSheet insights={insights} onClose={() => setRecordOpen(false)} />}
+
+      {/* Badges: the same shelf as your public profile (0087). */}
+      {user?.id && <BadgeShelf userId={user.id} self />}
 
       {/* ── Partners & rivals — YOUR page only ──────────────────────────
           These name another player and reveal their head-to-head record.

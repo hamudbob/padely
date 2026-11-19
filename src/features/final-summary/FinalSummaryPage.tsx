@@ -10,6 +10,7 @@ import { StandingsRow } from "../../lib/supabase/standingsQueries";
 import { getPublicSessionById, PublicSessionData } from "../../lib/supabase/publicSessionQueries";
 import { renderRecapCard } from "../../lib/recap/renderRecapCard";
 import { publicUrl, PUBLIC_ORIGIN, shareUrl } from "../../lib/shareLink";
+import NewBadgesCard from "../badges/NewBadgesCard";
 
 const FORMAT_LABELS: Record<string, string> = {
   americano: "Americano",
@@ -296,6 +297,8 @@ export default function FinalSummaryPage() {
           ))}
         </div>
       )}
+
+      {sessionId && <NewBadgesCard sessionId={sessionId} />}
 
       <div className="h-5" />
       <button

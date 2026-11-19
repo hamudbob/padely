@@ -26,6 +26,7 @@ import { useScrollRestoration } from "./lib/useScrollRestoration";
 import WatchPage from "./features/watch/WatchPage";
 import CreateSessionPage from "./features/create-session/CreateSessionPage";
 import HostLivePage from "./features/host-live/HostLivePage";
+import AllBadgesPage from "./features/badges/AllBadgesPage";
 import CoHostPage from "./features/co-host/CoHostPage";
 import PublicLivePage from "./features/public-live/PublicLivePage";
 import FinalSummaryPage from "./features/final-summary/FinalSummaryPage";
@@ -263,6 +264,7 @@ export default function App() {
       />
       <Route path="/live/:publicToken" element={<PublicLivePage />} />
       <Route path="/u/:userId" element={<PublicProfilePage />} />
+      <Route path="/u/:userId/badges" element={<AllBadgesPage />} />
       {/* A mistyped or stale URL lands on "/", which then routes by session
           state — never a blank screen. */}
         <Route path="*" element={<Navigate to="/" replace />} />

@@ -7,6 +7,7 @@ import { useBackNav } from "../../lib/useBackNav";
 import { RatingStrip, RecordCard, TrendCard, SectionHeading, memberSince } from "../profile/playerStats";
 import AvatarLightbox from "../shell/AvatarLightbox";
 import SafetySheet from "./SafetySheet";
+import BadgeShelf from "../badges/BadgeShelf";
 import { unblockUser } from "../../lib/supabase/safetyQueries";
 import { SkeletonScreen, SkeletonHero, SkeletonStats, SkeletonBlock } from "../shell/Skeleton";
 import { shareUrl } from "../../lib/shareLink";
@@ -209,6 +210,9 @@ export default function PublicProfilePage() {
           />
         </>
       )}
+
+      {/* Badges: the same shelf as the You tab, whoever opens it (0087). */}
+      {userId && <BadgeShelf userId={userId} self={isSelf} />}
 
       {/* Teams */}
       <SectionHeading>Teams</SectionHeading>
