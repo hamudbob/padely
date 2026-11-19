@@ -188,6 +188,7 @@ export function PlayerPayment({
     try {
       const url = await getCallupReceipt(eventId, myUserId);
       if (url) setPreview(url);
+      else setErr("Your receipt is no longer kept. Receipts are deleted 3 days after the night.");
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : "Couldn't open it.");
     }
@@ -200,14 +201,21 @@ export function PlayerPayment({
           <span className="w-9 h-9 rounded-full bg-win flex items-center justify-center shrink-0" aria-hidden>
             <svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" strokeWidth="2.8" strokeLinecap="round" strokeLinejoin="round"><polyline points="5 12 10 17 19 7" /></svg>
           </span>
-          <span className="min-w-0">
+          <span className="flex-1 min-w-0">
             <span className="block text-[14px] font-semibold text-graphite">Paid</span>
             <span className="block text-[12px] text-win">
               {me.paidAt ? `Marked paid ${dayAndTime(me.paidAt)}.` : "Marked paid."}
               {covers}
             </span>
           </span>
+          {me.hasReceipt && (
+            <button onClick={viewMine} className="shrink-0 text-[12px] font-semibold text-ink-2 px-1.5">
+              Receipt
+            </button>
+          )}
         </div>
+        {err && <p className="text-[12px] text-loss mt-2">{err}</p>}
+        {preview && <AvatarLightbox src={preview} alt="Your receipt" onClose={() => setPreview(null)} />}
       </Inset>
     );
   }
@@ -483,7 +491,7 @@ export function AdminPayments({
     try {
       const src = await receiptOf(r.key);
       if (src) setPreview({ src, name: r.name });
-      else setErr(`${r.name}'s receipt is no longer there.`);
+      else setErr(`${r.name}'s receipt is no longer kept. Receipts are deleted 3 days after the night.`);
     } catch (e) {
       setErr(e instanceof Error ? e.message : "Couldn't open it.");
     } finally {
@@ -689,7 +697,23 @@ export function AdminPayments({
                     )}
                   </span>
                 </span>
-                <span className="text-[11px] font-bold rounded-full px-2.5 py-1 bg-win-soft text-win shrink-0">{r.hasReceipt ? "Paid · receipt" : "Paid"}</span>
+                {r.hasReceipt ? (
+                  // Accepted receipts stay viewable (until they're deleted 3 days
+                  // after the night), so an admin can check one again later.
+                  <button
+                    onClick={() => view(r)}
+                    disabled={busy === r.key}
+                    aria-label={`View ${r.name}'s receipt`}
+                    className="inline-flex items-center gap-1 text-[11px] font-bold rounded-full px-2.5 py-1 bg-win-soft text-win shrink-0 active:scale-95 transition-transform disabled:opacity-50"
+                  >
+                    {busy === r.key ? "Opening…" : "Paid · receipt"}
+                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.6" strokeLinecap="round" strokeLinejoin="round" aria-hidden>
+                      <path d="M9 6l6 6-6 6" />
+                    </svg>
+                  </button>
+                ) : (
+                  <span className="text-[11px] font-bold rounded-full px-2.5 py-1 bg-win-soft text-win shrink-0">Paid</span>
+                )}
                 <button onClick={() => act(r, "unpaid")} disabled={busy === r.key} className="text-[11.5px] font-semibold text-warm-gray px-1 disabled:opacity-40">
                   Undo
                 </button>
@@ -792,6 +816,7 @@ export function MyGuestsPayment({
     try {
       const src = await getGuestReceipt(g.id);
       if (src) setPreview({ src, name: g.name });
+      else setErr(`${g.name}'s receipt is no longer kept. Receipts are deleted 3 days after the night.`);
     } catch (e2) {
       setErr(e2 instanceof Error ? e2.message : "Couldn't open it.");
     }
@@ -823,7 +848,7 @@ export function MyGuestsPayment({
                 <b className="block text-[13.5px] font-semibold text-graphite truncate">{g.name}</b>
                 <span className={`block text-[11.5px] truncate ${tone}`}>{label}</span>
               </span>
-              {g.hasReceipt && !g.paid && (
+              {g.hasReceipt && (
                 <button onClick={() => view(g)} className="shrink-0 text-[12px] font-semibold text-ink-2 px-1.5">
                   View
                 </button>
